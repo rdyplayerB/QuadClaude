@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { execSync } from 'child_process'
 import { logger } from './logger'
+import { GitStatus } from '../shared/types'
 
 type OutputCallback = (paneId: number, data: string) => void
 type ExitCallback = (paneId: number, exitCode: number) => void
@@ -184,6 +185,80 @@ export class PtyManager {
     }
 
     return instance.cwd
+  }
+
+  getGitStatus(paneId: number): GitStatus | null {
+    const instance = this.ptys.get(paneId)
+    if (!instance) return null
+
+    const cwd = this.getCwd(paneId) || instance.cwd
+
+    try {
+      // Check if this is a git repo
+      execSync('git rev-parse --is-inside-work-tree', {
+        cwd,
+        encoding: 'utf-8',
+        timeout: 1000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+    } catch {
+      // Not a git repo
+      return { isGitRepo: false }
+    }
+
+    try {
+      // Get branch name
+      let branch = ''
+      try {
+        branch = execSync('git symbolic-ref --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD', {
+          cwd,
+          encoding: 'utf-8',
+          timeout: 1000,
+        }).trim()
+      } catch {
+        branch = 'HEAD'
+      }
+
+      // Get ahead/behind counts
+      let ahead = 0
+      let behind = 0
+      try {
+        const tracking = execSync('git rev-list --left-right --count HEAD...@{u} 2>/dev/null', {
+          cwd,
+          encoding: 'utf-8',
+          timeout: 1000,
+        }).trim()
+        const [aheadStr, behindStr] = tracking.split(/\s+/)
+        ahead = parseInt(aheadStr, 10) || 0
+        behind = parseInt(behindStr, 10) || 0
+      } catch {
+        // No upstream set, ignore
+      }
+
+      // Get dirty file count (staged + unstaged + untracked)
+      let dirty = 0
+      try {
+        const status = execSync('git status --porcelain', {
+          cwd,
+          encoding: 'utf-8',
+          timeout: 1000,
+        })
+        dirty = status.split('\n').filter((line) => line.trim().length > 0).length
+      } catch {
+        // Ignore errors
+      }
+
+      return {
+        isGitRepo: true,
+        branch,
+        ahead,
+        behind,
+        dirty,
+      }
+    } catch (error) {
+      logger.warn('pty', `Failed to get git status for pane ${paneId}`, error instanceof Error ? error.message : String(error))
+      return { isGitRepo: false }
+    }
   }
 
   killPty(paneId: number): void {

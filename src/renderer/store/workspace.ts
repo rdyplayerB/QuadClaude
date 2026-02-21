@@ -6,6 +6,7 @@ import {
   WorkspacePreferences,
   WorkspaceState,
   DEFAULT_HOTKEYS,
+  GitStatus,
 } from '../../shared/types'
 
 interface WorkspaceStore extends WorkspaceState {
@@ -26,6 +27,7 @@ interface WorkspaceStore extends WorkspaceState {
   setPaneState: (id: number, state: PaneState) => void
   setPaneLabel: (id: number, label: string) => void
   setPaneCwd: (id: number, cwd: string) => void
+  setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
 
   // Preferences
   updatePreferences: (updates: Partial<WorkspacePreferences>) => void
@@ -53,6 +55,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     theme: 'dark',
     fontSize: 14,
     hotkeys: DEFAULT_HOTKEYS,
+    savedPrompts: [],
   },
   isInitialized: false,
 
@@ -65,11 +68,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ...DEFAULT_HOTKEYS,
         ...savedState.preferences?.hotkeys,
       }
+      // Ensure new preference fields have defaults
+      const savedPrompts = savedState.preferences?.savedPrompts ?? []
+
+      // Migrate removed layouts to 'grid'
+      let layout = savedState.layout
+      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen') {
+        layout = 'grid'
+      }
+
       set({
         ...savedState,
+        layout,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
+          savedPrompts,
         },
         isInitialized: true,
       })
@@ -94,6 +108,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           theme: 'dark',
           fontSize: 14,
           hotkeys: DEFAULT_HOTKEYS,
+          savedPrompts: [],
         },
         isInitialized: true,
       })
@@ -197,6 +212,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       ),
     }))
     debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPaneGitStatus: (id, gitStatus) => {
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === id ? { ...pane, gitStatus } : pane
+      ),
+    }))
+    // Don't save on git status changes - too frequent and not worth persisting
   },
 
   // Preferences

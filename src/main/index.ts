@@ -284,6 +284,7 @@ function createApplicationMenu() {
               applicationVersion: app.getVersion(),
               version: 'Build ' + new Date().toISOString().split('T')[0],
               copyright: '© 2024-2026 rdyplayerB',
+              credits: 'Crafted by ビルド studio\nhttps://birudo.studio',
             })
             app.showAboutPanel()
           }
@@ -349,6 +350,12 @@ function createApplicationMenu() {
           }
         },
         {
+          label: 'Prompt Palette',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => sendMenuAction('open-command-palette')
+        },
+        { type: 'separator' },
+        {
           label: 'Grid Layout',
           accelerator: 'CmdOrCtrl+1',
           click: () => sendMenuAction('layout-grid')
@@ -362,21 +369,6 @@ function createApplicationMenu() {
           label: 'Split Layout',
           accelerator: 'CmdOrCtrl+3',
           click: () => sendMenuAction('layout-split')
-        },
-        {
-          label: 'Horizontal Stack',
-          accelerator: 'CmdOrCtrl+4',
-          click: () => sendMenuAction('layout-horizontal')
-        },
-        {
-          label: 'Vertical Stack',
-          accelerator: 'CmdOrCtrl+5',
-          click: () => sendMenuAction('layout-vertical')
-        },
-        {
-          label: 'Fullscreen Layout',
-          accelerator: 'CmdOrCtrl+6',
-          click: () => sendMenuAction('layout-fullscreen')
         },
         { type: 'separator' },
         {
@@ -518,6 +510,11 @@ function setupIPC() {
   // Get current working directory
   ipcMain.handle(IPC_CHANNELS.PTY_CWD, async (_, paneId: number) => {
     return ptyManager?.getCwd(paneId)
+  })
+
+  // Get git status
+  ipcMain.handle(IPC_CHANNELS.PTY_GIT_STATUS, async (_, paneId: number) => {
+    return ptyManager?.getGitStatus(paneId)
   })
 
   // Workspace operations

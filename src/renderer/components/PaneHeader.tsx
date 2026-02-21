@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, DragEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { focusTerminal, clearTerminal } from './TerminalPane'
+import { clearTerminal } from './TerminalPane'
 
 // Custom MIME type for pane drag operations
 export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
@@ -10,19 +10,14 @@ interface PaneHeaderProps {
 }
 
 export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) {
-  const { panes, activePaneId, splitPaneIds, setSplitPaneId, setPaneLabel, setActivePaneId, swapPanes, layout } =
-    useWorkspaceStore()
+  const { panes, activePaneId, setPaneLabel, setActivePaneId } = useWorkspaceStore()
 
   const pane = panes.find((p) => p.id === paneId)
   const isActive = activePaneId === paneId
-  const splitPosition = layout === 'split' ? splitPaneIds.indexOf(paneId) as (0 | 1 | -1) : -1
 
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const [showSwapSelector, setShowSwapSelector] = useState(false)
-  const [isLabelHovered, setIsLabelHovered] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const selectorRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -30,19 +25,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
       inputRef.current.select()
     }
   }, [isEditing])
-
-  // Close swap selector when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (selectorRef.current && !selectorRef.current.contains(e.target as Node)) {
-        setShowSwapSelector(false)
-      }
-    }
-    if (showSwapSelector) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showSwapSelector])
 
   if (!pane) return null
 
@@ -66,28 +48,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     }
   }
 
-  const handleSwapPane = (targetPaneId: number) => {
-    if (layout === 'split' && splitPosition !== -1) {
-      // In split view, replace this pane's slot with the target pane
-      setSplitPaneId(splitPosition as 0 | 1, targetPaneId)
-    } else {
-      // In grid/focus view, swap positions in the panes array
-      swapPanes(paneId, targetPaneId)
-    }
-    // Make the selected pane the active window and focus its terminal
-    setActivePaneId(targetPaneId)
-    // Use requestAnimationFrame to ensure DOM has updated before focusing
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        focusTerminal(targetPaneId)
-      })
-    })
-    setShowSwapSelector(false)
-  }
-
-  // Get available panes to swap to (all panes except this one)
-  const availablePanesForSwap = panes.filter((p) => p.id !== paneId)
-
   // Drag handlers for pane reordering
   const handleDragStart = (e: DragEvent<HTMLDivElement>) => {
     e.dataTransfer.setData(PANE_DRAG_TYPE, paneId.toString())
@@ -96,106 +56,75 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     setActivePaneId(paneId)
   }
 
-  // ASCII state indicators
+  // State indicators
   const stateIndicator = () => {
     switch (pane.state) {
       case 'claude-active':
-        return <span className="text-claude-pink animate-pulse" title="Claude Active">[*]</span>
+        return <span className="w-2 h-2 rounded-full bg-[#d946ef] animate-pulse" title="Claude Active" />
       case 'claude-exited':
-        return <span className="text-yellow-600" title="Claude Exited">[·]</span>
+        return <span className="w-2 h-2 rounded-full bg-amber-500" title="Claude Exited" />
       default:
-        return <span className="text-terminal-muted" title="Shell">[·]</span>
+        return null // Don't show indicator for normal shell
     }
   }
 
   return (
     <div
-      draggable
-      onDragStart={handleDragStart}
-      className={`pane-header overflow-hidden px-3 flex items-center gap-2 font-mono text-xs border-b titlebar-no-drag cursor-grab active:cursor-grabbing ${
+      className={`pane-header overflow-hidden flex items-center font-mono text-[14px] titlebar-no-drag transition-all h-10 ${
         isActive
-          ? 'border-claude-pink/50 text-terminal-fg'
-          : 'border-terminal-border text-terminal-muted'
+          ? 'bg-[--ui-bg-elevated] text-[--ui-text-primary]'
+          : 'bg-[--ui-bg-primary] text-[--ui-text-secondary]'
       }`}
     >
-      {/* State indicator */}
-      {stateIndicator()}
-
-      {/* Label */}
-      {isEditing ? (
-        <input
-          ref={inputRef}
-          type="text"
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          className="flex-1 bg-terminal-bg text-terminal-fg text-xs px-1 py-0.5 outline-none border border-claude-pink font-mono"
-        />
-      ) : (
-        <span
-          className={`flex-1 truncate cursor-pointer select-none group ${isActive ? 'text-claude-pink' : ''}`}
-          onDoubleClick={handleDoubleClick}
-          onMouseEnter={() => setIsLabelHovered(true)}
-          onMouseLeave={() => setIsLabelHovered(false)}
-          title="Double-click to rename"
-        >
-          {pane.label}
-          {isLabelHovered && (
-            <span className="ml-1 text-terminal-muted opacity-60">[edit]</span>
-          )}
-        </span>
-      )}
-
-      {/* Working directory indicator */}
-      <span className="text-terminal-muted/50 truncate max-w-[200px]">
-        {pane.workingDirectory.replace(/^\/Users\/[^/]+/, '~')}
-      </span>
-
-      {/* Separator */}
-      <span className="text-terminal-border">|</span>
-
-      {/* Clear terminal button */}
-      <button
-        onClick={() => clearTerminal(paneId)}
-        className="text-terminal-muted hover:text-claude-pink transition-colors"
-        title="Clear terminal"
+      {/* Draggable zone */}
+      <div
+        draggable
+        onDragStart={handleDragStart}
+        className="flex-1 flex items-center gap-2 px-3 cursor-grab active:cursor-grabbing overflow-hidden h-full"
       >
-        [clear]
-      </button>
+        {/* State indicator */}
+        {stateIndicator()}
 
-      {/* Separator */}
-      <span className="text-terminal-border">|</span>
-
-      {/* Swap pane selector - fixed at far right */}
-      {availablePanesForSwap.length > 0 && (
-        <div className="relative" ref={selectorRef}>
-          <button
-            onClick={() => setShowSwapSelector(!showSwapSelector)}
-            className="text-terminal-muted hover:text-claude-pink transition-colors"
-            title="Swap terminal"
+        {/* Label */}
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            className="flex-1 bg-[--terminal-bg] text-[--ui-text-primary] text-[14px] px-2 py-1 outline-none border border-[--accent] rounded font-mono"
+          />
+        ) : (
+          <span
+            className="truncate cursor-pointer select-none"
+            onDoubleClick={handleDoubleClick}
+            title="Double-click to rename"
           >
-            [swap]
-          </button>
-          {showSwapSelector && (
-            <div className="absolute top-full right-0 mt-1 bg-terminal-bg border border-terminal-border z-50 min-w-[120px] font-mono">
-              <div className="text-terminal-muted text-xs px-2 py-1 border-b border-terminal-border">─ swap to ─</div>
-              {availablePanesForSwap.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleSwapPane(p.id)
-                  }}
-                  className="w-full text-left px-2 py-1 text-xs text-terminal-fg hover:text-claude-pink hover:bg-terminal-border/30 transition-colors"
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            {pane.label}
+          </span>
+        )}
+      </div>
+
+      {/* Clear button - only visible on hover via group */}
+      <div
+        className="flex items-center pr-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ cursor: 'default' }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onDragStart={(e) => e.preventDefault()}
+        draggable={false}
+      >
+        <button
+          onClick={() => clearTerminal(paneId)}
+          className="p-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
+          title="Clear (Cmd+K)"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 3l8 8M11 3l-8 8" strokeLinecap="round"/>
+          </svg>
+        </button>
+      </div>
     </div>
   )
 })

@@ -115,21 +115,6 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     updatePreferences({ hotkeys: DEFAULT_HOTKEYS })
   }
 
-  // Keyboard navigation for theme buttons
-  const themes = ['dark', 'light', 'system'] as const
-  const handleThemeKeyDown = (e: React.KeyboardEvent, currentTheme: typeof themes[number]) => {
-    const currentIndex = themes.indexOf(currentTheme)
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      e.preventDefault()
-      const nextIndex = (currentIndex + 1) % themes.length
-      updatePreferences({ theme: themes[nextIndex] })
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      e.preventDefault()
-      const prevIndex = (currentIndex - 1 + themes.length) % themes.length
-      updatePreferences({ theme: themes[prevIndex] })
-    }
-  }
-
   const terminalHotkeyLabels: Partial<Record<HotkeyField, string>> = {
     focusTerminal1: 'Terminal 1',
     focusTerminal2: 'Terminal 2',
@@ -141,9 +126,6 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     layoutGrid: 'Grid',
     layoutFocus: 'Focus',
     layoutSplit: 'Split',
-    layoutHorizontal: 'Horizontal',
-    layoutVertical: 'Vertical',
-    layoutFullscreen: 'Fullscreen',
   }
 
   if (!isOpen) return null
@@ -156,79 +138,77 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     >
       <div
         ref={modalRef}
-        className="bg-terminal-bg border border-terminal-border shadow-xl w-full max-w-md mx-4 font-mono"
+        className="bg-[--ui-bg-elevated] border border-[--ui-border] rounded-xl shadow-2xl w-full max-w-md mx-4"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
       >
-        {/* Header with ASCII border */}
-        <div className="border-b border-terminal-border">
-          <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-terminal-muted text-xs" aria-hidden="true">┌──</span>
-            <h2 id="settings-title" className="text-sm text-claude-pink">[ SETTINGS ]</h2>
-            <button
-              ref={firstFocusableRef}
-              onClick={onClose}
-              className="text-terminal-muted hover:text-claude-pink transition-colors text-xs"
-              aria-label="Close settings"
-            >
-              [×]
-            </button>
-          </div>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[--ui-border]">
+          <h2 id="settings-title" className="text-lg font-semibold text-[--ui-text-primary]">Settings</h2>
+          <button
+            ref={firstFocusableRef}
+            onClick={onClose}
+            className="p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active] rounded-lg transition-all"
+            aria-label="Close settings"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
 
         {/* Content */}
-        <div className="p-4 space-y-5">
+        <div className="p-5 space-y-6 max-h-[60vh] overflow-y-auto">
           {/* Appearance Section */}
           <div role="group" aria-labelledby="appearance-heading">
-            <div className="mb-3">
-              <span id="appearance-heading" className="text-terminal-muted text-xs">─── APPEARANCE ───</span>
-            </div>
-            <div className="space-y-3">
+            <h3 id="appearance-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-4">
+              Appearance
+            </h3>
+            <div className="space-y-4">
               {/* Font Size */}
               <div className="flex items-center justify-between">
-                <span className="text-xs text-terminal-fg" id="font-size-label">Font Size</span>
-                <div className="flex items-center gap-1" role="group" aria-labelledby="font-size-label">
+                <span className="text-sm text-[--ui-text-primary]" id="font-size-label">Font Size</span>
+                <div className="flex items-center gap-2" role="group" aria-labelledby="font-size-label">
                   <button
                     onClick={() => updatePreferences({ fontSize: Math.max(10, fontSize - 1) })}
-                    className="w-6 h-6 flex items-center justify-center text-xs border border-terminal-border text-terminal-muted hover:border-claude-pink hover:text-claude-pink transition-colors"
+                    className="w-8 h-8 flex items-center justify-center text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                     aria-label="Decrease font size"
                   >
-                    [-]
+                    −
                   </button>
-                  <span className="w-8 text-center text-xs text-terminal-fg" aria-live="polite">
+                  <span className="w-10 text-center text-sm font-medium text-[--ui-text-primary]" aria-live="polite">
                     {fontSize}
                   </span>
                   <button
                     onClick={() => updatePreferences({ fontSize: Math.min(24, fontSize + 1) })}
-                    className="w-6 h-6 flex items-center justify-center text-xs border border-terminal-border text-terminal-muted hover:border-claude-pink hover:text-claude-pink transition-colors"
+                    className="w-8 h-8 flex items-center justify-center text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                     aria-label="Increase font size"
                   >
-                    [+]
+                    +
                   </button>
                 </div>
               </div>
 
               {/* Theme */}
               <div className="flex items-center justify-between">
-                <span className="text-xs text-terminal-fg" id="theme-label">Theme</span>
-                <div className="flex items-center gap-1" role="radiogroup" aria-labelledby="theme-label">
-                  {themes.map((t) => (
+                <span className="text-sm text-[--ui-text-primary]" id="theme-label">Theme</span>
+                <div className="flex items-center bg-[--ui-bg-primary] rounded-lg p-1 border border-[--ui-border]" role="radiogroup" aria-labelledby="theme-label">
+                  {(['dark', 'light', 'system'] as const).map((t) => (
                     <button
                       key={t}
                       onClick={() => updatePreferences({ theme: t })}
-                      onKeyDown={(e) => handleThemeKeyDown(e, t)}
-                      className={`px-2 py-1 text-xs border transition-colors ${
+                      className={`px-3 py-1.5 text-sm capitalize rounded-md transition-all ${
                         theme === t
-                          ? 'border-claude-pink text-claude-pink'
-                          : 'border-terminal-border text-terminal-muted hover:border-claude-pink hover:text-terminal-fg'
+                          ? 'bg-[--ui-bg-active] text-[--ui-text-primary] font-medium'
+                          : 'text-[--ui-text-muted] hover:text-[--ui-text-secondary]'
                       }`}
                       role="radio"
                       aria-checked={theme === t}
                       aria-label={`${t} theme`}
                     >
-                      [{t}]
+                      {t}
                     </button>
                   ))}
                 </div>
@@ -238,100 +218,97 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
           {/* Hotkeys Section */}
           <div role="group" aria-labelledby="hotkeys-heading">
-            <div className="flex items-center justify-between mb-3">
-              <span id="hotkeys-heading" className="text-terminal-muted text-xs">─── HOTKEYS ───</span>
+            <div className="flex items-center justify-between mb-4">
+              <h3 id="hotkeys-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide">
+                Keyboard Shortcuts
+              </h3>
               <button
                 onClick={handleResetHotkeys}
-                className="text-xs text-terminal-muted hover:text-claude-pink transition-colors"
+                className="text-xs text-[--ui-text-muted] hover:text-[--accent] transition-colors"
                 aria-label="Reset hotkeys to defaults"
               >
-                [reset]
+                Reset to defaults
               </button>
             </div>
 
-            {/* Terminal Swap Hotkeys */}
-            <div className="mb-3">
-              <span className="text-terminal-muted text-[10px]">Terminal Swap</span>
-            </div>
-            <div className="space-y-2 mb-4">
-              {(Object.keys(terminalHotkeyLabels) as HotkeyField[]).map((field) => (
-                <div key={field} className="flex items-center justify-between">
-                  <span className="text-xs text-terminal-fg" id={`hotkey-label-${field}`}>
-                    {terminalHotkeyLabels[field]}
-                  </span>
-                  <button
-                    onClick={() => setEditingHotkey(field)}
-                    onKeyDown={(e) => editingHotkey === field && handleHotkeyKeyDown(e, field)}
-                    onBlur={() => setEditingHotkey(null)}
-                    className={`px-2 py-1 min-w-[100px] text-xs text-center border transition-colors ${
-                      editingHotkey === field
-                        ? 'border-claude-pink bg-claude-pink/10 text-claude-pink'
-                        : 'border-terminal-border text-terminal-muted hover:border-claude-pink hover:text-terminal-fg'
-                    }`}
-                    aria-labelledby={`hotkey-label-${field}`}
-                    aria-describedby={editingHotkey === field ? 'hotkey-edit-hint' : undefined}
-                  >
-                    {editingHotkey === field ? '[ press key... ]' : `[ ${hotkeys[field]} ]`}
-                  </button>
-                </div>
-              ))}
+            {/* Terminal Focus Hotkeys */}
+            <div className="mb-4">
+              <span className="text-xs text-[--ui-text-muted] mb-2 block">Focus Terminal</span>
+              <div className="space-y-2">
+                {(Object.keys(terminalHotkeyLabels) as HotkeyField[]).map((field) => (
+                  <div key={field} className="flex items-center justify-between">
+                    <span className="text-sm text-[--ui-text-primary]" id={`hotkey-label-${field}`}>
+                      {terminalHotkeyLabels[field]}
+                    </span>
+                    <button
+                      onClick={() => setEditingHotkey(field)}
+                      onKeyDown={(e) => editingHotkey === field && handleHotkeyKeyDown(e, field)}
+                      onBlur={() => setEditingHotkey(null)}
+                      className={`px-3 py-1.5 min-w-[100px] text-sm text-center rounded-lg transition-all ${
+                        editingHotkey === field
+                          ? 'bg-[--accent]/10 border-2 border-[--accent] text-[--accent]'
+                          : 'bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
+                      }`}
+                      aria-labelledby={`hotkey-label-${field}`}
+                    >
+                      {editingHotkey === field ? 'Press key...' : hotkeys[field]}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
 
             {/* Layout Hotkeys */}
-            <div className="mb-3">
-              <span className="text-terminal-muted text-[10px]">Layout Switch</span>
-            </div>
-            <div className="space-y-2">
-              {(Object.keys(layoutHotkeyLabels) as HotkeyField[]).map((field) => (
-                <div key={field} className="flex items-center justify-between">
-                  <span className="text-xs text-terminal-fg" id={`hotkey-label-${field}`}>
-                    {layoutHotkeyLabels[field]}
-                  </span>
-                  <button
-                    onClick={() => setEditingHotkey(field)}
-                    onKeyDown={(e) => editingHotkey === field && handleHotkeyKeyDown(e, field)}
-                    onBlur={() => setEditingHotkey(null)}
-                    className={`px-2 py-1 min-w-[100px] text-xs text-center border transition-colors ${
-                      editingHotkey === field
-                        ? 'border-claude-pink bg-claude-pink/10 text-claude-pink'
-                        : 'border-terminal-border text-terminal-muted hover:border-claude-pink hover:text-terminal-fg'
-                    }`}
-                    aria-labelledby={`hotkey-label-${field}`}
-                    aria-describedby={editingHotkey === field ? 'hotkey-edit-hint' : undefined}
-                  >
-                    {editingHotkey === field ? '[ press key... ]' : `[ ${hotkeys[field]} ]`}
-                  </button>
-                </div>
-              ))}
-              <span id="hotkey-edit-hint" className="sr-only">
-                Press any key combination to set the hotkey
-              </span>
+            <div>
+              <span className="text-xs text-[--ui-text-muted] mb-2 block">Switch Layout</span>
+              <div className="space-y-2">
+                {(Object.keys(layoutHotkeyLabels) as HotkeyField[]).map((field) => (
+                  <div key={field} className="flex items-center justify-between">
+                    <span className="text-sm text-[--ui-text-primary]" id={`hotkey-label-${field}`}>
+                      {layoutHotkeyLabels[field]}
+                    </span>
+                    <button
+                      onClick={() => setEditingHotkey(field)}
+                      onKeyDown={(e) => editingHotkey === field && handleHotkeyKeyDown(e, field)}
+                      onBlur={() => setEditingHotkey(null)}
+                      className={`px-3 py-1.5 min-w-[100px] text-sm text-center rounded-lg transition-all ${
+                        editingHotkey === field
+                          ? 'bg-[--accent]/10 border-2 border-[--accent] text-[--accent]'
+                          : 'bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
+                      }`}
+                      aria-labelledby={`hotkey-label-${field}`}
+                    >
+                      {editingHotkey === field ? 'Press key...' : hotkeys[field]}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="border-t border-terminal-border px-4 py-3">
-          <div className="text-[10px] text-terminal-muted text-center">
-            built by{' '}
+        <div className="px-5 py-4 border-t border-[--ui-border]">
+          <div className="text-xs text-[--ui-text-muted] text-center">
+            crafted by{' '}
             <a
-              href="https://x.com/rdyplayerB"
+              href="https://birudo.studio"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-claude-pink hover:underline"
+              className="text-[--accent] hover:underline"
             >
-              @rdyplayerB
+              ビルド studio
             </a>
-            {' '}|{' '}
+            {' '}·{' '}
             <a
               href="https://github.com/rdyplayerB/QuadClaude"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-claude-pink hover:underline"
+              className="text-[--accent] hover:underline"
             >
               GitHub
             </a>
-            {' '}| MIT License | v{appVersion}
+            {' '}· v{appVersion}
           </div>
         </div>
       </div>

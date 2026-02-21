@@ -1,7 +1,7 @@
 import Store from 'electron-store'
 import os from 'os'
 import fs from 'fs'
-import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS } from '../shared/types'
+import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode } from '../shared/types'
 import { logger } from './logger'
 
 const DEFAULT_PREFERENCES = {
@@ -9,6 +9,7 @@ const DEFAULT_PREFERENCES = {
   theme: 'dark' as const,
   fontSize: 14,
   hotkeys: DEFAULT_HOTKEYS,
+  savedPrompts: [] as const,
 }
 
 function createDefaultPaneConfig(id: number): PaneConfig {
@@ -91,6 +92,18 @@ export class WorkspaceManager {
       // Ensure hotkeys exist (backwards compatibility)
       if (!workspace.preferences.hotkeys) {
         workspace.preferences.hotkeys = DEFAULT_HOTKEYS
+      }
+
+      // Ensure savedPrompts exist (backwards compatibility)
+      if (!workspace.preferences.savedPrompts) {
+        workspace.preferences.savedPrompts = []
+      }
+
+      // Migrate removed layouts to 'grid' (horizontal, vertical, fullscreen removed)
+      const validLayouts: LayoutMode[] = ['grid', 'focus', 'split']
+      if (!validLayouts.includes(workspace.layout as LayoutMode)) {
+        logger.info('workspace', `Migrating removed layout '${workspace.layout}' to 'grid'`)
+        workspace.layout = 'grid'
       }
 
       logger.info('workspace', 'Workspace loaded', `Layout: ${workspace.layout}, Theme: ${workspace.preferences.theme}`)

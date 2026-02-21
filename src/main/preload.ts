@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   getCwd: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_CWD, paneId),
+
+  getGitStatus: (paneId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_GIT_STATUS, paneId) as Promise<GitStatus | null>,
 
   // Terminal I/O
   sendInput: (paneId: number, data: string) =>
@@ -76,6 +79,7 @@ declare global {
       createPty: (paneId: number, cwd?: string) => Promise<boolean>
       killPty: (paneId: number) => Promise<void>
       getCwd: (paneId: number) => Promise<string | null>
+      getGitStatus: (paneId: number) => Promise<GitStatus | null>
       sendInput: (paneId: number, data: string) => void
       resizeTerminal: (paneId: number, cols: number, rows: number) => void
       onTerminalOutput: (callback: (paneId: number, data: string) => void) => () => void

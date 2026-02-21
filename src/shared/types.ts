@@ -1,5 +1,22 @@
-// Layout types
-export type LayoutMode = 'grid' | 'focus' | 'split' | 'horizontal' | 'vertical' | 'fullscreen'
+// Layout types (simplified to 3 essential layouts)
+export type LayoutMode = 'grid' | 'focus' | 'split'
+
+// Git status for pane header
+export interface GitStatus {
+  isGitRepo: boolean
+  branch?: string
+  ahead?: number
+  behind?: number
+  dirty?: number
+}
+
+// Saved prompt for prompt library
+export interface SavedPrompt {
+  id: string
+  name: string
+  text: string
+  createdAt: number
+}
 
 // Pane state
 export type PaneState = 'shell' | 'claude-active' | 'claude-exited'
@@ -11,6 +28,7 @@ export interface PaneConfig {
   workingDirectory: string
   state: PaneState
   wasClaudeActive: boolean // For warm start restoration
+  gitStatus?: GitStatus // Git status for pane header
 }
 
 // Workspace state (persisted)
@@ -32,9 +50,7 @@ export interface HotkeyBindings {
   layoutGrid: string
   layoutFocus: string
   layoutSplit: string
-  layoutHorizontal: string
-  layoutVertical: string
-  layoutFullscreen: string
+  commandPalette: string
 }
 
 // Use Cmd on Mac, Win on Windows for layout hotkeys
@@ -50,16 +66,18 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   layoutGrid: `${metaKey}+1`,
   layoutFocus: `${metaKey}+2`,
   layoutSplit: `${metaKey}+3`,
-  layoutHorizontal: `${metaKey}+4`,
-  layoutVertical: `${metaKey}+5`,
-  layoutFullscreen: `${metaKey}+6`,
+  commandPalette: `${metaKey}+P`,
 }
+
+// All available layouts
+export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus', 'split']
 
 export interface WorkspacePreferences {
   restoreMode: 'cold' | 'warm'
   theme: 'dark' | 'light' | 'system'
   fontSize: number
   hotkeys: HotkeyBindings
+  savedPrompts: SavedPrompt[]
 }
 
 export interface WindowBounds {
@@ -82,6 +100,7 @@ export const IPC_CHANNELS = {
   PTY_KILL: 'pty:kill',
   PTY_EXIT: 'pty:exit',
   PTY_CWD: 'pty:cwd',
+  PTY_GIT_STATUS: 'pty:git-status',
 
   // Workspace
   WORKSPACE_SAVE: 'workspace:save',
@@ -107,9 +126,6 @@ export type MenuAction =
   | 'layout-grid'
   | 'layout-focus'
   | 'layout-split'
-  | 'layout-horizontal'
-  | 'layout-vertical'
-  | 'layout-fullscreen'
   | 'focus-pane-1'
   | 'focus-pane-2'
   | 'focus-pane-3'
@@ -118,3 +134,4 @@ export type MenuAction =
   | 'increase-font'
   | 'decrease-font'
   | 'open-settings'
+  | 'open-command-palette'

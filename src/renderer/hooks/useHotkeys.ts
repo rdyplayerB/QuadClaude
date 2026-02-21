@@ -4,11 +4,12 @@ import { focusTerminal } from '../components/TerminalPane'
 import { LayoutMode } from '../../shared/types'
 
 /**
- * Hook to handle global hotkey bindings for terminal focus and layout switching
+ * Hook to handle global hotkey bindings for terminal focus, layout switching, and command palette
  *
  * @param enabled - Whether hotkeys are currently enabled (default: true)
+ * @param onCommandPalette - Callback to open the command palette
  */
-export function useHotkeys(enabled: boolean = true) {
+export function useHotkeys(enabled: boolean = true, onCommandPalette?: () => void) {
   const {
     preferences,
     layout,
@@ -84,10 +85,10 @@ export function useHotkeys(enabled: boolean = true) {
       { ...parseHotkey(hotkeys.layoutGrid), layout: 'grid' },
       { ...parseHotkey(hotkeys.layoutFocus), layout: 'focus' },
       { ...parseHotkey(hotkeys.layoutSplit), layout: 'split' },
-      { ...parseHotkey(hotkeys.layoutHorizontal), layout: 'horizontal' },
-      { ...parseHotkey(hotkeys.layoutVertical), layout: 'vertical' },
-      { ...parseHotkey(hotkeys.layoutFullscreen), layout: 'fullscreen' },
     ]
+
+    // Command palette hotkey
+    const commandPaletteHotkey = parseHotkey(hotkeys.commandPalette)
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept if user is typing in an input field
@@ -99,6 +100,22 @@ export function useHotkeys(enabled: boolean = true) {
       }
 
       const pressedKey = e.key.toLowerCase()
+
+      // Check for command palette hotkey
+      if (onCommandPalette) {
+        const modifiersMatch =
+          e.ctrlKey === commandPaletteHotkey.modifiers.ctrl &&
+          e.altKey === commandPaletteHotkey.modifiers.alt &&
+          e.shiftKey === commandPaletteHotkey.modifiers.shift &&
+          e.metaKey === commandPaletteHotkey.modifiers.meta
+
+        if (pressedKey === commandPaletteHotkey.key && modifiersMatch) {
+          e.preventDefault()
+          e.stopPropagation()
+          onCommandPalette()
+          return
+        }
+      }
 
       // Check for layout switching hotkeys
       for (const config of layoutHotkeyConfigs) {
@@ -146,5 +163,5 @@ export function useHotkeys(enabled: boolean = true) {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('terminal-hotkey', handleTerminalHotkey)
     }
-  }, [enabled, preferences, handleTerminalFocus, setLayout])
+  }, [enabled, preferences, handleTerminalFocus, setLayout, onCommandPalette])
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react'
-import { Terminal } from 'xterm'
-import { FitAddon } from 'xterm-addon-fit'
-import { WebLinksAddon } from 'xterm-addon-web-links'
-import 'xterm/css/xterm.css'
+import { Terminal } from '@xterm/xterm'
+import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
+import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
 import { DEFAULT_HOTKEYS } from '../../shared/types'
@@ -14,6 +15,8 @@ const terminals = new Map<number, { terminal: Terminal; fitAddon: FitAddon }>()
 const focusListeners = new Map<number, () => void>()
 // Track user scroll state - prevents auto-scroll when user has scrolled up
 const userScrolledUp = new Map<number, boolean>()
+// Guard to prevent onScroll from resetting userScrolledUp during programmatic writes
+const isWritingOutput = new Map<number, boolean>()
 
 // Terminal theme constants (extracted to avoid recreation on every render)
 const DARK_THEME = {
@@ -111,6 +114,7 @@ export function disposeTerminal(paneId: number) {
     }
     focusListeners.delete(paneId)
     userScrolledUp.delete(paneId)
+    isWritingOutput.delete(paneId)
 
     // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
     entry.terminal.dispose()
@@ -147,6 +151,79 @@ function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
     terminal.scrollToBottom()
   }
 }
+
+// Git Status Bar component - displayed at bottom of each terminal pane
+const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) {
+  const [showTooltip, setShowTooltip] = useState(false)
+  const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
+  const gitStatus = pane?.gitStatus
+
+  return (
+    <div className="flex items-center justify-between px-3 h-7 bg-[--statusbar-bg] border-t border-[--ui-border-subtle] font-mono text-xs">
+      {/* Left side - git info */}
+      <div
+        className="relative flex items-center gap-2"
+        onMouseEnter={() => gitStatus?.isGitRepo && setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        {gitStatus?.isGitRepo ? (
+          <>
+            <span className="flex items-center gap-1.5">
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-green]">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+              </svg>
+              <span className="text-[--git-green]">{gitStatus.branch}</span>
+            </span>
+            {(gitStatus.ahead ?? 0) > 0 && (
+              <span className="text-[--git-cyan] flex items-center gap-0.5">
+                <span className="text-[11px]">↑</span>
+                <span>{gitStatus.ahead}</span>
+              </span>
+            )}
+            {(gitStatus.behind ?? 0) > 0 && (
+              <span className="text-[--git-yellow] flex items-center gap-0.5">
+                <span className="text-[11px]">↓</span>
+                <span>{gitStatus.behind}</span>
+              </span>
+            )}
+            {(gitStatus.dirty ?? 0) > 0 && (
+              <span className="text-[--git-orange] flex items-center gap-0.5">
+                <span className="text-[11px]">●</span>
+                <span>{gitStatus.dirty}</span>
+              </span>
+            )}
+            {/* Tooltip - positioned above */}
+            {showTooltip && (
+              <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-lg shadow-xl text-xs whitespace-nowrap z-50">
+                <div className="text-[--ui-text-primary] mb-1.5">
+                  <span className="text-[--git-green]">{gitStatus.branch}</span> branch
+                </div>
+                {(gitStatus.ahead ?? 0) > 0 && (
+                  <div className="text-[--git-cyan] py-0.5">↑ {gitStatus.ahead} commit{gitStatus.ahead !== 1 ? 's' : ''} ahead</div>
+                )}
+                {(gitStatus.behind ?? 0) > 0 && (
+                  <div className="text-[--git-yellow] py-0.5">↓ {gitStatus.behind} commit{gitStatus.behind !== 1 ? 's' : ''} behind</div>
+                )}
+                {(gitStatus.dirty ?? 0) > 0 && (
+                  <div className="text-[--git-orange] py-0.5">● {gitStatus.dirty} uncommitted</div>
+                )}
+                {(gitStatus.ahead ?? 0) === 0 && (gitStatus.behind ?? 0) === 0 && (gitStatus.dirty ?? 0) === 0 && (
+                  <div className="text-[--ui-text-muted] py-0.5">Clean working tree</div>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <span className="text-[--ui-text-faint]">—</span>
+        )}
+      </div>
+      {/* Right side - full path */}
+      <div className="text-[--ui-text-dimmed] truncate max-w-[300px]" title={pane?.workingDirectory}>
+        {pane?.workingDirectory.replace(/^\/Users\/[^/]+/, '~')}
+      </div>
+    </div>
+  )
+})
 
 interface TerminalPaneProps {
   paneId: number
@@ -214,6 +291,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         cursorBlink: true,
         allowProposedApi: true,
         scrollback: 1000, // Limit scrollback to prevent memory bloat
+        scrollOnUserInput: false, // Preserve scroll position when user types
       })
 
       const fitAddon = new FitAddon()
@@ -223,6 +301,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       terminal.loadAddon(webLinksAddon)
 
       terminal.open(terminalRef.current)
+
+      // Load WebGL addon for GPU-accelerated rendering (with fallback)
+      try {
+        const webglAddon = new WebglAddon()
+        webglAddon.onContextLoss(() => {
+          webglAddon.dispose()
+        })
+        terminal.loadAddon(webglAddon)
+      } catch (e) {
+        // WebGL not available, fall back to default canvas renderer
+        console.warn('WebGL addon failed to load, using default renderer:', e)
+      }
 
       xtermRef.current = terminal
       fitAddonRef.current = fitAddon
@@ -275,7 +365,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
       // Track user scroll to allow reading history during output
       // When user scrolls up, disable auto-scroll; when at bottom, re-enable
+      // Skip updates during programmatic writes to preserve user's scroll position
       terminal.onScroll(() => {
+        if (isWritingOutput.get(paneId)) return
         const atBottom = isTerminalAtBottom(terminal)
         userScrolledUp.set(paneId, !atBottom)
       })
@@ -325,16 +417,16 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           }
         }
 
-        // Let layout switching hotkeys pass through (Cmd + 1-6 on Mac, no shift)
+        // Let layout switching and command palette hotkeys pass through
         // Only Cmd on Mac to avoid conflict with Ctrl+1-4 terminal focus
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
         if (isMac && e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', '4', '5', '6'].includes(key)) {
+          if (['1', '2', '3', 'p'].includes(key)) {
             // Return false to prevent xterm from handling, let window handler take it
             return false
           }
         } else if (!isMac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', '4', '5', '6'].includes(key)) {
+          if (['1', '2', '3', 'p'].includes(key)) {
             return false
           }
         }
@@ -370,14 +462,37 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   }, [paneId]) // Remove pane.workingDirectory from deps to prevent re-init
 
   // Update font size when preference changes - preserve scroll position
+  // Debounced to handle rapid Cmd+/- presses and notify PTY of new dimensions
   useEffect(() => {
-    if (xtermRef.current && fitAddonRef.current && terminalRef.current) {
-      xtermRef.current.options.fontSize = preferences.fontSize
-      if (terminalRef.current.offsetWidth > 0) {
-        safeFit(xtermRef.current, fitAddonRef.current)
+    if (!xtermRef.current || !fitAddonRef.current || !terminalRef.current) return
+
+    const terminal = xtermRef.current
+    const fitAddon = fitAddonRef.current
+    const container = terminalRef.current
+
+    // Debounce to coalesce rapid font size changes
+    const timeoutId = setTimeout(() => {
+      terminal.options.fontSize = preferences.fontSize
+
+      if (container.offsetWidth > 0) {
+        // Pause output handling during resize to prevent visual corruption
+        isWritingOutput.set(paneId, true)
+
+        safeFit(terminal, fitAddon)
+
+        // Notify PTY of new dimensions so shell reflows correctly
+        const { cols, rows } = terminal
+        window.electronAPI.resizeTerminal(paneId, cols, rows)
+
+        // Resume output handling after a brief delay for reflow
+        requestAnimationFrame(() => {
+          isWritingOutput.set(paneId, false)
+        })
       }
-    }
-  }, [preferences.fontSize])
+    }, 50)
+
+    return () => clearTimeout(timeoutId)
+  }, [preferences.fontSize, paneId])
 
   // Update terminal theme when preference changes
   useEffect(() => {
@@ -390,28 +505,41 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   // Handle layout changes - ensure terminal stays at bottom after resize settles
   useEffect(() => {
-    if (xtermRef.current && fitAddonRef.current && terminalRef.current) {
-      const terminal = xtermRef.current
-      const fitAddon = fitAddonRef.current
-      const wasAtBottom = isTerminalAtBottom(terminal)
+    if (!xtermRef.current || !fitAddonRef.current || !terminalRef.current) return
 
-      // Give layout transition time to complete, then refit and restore scroll
-      const timeoutId = setTimeout(() => {
-        if (terminalRef.current && terminalRef.current.offsetWidth > 0) {
-          try {
-            fitAddon.fit()
-          } catch (e) {
-            // Ignore fit errors
-          }
-          if (wasAtBottom) {
-            terminal.scrollToBottom()
-          }
+    const terminal = xtermRef.current
+    const fitAddon = fitAddonRef.current
+    const wasAtBottom = isTerminalAtBottom(terminal)
+
+    // Give layout transition time to complete, then refit and restore scroll
+    const timeoutId = setTimeout(() => {
+      if (terminalRef.current && terminalRef.current.offsetWidth > 0) {
+        // Pause output handling during resize
+        isWritingOutput.set(paneId, true)
+
+        try {
+          fitAddon.fit()
+        } catch (e) {
+          // Ignore fit errors
         }
-      }, 200) // Wait for CSS transitions (150ms) to complete
 
-      return () => clearTimeout(timeoutId)
-    }
-  }, [layout])
+        // Notify PTY of new dimensions
+        const { cols, rows } = terminal
+        window.electronAPI.resizeTerminal(paneId, cols, rows)
+
+        if (wasAtBottom) {
+          terminal.scrollToBottom()
+        }
+
+        // Resume output handling
+        requestAnimationFrame(() => {
+          isWritingOutput.set(paneId, false)
+        })
+      }
+    }, 200) // Wait for CSS transitions (150ms) to complete
+
+    return () => clearTimeout(timeoutId)
+  }, [layout, paneId])
 
   // Listen for terminal output
   // Note: Only paneId in deps - use getState() for store actions to prevent re-registration
@@ -420,13 +548,29 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       (outputPaneId, data) => {
         if (outputPaneId === paneId && xtermRef.current) {
           const terminal = xtermRef.current
+          const hasUserScrolledUp = userScrolledUp.get(paneId)
 
-          // Write data first
+          // If user has scrolled up, save position before write (xterm auto-scrolls on write)
+          let savedViewportY: number | null = null
+          if (hasUserScrolledUp) {
+            savedViewportY = terminal.buffer.active.viewportY
+            isWritingOutput.set(paneId, true) // Guard against onScroll resetting our flag
+          }
+
+          // Write data
           terminal.write(data)
 
-          // Only auto-scroll if user hasn't explicitly scrolled up
-          // The userScrolledUp flag is set by the onScroll handler
-          if (!userScrolledUp.get(paneId)) {
+          // Restore scroll position if user was scrolled up, otherwise scroll to bottom
+          if (hasUserScrolledUp && savedViewportY !== null) {
+            // xterm auto-scrolls on write, so scroll back up to where user was
+            // viewportY is the top line visible; after write it's at baseY (bottom)
+            const currentViewportY = terminal.buffer.active.viewportY
+            const linesToScrollBack = savedViewportY - currentViewportY
+            if (linesToScrollBack !== 0) {
+              terminal.scrollLines(linesToScrollBack)
+            }
+            isWritingOutput.set(paneId, false) // Clear guard
+          } else {
             terminal.scrollToBottom()
           }
 
@@ -473,6 +617,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           if (xtermRef.current && fitAddonRef.current && terminalRef.current) {
             xtermRef.current.clear()
             userScrolledUp.set(paneId, false) // Reset scroll state after clear
+            isWritingOutput.set(paneId, false)
             if (terminalRef.current.offsetWidth > 0) {
               try {
                 fitAddonRef.current.fit()
@@ -491,23 +636,29 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     return unsubscribe
   }, [paneId])
 
-  // Poll for current working directory updates
+  // Poll for current working directory and git status updates
   // Note: Only paneId in deps - use getState() for store access to prevent re-registration
   useEffect(() => {
-    const updateCwd = async () => {
+    const updateCwdAndGitStatus = async () => {
+      const store = useWorkspaceStore.getState()
+      const currentPane = store.panes.find((p) => p.id === paneId)
+
+      // Update CWD
       const cwd = await window.electronAPI.getCwd(paneId)
-      if (cwd) {
-        const store = useWorkspaceStore.getState()
-        const currentPane = store.panes.find((p) => p.id === paneId)
-        if (currentPane && cwd !== currentPane.workingDirectory) {
-          store.setPaneCwd(paneId, cwd)
-        }
+      if (cwd && currentPane && cwd !== currentPane.workingDirectory) {
+        store.setPaneCwd(paneId, cwd)
+      }
+
+      // Update git status
+      const gitStatus = await window.electronAPI.getGitStatus(paneId)
+      if (gitStatus) {
+        store.setPaneGitStatus(paneId, gitStatus)
       }
     }
 
     // Update immediately and then every 10 seconds (reduced from 2s to lower IPC overhead)
-    updateCwd()
-    const interval = setInterval(updateCwd, 10000)
+    updateCwdAndGitStatus()
+    const interval = setInterval(updateCwdAndGitStatus, 10000)
 
     return () => clearInterval(interval)
   }, [paneId])
@@ -550,7 +701,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     const draggedPaneId = e.dataTransfer.getData(PANE_DRAG_TYPE)
     if (draggedPaneId) {
       const sourcePaneId = parseInt(draggedPaneId, 10)
-      if (sourcePaneId !== paneId && layout !== 'fullscreen') {
+      if (sourcePaneId !== paneId) {
         // Swap pane positions - this visually swaps them since grid uses array position
         swapPanes(sourcePaneId, paneId)
       }
@@ -584,17 +735,17 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   if (!pane) return null
 
-  const borderClass = isPaneDragOver
-    ? 'border-claude-pink/50'
-    : isDragOver
-      ? 'border-claude-pink/30'
-      : isActive
-        ? 'border-claude-pink/40'
-        : 'border-terminal-border'
+  // Border styling - subtle by default, prominent on interaction
+  const getBorderClass = () => {
+    if (isPaneDragOver) return 'ring-2 ring-[--accent] ring-inset'
+    if (isDragOver) return 'ring-2 ring-[--accent]/50 ring-inset'
+    if (isActive) return 'ring-1 ring-[--accent]/40 ring-inset'
+    return ''
+  }
 
   return (
     <div
-      className={`h-full min-h-0 flex flex-col bg-terminal-bg overflow-hidden border transition-colors relative ${borderClass}`}
+      className={`h-full min-h-0 flex flex-col bg-[--ui-bg-primary] overflow-hidden rounded-sm transition-all relative ${getBorderClass()}`}
       onClick={handleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -607,14 +758,15 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         role="application"
         aria-label={`Terminal ${paneId + 1}`}
       />
+      <GitStatusBar paneId={paneId} />
       {isDragOver && (
-        <div className="absolute inset-0 flex items-center justify-center bg-claude-pink/10 pointer-events-none font-mono">
-          <div className="text-claude-pink text-sm">[ drop file here ]</div>
+        <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
+          <div className="text-[--accent] text-sm font-medium">Drop file here</div>
         </div>
       )}
-      {isPaneDragOver && layout !== 'fullscreen' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-claude-pink/10 pointer-events-none font-mono">
-          <div className="text-claude-pink text-sm">[ swap ]</div>
+      {isPaneDragOver && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
+          <div className="text-[--accent] text-sm font-medium">Swap terminals</div>
         </div>
       )}
     </div>

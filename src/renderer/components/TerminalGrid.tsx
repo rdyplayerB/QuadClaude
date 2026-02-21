@@ -8,8 +8,8 @@ export const TerminalGrid = memo(function TerminalGrid() {
 
   if (!isInitialized || panes.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-terminal-muted font-mono text-sm">
-        [ loading... ]
+      <div className="h-full flex items-center justify-center text-[--ui-text-dimmed] font-mono text-sm bg-[--ui-bg-base]">
+        Loading...
       </div>
     )
   }
@@ -17,7 +17,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
   const gridStyle = getGridStyle(layout, focusPaneId, splitPaneIds, activePaneId)
 
   return (
-    <div style={gridStyle} className="p-1 bg-terminal-border">
+    <div style={gridStyle} className="p-1 gap-1 bg-[--ui-bg-base]">
       {panes.map((pane, index) => (
         <div
           key={pane.id}

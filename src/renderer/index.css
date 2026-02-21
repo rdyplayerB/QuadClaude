@@ -9,18 +9,62 @@
   --terminal-border: #3c3c3c;
   --terminal-header: #1a1a1a;
   --terminal-muted: #6b6b6b;
-  --claude-pink: #D4A59A;
-  --claude-pink-muted: #a88579;
+  --accent: #22d3ee;
+  --accent-muted: #06b6d4;
+
+  /* UI colors */
+  --ui-bg-base: #141414;
+  --ui-bg-primary: #1e1e1e;
+  --ui-bg-elevated: #252525;
+  --ui-bg-active: #3a3a3a;
+  --ui-border: #333;
+  --ui-border-subtle: #2a2a2a;
+  --ui-text-primary: #ffffff;
+  --ui-text-secondary: #888;
+  --ui-text-muted: #666;
+  --ui-text-dimmed: #555;
+  --ui-text-faint: #444;
+
+  /* Status bar */
+  --statusbar-bg: #1a1a1a;
+
+  /* Git colors */
+  --git-green: #4ade80;
+  --git-cyan: #22d3ee;
+  --git-yellow: #fbbf24;
+  --git-orange: #fb923c;
 }
 
 :root.light {
   --terminal-bg: #f5f5f5;
   --terminal-fg: #222222;
-  --terminal-border: #c0c0c0;
+  --terminal-border: #d0d0d0;
   --terminal-header: #e8e8e8;
   --terminal-muted: #555555;
-  --claude-pink: #b5736a;
-  --claude-pink-muted: #8a5f56;
+  --accent: #0891b2;
+  --accent-muted: #0e7490;
+
+  /* UI colors - light mode */
+  --ui-bg-base: #e8e8e8;
+  --ui-bg-primary: #f5f5f5;
+  --ui-bg-elevated: #ffffff;
+  --ui-bg-active: #e0e0e0;
+  --ui-border: #c0c0c0;
+  --ui-border-subtle: #d8d8d8;
+  --ui-text-primary: #1a1a1a;
+  --ui-text-secondary: #666;
+  --ui-text-muted: #888;
+  --ui-text-dimmed: #999;
+  --ui-text-faint: #aaa;
+
+  /* Status bar */
+  --statusbar-bg: #e0e0e0;
+
+  /* Git colors - slightly darker for light mode */
+  --git-green: #16a34a;
+  --git-cyan: #0891b2;
+  --git-yellow: #ca8a04;
+  --git-orange: #ea580c;
 }
 
 /* Base styles */
@@ -66,10 +110,10 @@ body {
 
 /* Pane header - fixed height to prevent shifting during layout changes */
 .pane-header {
-  height: 36px;
-  min-height: 36px;
-  max-height: 36px;
-  flex: 0 0 36px;
+  height: 40px;
+  min-height: 40px;
+  max-height: 40px;
+  flex: 0 0 40px;
 }
 
 /* Terminal container - with performance optimizations */
