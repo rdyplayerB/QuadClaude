@@ -19,7 +19,7 @@ export interface SavedPrompt {
 }
 
 // Pane state
-export type PaneState = 'shell' | 'claude-active' | 'claude-exited'
+export type PaneState = 'shell' | 'claude-active'
 
 // Individual pane configuration
 export interface PaneConfig {
@@ -27,7 +27,6 @@ export interface PaneConfig {
   label: string
   workingDirectory: string
   state: PaneState
-  wasClaudeActive: boolean // For warm start restoration
   gitStatus?: GitStatus // Git status for pane header
 }
 
@@ -73,7 +72,6 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
 export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus', 'split']
 
 export interface WorkspacePreferences {
-  restoreMode: 'cold' | 'warm'
   theme: 'dark' | 'light' | 'system'
   fontSize: number
   hotkeys: HotkeyBindings
@@ -101,6 +99,7 @@ export const IPC_CHANNELS = {
   PTY_EXIT: 'pty:exit',
   PTY_CWD: 'pty:cwd',
   PTY_GIT_STATUS: 'pty:git-status',
+  PTY_IS_CLAUDE_RUNNING: 'pty:is-claude-running',
 
   // Workspace
   WORKSPACE_SAVE: 'workspace:save',

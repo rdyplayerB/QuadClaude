@@ -49,10 +49,7 @@ function App() {
   }, [preferences.theme])
 
   // Enable global hotkeys (disabled when settings modal is open)
-  useHotkeys(
-    !isSettingsOpen,
-    useCallback(() => {}, []) // Prompt toolbar is now always visible
-  )
+  useHotkeys(!isSettingsOpen)
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {

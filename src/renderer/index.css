@@ -4,7 +4,7 @@
 
 /* Theme variables */
 :root {
-  --terminal-bg: #1a1a1a;
+  --terminal-bg: #1e1e1e;
   --terminal-fg: #d4d4d4;
   --terminal-border: #3c3c3c;
   --terminal-header: #1a1a1a;
@@ -26,7 +26,7 @@
   --ui-text-faint: #444;
 
   /* Status bar */
-  --statusbar-bg: #1a1a1a;
+  --statusbar-bg: #1e1e1e;
 
   /* Git colors */
   --git-green: #4ade80;
@@ -122,11 +122,22 @@ body {
   height: 100%;
   min-height: 0; /* Critical for flexbox - allows proper shrinking */
   contain: layout paint style;
+  background: var(--terminal-bg); /* Ensure container matches terminal bg */
 }
 
 .terminal-container .xterm {
   height: 100%;
   padding: 4px;
+  background: var(--terminal-bg) !important; /* Override xterm default */
+}
+
+/* Force xterm internal elements to match terminal background */
+.terminal-container .xterm-viewport {
+  background: var(--terminal-bg) !important;
+}
+
+.terminal-container .xterm-screen {
+  background: var(--terminal-bg) !important;
 }
 
 /* Titlebar drag region */

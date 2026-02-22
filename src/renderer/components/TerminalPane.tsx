@@ -137,29 +137,21 @@ function isTerminalAtBottom(terminal: Terminal): boolean {
   return buffer.baseY + terminal.rows >= buffer.length - 1
 }
 
-// Helper to safely fit terminal while preserving scroll position
-function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
-  const wasAtBottom = isTerminalAtBottom(terminal)
-  try {
-    fitAddon.fit()
-  } catch (e) {
-    // Ignore fit errors during transitions
-    return
-  }
-  // Always scroll to bottom if we were at the bottom before fit
-  if (wasAtBottom) {
-    terminal.scrollToBottom()
-  }
-}
-
-// Git Status Bar component - displayed at bottom of each terminal pane
+// Git Status Bar component - only displayed when Claude is active
 const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) {
   const [showTooltip, setShowTooltip] = useState(false)
   const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
   const gitStatus = pane?.gitStatus
+  const workingDir = pane?.workingDirectory || ''
+  const shortPath = workingDir.replace(/^\/Users\/[^/]+/, '~')
+
+  // Only show status bar when Claude is active
+  if (pane?.state !== 'claude-active') {
+    return null
+  }
 
   return (
-    <div className="flex items-center justify-between px-3 h-7 bg-[--statusbar-bg] border-t border-[--ui-border-subtle] font-mono text-xs">
+    <div className="flex items-center justify-between px-3 h-7 bg-[--terminal-bg] font-mono text-xs shrink-0">
       {/* Left side - git info */}
       <div
         className="relative flex items-center gap-2"
@@ -176,19 +168,19 @@ const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) 
             </span>
             {(gitStatus.ahead ?? 0) > 0 && (
               <span className="text-[--git-cyan] flex items-center gap-0.5">
-                <span className="text-[11px]">↑</span>
+                <span className="text-[10px]">↑</span>
                 <span>{gitStatus.ahead}</span>
               </span>
             )}
             {(gitStatus.behind ?? 0) > 0 && (
               <span className="text-[--git-yellow] flex items-center gap-0.5">
-                <span className="text-[11px]">↓</span>
+                <span className="text-[10px]">↓</span>
                 <span>{gitStatus.behind}</span>
               </span>
             )}
             {(gitStatus.dirty ?? 0) > 0 && (
               <span className="text-[--git-orange] flex items-center gap-0.5">
-                <span className="text-[11px]">●</span>
+                <span className="text-[10px]">●</span>
                 <span>{gitStatus.dirty}</span>
               </span>
             )}
@@ -217,13 +209,29 @@ const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) 
           <span className="text-[--ui-text-faint]">—</span>
         )}
       </div>
-      {/* Right side - full path */}
-      <div className="text-[--ui-text-dimmed] truncate max-w-[300px]" title={pane?.workingDirectory}>
-        {pane?.workingDirectory.replace(/^\/Users\/[^/]+/, '~')}
+      {/* Right side - path */}
+      <div className="text-[--ui-text-dimmed] truncate max-w-[300px]" title={workingDir}>
+        {shortPath}
       </div>
     </div>
   )
 })
+
+// Helper to safely fit terminal while preserving scroll position
+function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
+  const wasAtBottom = isTerminalAtBottom(terminal)
+  try {
+    fitAddon.fit()
+  } catch (e) {
+    // Ignore fit errors during transitions
+    return
+  }
+  // Always scroll to bottom if we were at the bottom before fit
+  if (wasAtBottom) {
+    terminal.scrollToBottom()
+  }
+}
+
 
 interface TerminalPaneProps {
   paneId: number
@@ -574,10 +582,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
             terminal.scrollToBottom()
           }
 
-          // Detect Claude activation/deactivation from output
-          if (data.includes('Claude Code') || data.includes('claude>')) {
-            useWorkspaceStore.getState().setPaneState(paneId, 'claude-active')
-          }
+          // Claude status is now detected via process polling, not output matching
         }
       }
     )
@@ -636,29 +641,59 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     return unsubscribe
   }, [paneId])
 
-  // Poll for current working directory and git status updates
+  // Poll for Claude process status (fast, lightweight check)
   // Note: Only paneId in deps - use getState() for store access to prevent re-registration
   useEffect(() => {
+    const checkClaudeStatus = async () => {
+      const store = useWorkspaceStore.getState()
+      const currentPane = store.panes.find((p) => p.id === paneId)
+      const currentState = currentPane?.state || 'shell'
+
+      // Check if Claude process is actually running - this is the source of truth
+      const isClaudeRunning = await window.electronAPI.isClaudeRunning(paneId)
+
+      if (isClaudeRunning && currentState !== 'claude-active') {
+        store.setPaneState(paneId, 'claude-active')
+      } else if (!isClaudeRunning && currentState === 'claude-active') {
+        store.setPaneState(paneId, 'shell')
+      }
+    }
+
+    // Check Claude status every 2 seconds (pgrep is lightweight)
+    checkClaudeStatus()
+    const interval = setInterval(checkClaudeStatus, 2000)
+
+    return () => clearInterval(interval)
+  }, [paneId])
+
+  // Poll for CWD and git status (heavier operations, less frequent)
+  useEffect(() => {
+    let pollCount = 0
+
     const updateCwdAndGitStatus = async () => {
       const store = useWorkspaceStore.getState()
       const currentPane = store.panes.find((p) => p.id === paneId)
 
-      // Update CWD
+      // Update CWD every poll (5 seconds)
       const cwd = await window.electronAPI.getCwd(paneId)
       if (cwd && currentPane && cwd !== currentPane.workingDirectory) {
         store.setPaneCwd(paneId, cwd)
       }
 
-      // Update git status
-      const gitStatus = await window.electronAPI.getGitStatus(paneId)
-      if (gitStatus) {
-        store.setPaneGitStatus(paneId, gitStatus)
+      // Only update git status every 3rd poll (15 seconds) AND only when Claude is active
+      pollCount++
+      if (pollCount >= 3 && currentPane?.state === 'claude-active') {
+        pollCount = 0
+        const gitStatus = await window.electronAPI.getGitStatus(paneId)
+        if (gitStatus) {
+          store.setPaneGitStatus(paneId, gitStatus)
+        }
       }
     }
 
-    // Update immediately and then every 10 seconds (reduced from 2s to lower IPC overhead)
+    // Initial update
     updateCwdAndGitStatus()
-    const interval = setInterval(updateCwdAndGitStatus, 10000)
+    const interval = setInterval(updateCwdAndGitStatus, 5000)
 
     return () => clearInterval(interval)
   }, [paneId])
@@ -735,30 +770,33 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   if (!pane) return null
 
-  // Border styling - subtle by default, prominent on interaction
+  // Border styling - always visible to define pane boundaries
   const getBorderClass = () => {
-    if (isPaneDragOver) return 'ring-2 ring-[--accent] ring-inset'
-    if (isDragOver) return 'ring-2 ring-[--accent]/50 ring-inset'
-    if (isActive) return 'ring-1 ring-[--accent]/40 ring-inset'
-    return ''
+    if (isPaneDragOver) return 'border-2 border-[--accent]'
+    if (isDragOver) return 'border-2 border-[--accent]/50'
+    if (isActive) return 'border-2 border-[--accent]/70'
+    return 'border border-[#444]'  // Visible gray border for inactive panes
   }
 
   return (
     <div
-      className={`h-full min-h-0 flex flex-col bg-[--ui-bg-primary] overflow-hidden rounded-sm transition-all relative ${getBorderClass()}`}
+      className={`h-full min-h-0 flex flex-col bg-[--ui-bg-elevated] overflow-hidden rounded-lg transition-all relative ${getBorderClass()}`}
       onClick={handleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       <PaneHeader paneId={paneId} />
-      <div
-        ref={terminalRef}
-        className="flex-1 min-h-0 terminal-container"
-        role="application"
-        aria-label={`Terminal ${paneId + 1}`}
-      />
-      <GitStatusBar paneId={paneId} />
+      {/* Terminal + status bar wrapper - shared background eliminates black band */}
+      <div className="flex-1 min-h-0 flex flex-col bg-[--terminal-bg]">
+        <div
+          ref={terminalRef}
+          className="flex-1 min-h-0 terminal-container"
+          role="application"
+          aria-label={`Terminal ${paneId + 1}`}
+        />
+        <GitStatusBar paneId={paneId} />
+      </div>
       {isDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
           <div className="text-[--accent] text-sm font-medium">Drop file here</div>

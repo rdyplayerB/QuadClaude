@@ -4,12 +4,11 @@ import { focusTerminal } from '../components/TerminalPane'
 import { LayoutMode } from '../../shared/types'
 
 /**
- * Hook to handle global hotkey bindings for terminal focus, layout switching, and command palette
+ * Hook to handle global hotkey bindings for terminal focus and layout switching
  *
  * @param enabled - Whether hotkeys are currently enabled (default: true)
- * @param onCommandPalette - Callback to open the command palette
  */
-export function useHotkeys(enabled: boolean = true, onCommandPalette?: () => void) {
+export function useHotkeys(enabled: boolean = true) {
   const {
     preferences,
     layout,
@@ -87,9 +86,6 @@ export function useHotkeys(enabled: boolean = true, onCommandPalette?: () => voi
       { ...parseHotkey(hotkeys.layoutSplit), layout: 'split' },
     ]
 
-    // Command palette hotkey
-    const commandPaletteHotkey = parseHotkey(hotkeys.commandPalette)
-
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept if user is typing in an input field
       if (
@@ -100,22 +96,6 @@ export function useHotkeys(enabled: boolean = true, onCommandPalette?: () => voi
       }
 
       const pressedKey = e.key.toLowerCase()
-
-      // Check for command palette hotkey
-      if (onCommandPalette) {
-        const modifiersMatch =
-          e.ctrlKey === commandPaletteHotkey.modifiers.ctrl &&
-          e.altKey === commandPaletteHotkey.modifiers.alt &&
-          e.shiftKey === commandPaletteHotkey.modifiers.shift &&
-          e.metaKey === commandPaletteHotkey.modifiers.meta
-
-        if (pressedKey === commandPaletteHotkey.key && modifiersMatch) {
-          e.preventDefault()
-          e.stopPropagation()
-          onCommandPalette()
-          return
-        }
-      }
 
       // Check for layout switching hotkeys
       for (const config of layoutHotkeyConfigs) {
@@ -163,5 +143,5 @@ export function useHotkeys(enabled: boolean = true, onCommandPalette?: () => voi
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('terminal-hotkey', handleTerminalHotkey)
     }
-  }, [enabled, preferences, handleTerminalFocus, setLayout, onCommandPalette])
+  }, [enabled, preferences, handleTerminalFocus, setLayout])
 }

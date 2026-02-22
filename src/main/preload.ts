@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getGitStatus: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_GIT_STATUS, paneId) as Promise<GitStatus | null>,
 
+  isClaudeRunning: (paneId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_IS_CLAUDE_RUNNING, paneId) as Promise<boolean>,
+
   // Terminal I/O
   sendInput: (paneId: number, data: string) =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_INPUT, paneId, data),
@@ -80,6 +83,7 @@ declare global {
       killPty: (paneId: number) => Promise<void>
       getCwd: (paneId: number) => Promise<string | null>
       getGitStatus: (paneId: number) => Promise<GitStatus | null>
+      isClaudeRunning: (paneId: number) => Promise<boolean>
       sendInput: (paneId: number, data: string) => void
       resizeTerminal: (paneId: number, cols: number, rows: number) => void
       onTerminalOutput: (callback: (paneId: number, data: string) => void) => () => void

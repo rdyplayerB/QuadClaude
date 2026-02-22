@@ -517,6 +517,11 @@ function setupIPC() {
     return ptyManager?.getGitStatus(paneId)
   })
 
+  // Check if Claude process is running in PTY
+  ipcMain.handle(IPC_CHANNELS.PTY_IS_CLAUDE_RUNNING, async (_, paneId: number) => {
+    return ptyManager?.isClaudeRunning(paneId) ?? false
+  })
+
   // Workspace operations
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_LOAD, async () => {
     logger.info('workspace', 'Loading workspace state')

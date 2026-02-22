@@ -261,6 +261,28 @@ export class PtyManager {
     }
   }
 
+  // Check if claude process is running in this PTY
+  isClaudeRunning(paneId: number): boolean {
+    const instance = this.ptys.get(paneId)
+    if (!instance) return false
+
+    try {
+      const pid = instance.pty.pid
+      if (os.platform() === 'darwin' || os.platform() === 'linux') {
+        // Use pgrep to find claude process with this shell as parent
+        // -P filters by parent PID, returns exit code 0 if found
+        execSync(`pgrep -P ${pid} -f "claude" 2>/dev/null`, {
+          encoding: 'utf-8',
+          timeout: 500,
+        })
+        return true
+      }
+    } catch {
+      // pgrep returns non-zero if no process found - this is expected
+    }
+    return false
+  }
+
   killPty(paneId: number): void {
     const instance = this.ptys.get(paneId)
     if (instance) {

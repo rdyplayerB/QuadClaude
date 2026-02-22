@@ -9,11 +9,21 @@ interface PaneHeaderProps {
   paneId: number
 }
 
+// Unique colors for each terminal's indicator (work well in dark & light modes)
+const PANE_COLORS = [
+  '#22d3ee', // Cyan (Terminal 1)
+  '#4ade80', // Green (Terminal 2)
+  '#fbbf24', // Amber (Terminal 3)
+  '#a78bfa', // Purple (Terminal 4)
+]
+
 export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) {
   const { panes, activePaneId, setPaneLabel, setActivePaneId } = useWorkspaceStore()
 
   const pane = panes.find((p) => p.id === paneId)
+  const paneIndex = panes.findIndex((p) => p.id === paneId)
   const isActive = activePaneId === paneId
+  const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -56,24 +66,26 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     setActivePaneId(paneId)
   }
 
-  // State indicators
+  // State indicators - each pane gets its own unique color
   const stateIndicator = () => {
-    switch (pane.state) {
-      case 'claude-active':
-        return <span className="w-2 h-2 rounded-full bg-[#d946ef] animate-pulse" title="Claude Active" />
-      case 'claude-exited':
-        return <span className="w-2 h-2 rounded-full bg-amber-500" title="Claude Exited" />
-      default:
-        return null // Don't show indicator for normal shell
+    if (pane.state === 'claude-active') {
+      return (
+        <span
+          className="w-2 h-2 rounded-full animate-pulse"
+          style={{ backgroundColor: paneColor }}
+          title="Claude Active"
+        />
+      )
     }
+    return null // Don't show indicator for normal shell
   }
 
   return (
     <div
-      className={`pane-header overflow-hidden flex items-center font-mono text-[14px] titlebar-no-drag transition-all h-10 ${
+      className={`pane-header overflow-hidden flex items-center font-mono text-[14px] titlebar-no-drag transition-all h-10 border-b border-[#444] ${
         isActive
           ? 'bg-[--ui-bg-elevated] text-[--ui-text-primary]'
-          : 'bg-[--ui-bg-primary] text-[--ui-text-secondary]'
+          : 'bg-[--ui-bg-elevated] text-[--ui-text-secondary]'
       }`}
     >
       {/* Draggable zone */}

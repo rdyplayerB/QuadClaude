@@ -17,7 +17,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
   const gridStyle = getGridStyle(layout, focusPaneId, splitPaneIds, activePaneId)
 
   return (
-    <div style={gridStyle} className="p-1 gap-1 bg-[--ui-bg-base]">
+    <div style={gridStyle} className="p-2 gap-2 bg-[--ui-bg-base]">
       {panes.map((pane, index) => (
         <div
           key={pane.id}

@@ -51,7 +51,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   splitPaneIds: [0, 1] as [number, number],
   panes: [],
   preferences: {
-    restoreMode: 'cold',
     theme: 'dark',
     fontSize: 14,
     hotkeys: DEFAULT_HOTKEYS,
@@ -77,9 +76,16 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout = 'grid'
       }
 
+      // Reset all pane states to 'shell' on startup - Claude sessions don't survive app restart
+      const panes = savedState.panes?.map((pane: PaneConfig) => ({
+        ...pane,
+        state: 'shell' as PaneState,
+      })) ?? []
+
       set({
         ...savedState,
         layout,
+        panes,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
@@ -101,10 +107,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           label: `Terminal ${id + 1}`,
           workingDirectory: homeDir,
           state: 'shell' as PaneState,
-          wasClaudeActive: false,
         })),
         preferences: {
-          restoreMode: 'cold',
           theme: 'dark',
           fontSize: 14,
           hotkeys: DEFAULT_HOTKEYS,
@@ -182,21 +186,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setPaneState: (id, paneState) => {
+    // Avoid unnecessary re-renders if state hasn't changed
+    const currentPane = get().panes.find((p) => p.id === id)
+    if (currentPane?.state === paneState) return
+
     set((state) => ({
       panes: state.panes.map((pane) =>
-        pane.id === id
-          ? {
-              ...pane,
-              state: paneState,
-              wasClaudeActive: paneState === 'claude-active' ? true : pane.wasClaudeActive,
-            }
-          : pane
+        pane.id === id ? { ...pane, state: paneState } : pane
       ),
     }))
     // Don't save on pane state changes - too frequent during terminal activity
   },
 
   setPaneLabel: (id, label) => {
+    // Avoid unnecessary re-renders if label hasn't changed
+    const currentPane = get().panes.find((p) => p.id === id)
+    if (currentPane?.label === label) return
+
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === id ? { ...pane, label } : pane
@@ -206,6 +212,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setPaneCwd: (id, cwd) => {
+    // Avoid unnecessary re-renders if cwd hasn't changed
+    const currentPane = get().panes.find((p) => p.id === id)
+    if (currentPane?.workingDirectory === cwd) return
+
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === id ? { ...pane, workingDirectory: cwd } : pane
@@ -215,6 +225,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setPaneGitStatus: (id, gitStatus) => {
+    // Avoid unnecessary re-renders - compare stringified values
+    const currentPane = get().panes.find((p) => p.id === id)
+    if (JSON.stringify(currentPane?.gitStatus) === JSON.stringify(gitStatus)) return
+
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === id ? { ...pane, gitStatus } : pane

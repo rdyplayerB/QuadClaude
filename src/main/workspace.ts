@@ -5,7 +5,6 @@ import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode }
 import { logger } from './logger'
 
 const DEFAULT_PREFERENCES = {
-  restoreMode: 'cold' as const,
   theme: 'dark' as const,
   fontSize: 14,
   hotkeys: DEFAULT_HOTKEYS,
@@ -18,7 +17,6 @@ function createDefaultPaneConfig(id: number): PaneConfig {
     label: `Terminal ${id + 1}`,
     workingDirectory: os.homedir(),
     state: 'shell',
-    wasClaudeActive: false,
   }
 }
 
