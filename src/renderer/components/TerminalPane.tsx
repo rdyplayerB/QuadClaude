@@ -246,6 +246,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     panes,
     activePaneId,
     setActivePaneId,
+    setFocusPaneId,
+    setLayout,
     preferences,
     layout,
     swapPanes,
@@ -704,6 +706,19 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     xtermRef.current?.focus()
   }, [paneId, setActivePaneId])
 
+  // Handle double-click to toggle focus mode
+  const handleDoubleClick = useCallback(() => {
+    if (layout === 'grid') {
+      // Switch to focus mode with this pane as the main focus
+      setFocusPaneId(paneId)
+      setLayout('focus')
+    } else if (layout === 'focus') {
+      // Switch back to grid mode
+      setLayout('grid')
+    }
+    xtermRef.current?.focus()
+  }, [layout, paneId, setFocusPaneId, setLayout])
+
   // Handle drag and drop
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -782,6 +797,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     <div
       className={`h-full min-h-0 flex flex-col bg-[--ui-bg-elevated] overflow-hidden rounded-lg transition-all relative ${getBorderClass()}`}
       onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
