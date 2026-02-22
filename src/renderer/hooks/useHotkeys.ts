@@ -11,12 +11,9 @@ import { LayoutMode } from '../../shared/types'
 export function useHotkeys(enabled: boolean = true) {
   const {
     preferences,
-    layout,
     activePaneId,
-    splitPaneIds,
     setActivePaneId,
     setLayout,
-    setSplitPaneId,
     swapPanes,
   } = useWorkspaceStore()
 
@@ -30,17 +27,8 @@ export function useHotkeys(enabled: boolean = true) {
         return
       }
 
-      // Swap the active pane with the target pane (same as swap button)
-      if (layout === 'split') {
-        // In split view, replace the active pane's slot with the target pane
-        const activePosition = splitPaneIds.indexOf(activePaneId)
-        if (activePosition !== -1) {
-          setSplitPaneId(activePosition as 0 | 1, targetPaneId)
-        }
-      } else {
-        // In grid/focus/horizontal/vertical views, swap positions in the panes array
-        swapPanes(activePaneId, targetPaneId)
-      }
+      // Swap positions in the panes array
+      swapPanes(activePaneId, targetPaneId)
 
       // Make the target pane active and focus it
       setActivePaneId(targetPaneId)
@@ -50,7 +38,7 @@ export function useHotkeys(enabled: boolean = true) {
         })
       })
     },
-    [layout, activePaneId, splitPaneIds, setActivePaneId, setSplitPaneId, swapPanes]
+    [activePaneId, setActivePaneId, swapPanes]
   )
 
   useEffect(() => {
@@ -83,7 +71,6 @@ export function useHotkeys(enabled: boolean = true) {
     const layoutHotkeyConfigs: { key: string; modifiers: { ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }; layout: LayoutMode }[] = [
       { ...parseHotkey(hotkeys.layoutGrid), layout: 'grid' },
       { ...parseHotkey(hotkeys.layoutFocus), layout: 'focus' },
-      { ...parseHotkey(hotkeys.layoutSplit), layout: 'split' },
     ]
 
     const handleKeyDown = (e: KeyboardEvent) => {

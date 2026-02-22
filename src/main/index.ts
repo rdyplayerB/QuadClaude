@@ -365,11 +365,6 @@ function createApplicationMenu() {
           accelerator: 'CmdOrCtrl+2',
           click: () => sendMenuAction('layout-focus')
         },
-        {
-          label: 'Split Layout',
-          accelerator: 'CmdOrCtrl+3',
-          click: () => sendMenuAction('layout-split')
-        },
         { type: 'separator' },
         {
           label: 'Increase Font Size',

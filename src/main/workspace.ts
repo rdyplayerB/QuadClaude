@@ -25,7 +25,6 @@ function createDefaultWorkspace(): WorkspaceState {
     layout: 'grid',
     focusPaneId: 0,
     activePaneId: 0,
-    splitPaneIds: [0, 1],
     panes: [
       createDefaultPaneConfig(0),
       createDefaultPaneConfig(1),
@@ -82,11 +81,6 @@ export class WorkspaceManager {
       }
       workspace.panes = workspace.panes.slice(0, 4)
 
-      // Ensure splitPaneIds exists (backwards compatibility)
-      if (!workspace.splitPaneIds) {
-        workspace.splitPaneIds = [0, 1]
-      }
-
       // Ensure hotkeys exist (backwards compatibility)
       if (!workspace.preferences.hotkeys) {
         workspace.preferences.hotkeys = DEFAULT_HOTKEYS
@@ -97,8 +91,8 @@ export class WorkspaceManager {
         workspace.preferences.savedPrompts = []
       }
 
-      // Migrate removed layouts to 'grid' (horizontal, vertical, fullscreen removed)
-      const validLayouts: LayoutMode[] = ['grid', 'focus', 'split']
+      // Migrate removed layouts to 'grid' (horizontal, vertical, fullscreen, split removed)
+      const validLayouts: LayoutMode[] = ['grid', 'focus']
       if (!validLayouts.includes(workspace.layout as LayoutMode)) {
         logger.info('workspace', `Migrating removed layout '${workspace.layout}' to 'grid'`)
         workspace.layout = 'grid'

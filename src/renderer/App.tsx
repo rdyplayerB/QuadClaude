@@ -14,10 +14,8 @@ function App() {
     layout,
     setLayout,
     activePaneId,
-    splitPaneIds,
     setActivePaneId,
     setFocusPaneId,
-    setSplitPaneId,
     preferences,
     updatePreferences,
   } = useWorkspaceStore()
@@ -65,17 +63,11 @@ function App() {
 
       if (layout === 'focus') {
         setFocusPaneId(paneId)
-      } else if (layout === 'split') {
-        if (!splitPaneIds.includes(paneId)) {
-          const activePosition = splitPaneIds.indexOf(activePaneId)
-          const targetPosition = activePosition !== -1 ? activePosition : 0
-          setSplitPaneId(targetPosition as 0 | 1, paneId)
-        }
       }
 
       focusTerminal(paneId)
     },
-    [layout, activePaneId, splitPaneIds, setActivePaneId, setFocusPaneId, setSplitPaneId]
+    [layout, setActivePaneId, setFocusPaneId]
   )
 
   // Listen for menu actions
@@ -87,9 +79,6 @@ function App() {
           break
         case 'layout-focus':
           setLayout('focus')
-          break
-        case 'layout-split':
-          setLayout('split')
           break
         case 'focus-pane-1':
           handleTerminalFocus(0)

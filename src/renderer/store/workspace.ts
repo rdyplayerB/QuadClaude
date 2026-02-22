@@ -18,7 +18,6 @@ interface WorkspaceStore extends WorkspaceState {
   setLayout: (layout: LayoutMode) => void
   setFocusPaneId: (id: number) => void
   setActivePaneId: (id: number) => void
-  setSplitPaneId: (position: 0 | 1, paneId: number) => void
   swapPanes: (paneId1: number, paneId2: number) => void
   resetPaneOrder: () => void
 
@@ -48,7 +47,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   layout: 'grid',
   focusPaneId: 0,
   activePaneId: 0,
-  splitPaneIds: [0, 1] as [number, number],
   panes: [],
   preferences: {
     theme: 'dark',
@@ -72,7 +70,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
       // Migrate removed layouts to 'grid'
       let layout = savedState.layout
-      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen') {
+      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen' || layout === 'split') {
         layout = 'grid'
       }
 
@@ -101,7 +99,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout: 'grid',
         focusPaneId: 0,
         activePaneId: 0,
-        splitPaneIds: [0, 1] as [number, number],
         panes: [0, 1, 2, 3].map((id) => ({
           id,
           label: `Terminal ${id + 1}`,
@@ -142,14 +139,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   setActivePaneId: (activePaneId) => {
     set({ activePaneId })
     // Don't save on active pane change - too frequent
-  },
-
-  setSplitPaneId: (position, paneId) => {
-    const current = get().splitPaneIds
-    const newSplitPaneIds: [number, number] = [...current] as [number, number]
-    newSplitPaneIds[position] = paneId
-    set({ splitPaneIds: newSplitPaneIds })
-    debouncedSave(() => get().saveWorkspace())
   },
 
   swapPanes: (paneId1, paneId2) => {
@@ -247,12 +236,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, splitPaneIds, panes, preferences } = get()
+    const { layout, focusPaneId, activePaneId, panes, preferences } = get()
     window.electronAPI.saveWorkspace({
       layout,
       focusPaneId,
       activePaneId,
-      splitPaneIds,
       panes,
       preferences,
     })

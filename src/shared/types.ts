@@ -1,5 +1,5 @@
-// Layout types (simplified to 3 essential layouts)
-export type LayoutMode = 'grid' | 'focus' | 'split'
+// Layout types - all show 4 terminals (true to "QuadClaude" name)
+export type LayoutMode = 'grid' | 'focus'
 
 // Git status for pane header
 export interface GitStatus {
@@ -35,7 +35,6 @@ export interface WorkspaceState {
   layout: LayoutMode
   focusPaneId: number // Which pane is focused in focus layout
   activePaneId: number // Which pane currently has input focus
-  splitPaneIds: [number, number] // Which panes are visible in split layout
   panes: PaneConfig[]
   preferences: WorkspacePreferences
   windowBounds?: WindowBounds
@@ -48,8 +47,6 @@ export interface HotkeyBindings {
   focusTerminal4: string
   layoutGrid: string
   layoutFocus: string
-  layoutSplit: string
-  commandPalette: string
 }
 
 // Use Cmd on Mac, Win on Windows for layout hotkeys
@@ -64,12 +61,10 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   focusTerminal4: 'Ctrl+4',
   layoutGrid: `${metaKey}+1`,
   layoutFocus: `${metaKey}+2`,
-  layoutSplit: `${metaKey}+3`,
-  commandPalette: `${metaKey}+P`,
 }
 
 // All available layouts
-export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus', 'split']
+export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus']
 
 export interface WorkspacePreferences {
   theme: 'dark' | 'light' | 'system'
@@ -124,7 +119,6 @@ export type MenuAction =
   | 'launch-claude'
   | 'layout-grid'
   | 'layout-focus'
-  | 'layout-split'
   | 'focus-pane-1'
   | 'focus-pane-2'
   | 'focus-pane-3'
@@ -133,4 +127,3 @@ export type MenuAction =
   | 'increase-font'
   | 'decrease-font'
   | 'open-settings'
-  | 'open-command-palette'

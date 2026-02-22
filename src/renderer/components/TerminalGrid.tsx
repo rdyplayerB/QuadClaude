@@ -4,7 +4,7 @@ import { TerminalPane } from './TerminalPane'
 import { getGridStyle, getPaneStyle } from '../layouts'
 
 export const TerminalGrid = memo(function TerminalGrid() {
-  const { layout, focusPaneId, splitPaneIds, activePaneId, panes, isInitialized } = useWorkspaceStore()
+  const { layout, focusPaneId, activePaneId, panes, isInitialized } = useWorkspaceStore()
 
   if (!isInitialized || panes.length === 0) {
     return (
@@ -14,14 +14,14 @@ export const TerminalGrid = memo(function TerminalGrid() {
     )
   }
 
-  const gridStyle = getGridStyle(layout, focusPaneId, splitPaneIds, activePaneId)
+  const gridStyle = getGridStyle(layout, focusPaneId, activePaneId)
 
   return (
     <div style={gridStyle} className="p-2 gap-2 bg-[--ui-bg-base]">
       {panes.map((pane, index) => (
         <div
           key={pane.id}
-          style={getPaneStyle(index, pane.id, layout, splitPaneIds, activePaneId)}
+          style={getPaneStyle(index, pane.id, layout, activePaneId)}
           className="pane-transition min-h-0"
         >
           <TerminalPane paneId={pane.id} />

@@ -21,29 +21,20 @@ const FocusIcon = () => (
   </svg>
 )
 
-const SplitIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-    <rect x="1" y="1" width="6.5" height="14" rx="1" opacity="0.9"/>
-    <rect x="8.5" y="1" width="6.5" height="14" rx="1" opacity="0.9"/>
-  </svg>
-)
-
 const layoutIcons: Record<LayoutMode, React.ReactNode> = {
   grid: <GridIcon />,
   focus: <FocusIcon />,
-  split: <SplitIcon />,
 }
 
 const layoutTitles: Record<LayoutMode, string> = {
   grid: 'Grid (Cmd+1)',
   focus: 'Focus (Cmd+2)',
-  split: 'Split (Cmd+3)',
 }
 
 export const LayoutSelector = memo(function LayoutSelector() {
   const { layout, setLayout } = useWorkspaceStore()
 
-  const layouts: LayoutMode[] = ['grid', 'focus', 'split']
+  const layouts: LayoutMode[] = ['grid', 'focus']
 
   return (
     <div className="flex items-center bg-[--ui-bg-elevated] rounded-lg p-1 border border-[--ui-border]">
