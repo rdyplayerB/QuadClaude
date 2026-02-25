@@ -150,10 +150,10 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
 
       {/* Expanded panel */}
       {isExpanded && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-xl shadow-2xl overflow-hidden">
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-xl shadow-2xl overflow-hidden" style={{ width: '60vw', minWidth: '500px', maxWidth: '1200px' }}>
           {/* Create form */}
           {isCreating ? (
-            <div className="p-4 space-y-3">
+            <div className="p-5 space-y-4">
               <div className="text-sm text-[--ui-text-muted] font-medium mb-2">New Prompt</div>
               <input
                 ref={nameInputRef}
@@ -165,7 +165,7 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
                   if (e.key === 'Enter') handleCreate()
                   if (e.key === 'Escape') setIsCreating(false)
                 }}
-                className="w-full px-3 py-2 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-muted] rounded-lg focus:border-[--accent] focus:outline-none"
+                className="w-full px-3 py-2.5 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-muted] rounded-lg focus:border-[--accent] focus:outline-none"
               />
               <textarea
                 placeholder="Prompt text..."
@@ -175,8 +175,9 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
                   if (e.key === 'Enter' && e.metaKey) handleCreate()
                   if (e.key === 'Escape') setIsCreating(false)
                 }}
-                rows={2}
-                className="w-full px-3 py-2 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-muted] rounded-lg focus:border-[--accent] focus:outline-none resize-none"
+                rows={12}
+                className="w-full px-3 py-2.5 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-muted] rounded-lg focus:border-[--accent] focus:outline-none resize-y"
+                style={{ minHeight: '200px', maxHeight: '60vh' }}
               />
               <div className="flex gap-2">
                 <button

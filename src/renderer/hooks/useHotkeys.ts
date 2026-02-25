@@ -71,6 +71,7 @@ export function useHotkeys(enabled: boolean = true) {
     const layoutHotkeyConfigs: { key: string; modifiers: { ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }; layout: LayoutMode }[] = [
       { ...parseHotkey(hotkeys.layoutGrid), layout: 'grid' },
       { ...parseHotkey(hotkeys.layoutFocus), layout: 'focus' },
+      { ...parseHotkey(hotkeys.layoutFocusRight), layout: 'focus-right' },
     ]
 
     const handleKeyDown = (e: KeyboardEvent) => {

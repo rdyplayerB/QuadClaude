@@ -30,6 +30,17 @@ export const LAYOUTS: Record<LayoutMode, LayoutConfig> = {
     ],
     visiblePanes: [0, 1, 2, 3],
   },
+  'focus-right': {
+    name: 'Focus Right',
+    icon: '◰',
+    gridTemplate: '1fr 1fr 1fr / 1fr 3fr',
+    areas: [
+      ['pane1', 'pane0'],
+      ['pane2', 'pane0'],
+      ['pane3', 'pane0'],
+    ],
+    visiblePanes: [0, 1, 2, 3],
+  },
 }
 
 export function getGridStyle(
@@ -39,7 +50,7 @@ export function getGridStyle(
 ): React.CSSProperties {
   const config = LAYOUTS[layout]
 
-  // For focus layout, position 0 is always the large focus area
+  // For focus layout, position 0 is always the large focus area (on left)
   if (layout === 'focus') {
     return {
       display: 'grid',
@@ -48,6 +59,21 @@ export function getGridStyle(
         "pane0 pane1"
         "pane0 pane2"
         "pane0 pane3"
+      `,
+      gap: '2px',
+      height: '100%',
+    }
+  }
+
+  // For focus-right layout, position 0 is the large focus area (on right)
+  if (layout === 'focus-right') {
+    return {
+      display: 'grid',
+      gridTemplate: config.gridTemplate,
+      gridTemplateAreas: `
+        "pane1 pane0"
+        "pane2 pane0"
+        "pane3 pane0"
       `,
       gap: '2px',
       height: '100%',

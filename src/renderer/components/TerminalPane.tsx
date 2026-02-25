@@ -246,8 +246,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     panes,
     activePaneId,
     setActivePaneId,
-    setFocusPaneId,
     setLayout,
+    setFocusPaneId,
+    focusPaneId,
     preferences,
     layout,
     swapPanes,
@@ -706,18 +707,21 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     xtermRef.current?.focus()
   }, [paneId, setActivePaneId])
 
-  // Handle double-click to toggle focus mode
+  // Handle double-click in focus mode (both focus and focus-right):
+  // - On a small pane: make it the big pane
+  // - On the big pane: exit to grid view
   const handleDoubleClick = useCallback(() => {
-    if (layout === 'grid') {
-      // Switch to focus mode with this pane as the main focus
-      setFocusPaneId(paneId)
-      setLayout('focus')
-    } else if (layout === 'focus') {
-      // Switch back to grid mode
-      setLayout('grid')
+    if (layout === 'focus' || layout === 'focus-right') {
+      if (paneId === focusPaneId) {
+        // Double-clicked the big pane - exit focus mode
+        setLayout('grid')
+      } else {
+        // Double-clicked a small pane - make it the big one
+        setFocusPaneId(paneId)
+      }
+      xtermRef.current?.focus()
     }
-    xtermRef.current?.focus()
-  }, [layout, paneId, setFocusPaneId, setLayout])
+  }, [layout, setLayout, paneId, focusPaneId, setFocusPaneId])
 
   // Handle drag and drop
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {

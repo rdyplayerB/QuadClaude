@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor } from 'electron
 import path from 'path'
 import { PtyManager } from './pty'
 import { WorkspaceManager } from './workspace'
+import { HistoryManager } from './history'
 import { logger } from './logger'
 import { IPC_CHANNELS, MenuAction } from '../shared/types'
 
@@ -18,6 +19,7 @@ let mainWindow: BrowserWindow | null = null
 let logWindow: BrowserWindow | null = null
 let ptyManager: PtyManager | null = null
 let workspaceManager: WorkspaceManager | null = null
+let historyManager: HistoryManager | null = null
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -361,9 +363,14 @@ function createApplicationMenu() {
           click: () => sendMenuAction('layout-grid')
         },
         {
-          label: 'Focus Layout',
+          label: 'Focus Left Layout',
           accelerator: 'CmdOrCtrl+2',
           click: () => sendMenuAction('layout-focus')
+        },
+        {
+          label: 'Focus Right Layout',
+          accelerator: 'CmdOrCtrl+3',
+          click: () => sendMenuAction('layout-focus-right')
         },
         { type: 'separator' },
         {
@@ -548,6 +555,27 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, async () => {
     return app.getVersion()
   })
+
+  // History operations
+  ipcMain.handle(IPC_CHANNELS.HISTORY_GET_PROJECT_ID, async (_, projectPath: string) => {
+    return historyManager?.getOrCreateProjectId(projectPath)
+  })
+
+  ipcMain.on(IPC_CHANNELS.HISTORY_APPEND, (_, projectId: string, paneId: number, type: 'input' | 'output', content: string) => {
+    historyManager?.appendExchange(projectId, paneId, type, content)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_GET_SESSIONS, async (_, projectId: string) => {
+    return historyManager?.getSessions(projectId) || []
+  })
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_GET_DAY, async (_, projectId: string, date: string) => {
+    return historyManager?.getDayContent(projectId, date) || ''
+  })
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_SEARCH, async (_, projectId: string, query: string, limit?: number) => {
+    return historyManager?.search(projectId, query, limit) || []
+  })
 }
 
 // App lifecycle
@@ -567,6 +595,14 @@ app.whenReady().then(() => {
     logger.info('workspace', 'WorkspaceManager initialized')
   } catch (error) {
     logger.error('workspace', 'Failed to initialize WorkspaceManager', error instanceof Error ? error.message : String(error))
+  }
+
+  try {
+    logger.info('history', 'Initializing HistoryManager')
+    historyManager = new HistoryManager()
+    logger.info('history', 'HistoryManager initialized')
+  } catch (error) {
+    logger.error('history', 'Failed to initialize HistoryManager', error instanceof Error ? error.message : String(error))
   }
 
   try {
@@ -629,6 +665,8 @@ app.on('before-quit', () => {
       logger.info('app', 'Saved CWDs on quit', `${cwds.size} pane(s)`)
     }
   }
+  // Flush history before quitting
+  historyManager?.shutdown()
   ptyManager?.killAll()
 })
 

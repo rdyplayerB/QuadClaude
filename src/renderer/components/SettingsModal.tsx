@@ -124,7 +124,8 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
   const layoutHotkeyLabels: Partial<Record<HotkeyField, string>> = {
     layoutGrid: 'Grid',
-    layoutFocus: 'Focus',
+    layoutFocus: 'Focus Left',
+    layoutFocusRight: 'Focus Right',
   }
 
   if (!isOpen) return null

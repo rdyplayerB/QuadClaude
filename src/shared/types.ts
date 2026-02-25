@@ -1,5 +1,5 @@
 // Layout types - all show 4 terminals (true to "QuadClaude" name)
-export type LayoutMode = 'grid' | 'focus'
+export type LayoutMode = 'grid' | 'focus' | 'focus-right'
 
 // Git status for pane header
 export interface GitStatus {
@@ -47,6 +47,7 @@ export interface HotkeyBindings {
   focusTerminal4: string
   layoutGrid: string
   layoutFocus: string
+  layoutFocusRight: string
 }
 
 // Use Cmd on Mac, Win on Windows for layout hotkeys
@@ -61,10 +62,11 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   focusTerminal4: 'Ctrl+4',
   layoutGrid: `${metaKey}+1`,
   layoutFocus: `${metaKey}+2`,
+  layoutFocusRight: `${metaKey}+3`,
 }
 
 // All available layouts
-export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus']
+export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus', 'focus-right']
 
 export interface WorkspacePreferences {
   theme: 'dark' | 'light' | 'system'
@@ -101,6 +103,13 @@ export const IPC_CHANNELS = {
   WORKSPACE_LOAD: 'workspace:load',
   WORKSPACE_GET_HOME: 'workspace:get-home',
 
+  // History
+  HISTORY_GET_PROJECT_ID: 'history:get-project-id',
+  HISTORY_APPEND: 'history:append',
+  HISTORY_GET_SESSIONS: 'history:get-sessions',
+  HISTORY_GET_DAY: 'history:get-day',
+  HISTORY_SEARCH: 'history:search',
+
   // App
   APP_QUIT: 'app:quit',
   APP_MENU_ACTION: 'app:menu-action',
@@ -119,6 +128,7 @@ export type MenuAction =
   | 'launch-claude'
   | 'layout-grid'
   | 'layout-focus'
+  | 'layout-focus-right'
   | 'focus-pane-1'
   | 'focus-pane-2'
   | 'focus-pane-3'

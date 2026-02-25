@@ -21,20 +21,31 @@ const FocusIcon = () => (
   </svg>
 )
 
+const FocusRightIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+    <rect x="1" y="1" width="3.5" height="4" rx="0.5" opacity="0.6"/>
+    <rect x="1" y="6" width="3.5" height="4" rx="0.5" opacity="0.6"/>
+    <rect x="1" y="11" width="3.5" height="4" rx="0.5" opacity="0.6"/>
+    <rect x="6" y="1" width="9" height="14" rx="1" opacity="0.9"/>
+  </svg>
+)
+
 const layoutIcons: Record<LayoutMode, React.ReactNode> = {
   grid: <GridIcon />,
   focus: <FocusIcon />,
+  'focus-right': <FocusRightIcon />,
 }
 
 const layoutTitles: Record<LayoutMode, string> = {
   grid: 'Grid (Cmd+1)',
-  focus: 'Focus (Cmd+2)',
+  focus: 'Focus Left (Cmd+2)',
+  'focus-right': 'Focus Right (Cmd+3)',
 }
 
 export const LayoutSelector = memo(function LayoutSelector() {
   const { layout, setLayout } = useWorkspaceStore()
 
-  const layouts: LayoutMode[] = ['grid', 'focus']
+  const layouts: LayoutMode[] = ['grid', 'focus', 'focus-right']
 
   return (
     <div className="flex items-center bg-[--ui-bg-elevated] rounded-lg p-1 border border-[--ui-border]">

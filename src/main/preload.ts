@@ -1,6 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus } from '../shared/types'
 
+// History types (mirrored from main/history.ts)
+interface HistorySession {
+  date: string
+  file: string
+  size: number
+  preview: string
+  exchangeCount: number
+}
+
+interface HistorySearchResult {
+  date: string
+  matches: string[]
+}
+
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   // PTY operations
@@ -73,6 +87,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App info
   getAppVersion: () =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION) as Promise<string>,
+
+  // History
+  getProjectId: (projectPath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_PROJECT_ID, projectPath) as Promise<string>,
+
+  appendHistory: (projectId: string, paneId: number, type: 'input' | 'output', content: string) =>
+    ipcRenderer.send(IPC_CHANNELS.HISTORY_APPEND, projectId, paneId, type, content),
+
+  getHistorySessions: (projectId: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_SESSIONS, projectId) as Promise<HistorySession[]>,
+
+  getHistoryDay: (projectId: string, date: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_DAY, projectId, date) as Promise<string>,
+
+  searchHistory: (projectId: string, query: string, limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_SEARCH, projectId, query, limit) as Promise<HistorySearchResult[]>,
 })
 
 // Type declaration for the renderer
@@ -94,6 +124,12 @@ declare global {
       onMenuAction: (callback: (action: MenuAction) => void) => () => void
       onSystemResume: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
+      // History
+      getProjectId: (projectPath: string) => Promise<string>
+      appendHistory: (projectId: string, paneId: number, type: 'input' | 'output', content: string) => void
+      getHistorySessions: (projectId: string) => Promise<HistorySession[]>
+      getHistoryDay: (projectId: string, date: string) => Promise<string>
+      searchHistory: (projectId: string, query: string, limit?: number) => Promise<HistorySearchResult[]>
     }
   }
 }
