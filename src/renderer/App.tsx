@@ -1,9 +1,9 @@
-import { useEffect, useCallback, useState, useRef } from 'react'
+import { useEffect, useCallback, useState } from 'react'
 import { TerminalGrid } from './components/TerminalGrid'
 import { SettingsModal } from './components/SettingsModal'
 import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
-import { HistoryPanel } from './components/HistoryPanel'
+import { HistoryReviewView } from './components/HistoryReviewView'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
@@ -22,27 +22,11 @@ function App() {
   } = useWorkspaceStore()
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false)
-  const [projectId, setProjectId] = useState<string | null>(null)
-  const projectIdRef = useRef<string | null>(null)
 
   // Initialize workspace on mount
   useEffect(() => {
     initialize()
   }, [initialize])
-
-  // Initialize project ID for history tracking
-  useEffect(() => {
-    const initProjectId = async () => {
-      // Use the home directory as the base project path
-      // In a real scenario, you might want to use the working directory of the first pane
-      const homeDir = await window.electronAPI.getHomeDir()
-      const id = await window.electronAPI.getProjectId(homeDir)
-      setProjectId(id)
-      projectIdRef.current = id
-    }
-    initProjectId()
-  }, [])
 
 
   // Apply theme to document
@@ -165,46 +149,26 @@ function App() {
     }
   }, [])
 
-  // Capture terminal I/O for history (buffered to reduce writes)
-  const outputBufferRef = useRef<Map<number, string>>(new Map())
-  const flushTimeoutRef = useRef<number | null>(null)
+  
+  // History review mode - dedicated view
+  if (layout === 'history') {
+    return (
+      <div className="h-screen w-screen flex flex-col bg-terminal-bg overflow-hidden">
+        {/* Title bar with drag region */}
+        <div className="h-11 titlebar-drag-region bg-[--ui-bg-primary] border-b border-[--ui-border-subtle]" />
 
-  useEffect(() => {
-    // Flush buffered output to history
-    const flushBuffer = () => {
-      const id = projectIdRef.current
-      if (!id) return
+        {/* History review view takes full area */}
+        <div className="flex-1 overflow-hidden">
+          <HistoryReviewView />
+        </div>
 
-      outputBufferRef.current.forEach((content, paneId) => {
-        if (content.trim()) {
-          window.electronAPI.appendHistory(id, paneId, 'output', content)
-        }
-      })
-      outputBufferRef.current.clear()
-    }
+        {/* Settings modal */}
+        <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      </div>
+    )
+  }
 
-    const unsubscribe = window.electronAPI.onTerminalOutput((paneId, data) => {
-      // Buffer output
-      const existing = outputBufferRef.current.get(paneId) || ''
-      outputBufferRef.current.set(paneId, existing + data)
-
-      // Debounce flush: wait for output to settle before saving
-      if (flushTimeoutRef.current) {
-        clearTimeout(flushTimeoutRef.current)
-      }
-      flushTimeoutRef.current = window.setTimeout(flushBuffer, 2000)
-    })
-
-    return () => {
-      unsubscribe()
-      // Flush on cleanup
-      if (flushTimeoutRef.current) {
-        clearTimeout(flushTimeoutRef.current)
-      }
-      flushBuffer()
-    }
-  }, [])
-
+  // Normal mode - grid/focus layouts
   return (
     <div className="h-screen w-screen flex flex-col bg-terminal-bg overflow-hidden">
       {/* Title bar - clean, minimal */}
@@ -217,18 +181,6 @@ function App() {
 
         {/* Right side - utility buttons */}
         <div className="flex items-center gap-1">
-          {/* History */}
-          <button
-            onClick={() => setIsHistoryOpen(true)}
-            className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
-            title="Conversation History"
-            aria-label="Open history"
-          >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-              <path d="M9 1.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15ZM0 9a9 9 0 1 1 18 0A9 9 0 0 1 0 9Z"/>
-              <path d="M9 4.5a.75.75 0 0 1 .75.75v3.44l2.03 2.03a.75.75 0 1 1-1.06 1.06l-2.25-2.25A.75.75 0 0 1 8.25 9V5.25A.75.75 0 0 1 9 4.5Z"/>
-            </svg>
-          </button>
           {/* Theme toggle */}
           <button
             onClick={() => updatePreferences({ theme: preferences.theme === 'light' ? 'dark' : 'light' })}
@@ -274,13 +226,6 @@ function App() {
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-
-      {/* History panel */}
-      <HistoryPanel
-        isOpen={isHistoryOpen}
-        onClose={() => setIsHistoryOpen(false)}
-        projectId={projectId}
-      />
     </div>
   )
 }

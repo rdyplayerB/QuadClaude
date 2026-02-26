@@ -235,9 +235,11 @@ function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
 
 interface TerminalPaneProps {
   paneId: number
+  showHistoryButton?: boolean
+  onHistoryClick?: () => void
 }
 
-export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneProps) {
+export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButton = true, onHistoryClick }: TerminalPaneProps) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -806,7 +808,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <PaneHeader paneId={paneId} />
+      <PaneHeader paneId={paneId} showHistoryButton={showHistoryButton} onHistoryClick={onHistoryClick} />
       {/* Terminal + status bar wrapper - shared background eliminates black band */}
       <div className="flex-1 min-h-0 flex flex-col bg-[--terminal-bg]">
         <div

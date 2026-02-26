@@ -14,6 +14,13 @@ interface WorkspaceStore extends WorkspaceState {
   initialize: () => Promise<void>
   isInitialized: boolean
 
+  // History review mode
+  historyReviewPaneId: number | null  // Which pane is being reviewed (null = not in review mode)
+  previousLayout: LayoutMode | null   // Layout to return to after exiting history mode
+  enterHistoryReview: (paneId: number) => void
+  exitHistoryReview: () => void
+  setHistoryReviewPane: (paneId: number) => void  // Switch pane within history mode
+
   // Layout actions
   setLayout: (layout: LayoutMode) => void
   setFocusPaneId: (id: number) => void
@@ -55,6 +62,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     savedPrompts: [],
   },
   isInitialized: false,
+  historyReviewPaneId: null,
+  previousLayout: null,
 
   // Initialize from saved state
   initialize: async () => {
@@ -116,8 +125,31 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
   },
 
+  // History review mode actions
+  enterHistoryReview: (paneId) => {
+    const currentLayout = get().layout
+    // Don't save 'history' as previous layout
+    if (currentLayout !== 'history') {
+      set({ previousLayout: currentLayout })
+    }
+    set({ layout: 'history', historyReviewPaneId: paneId, activePaneId: paneId })
+  },
+
+  exitHistoryReview: () => {
+    const previousLayout = get().previousLayout || 'grid'
+    set({ layout: previousLayout, historyReviewPaneId: null, previousLayout: null })
+  },
+
+  setHistoryReviewPane: (paneId) => {
+    set({ historyReviewPaneId: paneId, activePaneId: paneId })
+  },
+
   // Layout actions
   setLayout: (layout) => {
+    // If switching away from history mode, clear review state
+    if (get().layout === 'history' && layout !== 'history') {
+      set({ historyReviewPaneId: null, previousLayout: null })
+    }
     set({ layout })
     debouncedSave(() => get().saveWorkspace())
   },
@@ -236,9 +268,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, panes, preferences } = get()
+    const { layout, previousLayout, focusPaneId, activePaneId, panes, preferences } = get()
+    // Don't persist 'history' layout - save the previous layout instead
+    const layoutToSave = layout === 'history' ? (previousLayout || 'grid') : layout
     window.electronAPI.saveWorkspace({
-      layout,
+      layout: layoutToSave,
       focusPaneId,
       activePaneId,
       panes,

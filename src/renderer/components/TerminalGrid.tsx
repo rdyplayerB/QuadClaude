@@ -1,10 +1,14 @@
-import { memo } from 'react'
+import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { TerminalPane } from './TerminalPane'
 import { getGridStyle, getPaneStyle } from '../layouts'
 
 export const TerminalGrid = memo(function TerminalGrid() {
-  const { layout, focusPaneId, activePaneId, panes, isInitialized } = useWorkspaceStore()
+  const { layout, focusPaneId, activePaneId, panes, isInitialized, enterHistoryReview } = useWorkspaceStore()
+
+  const handleHistoryClick = useCallback((paneId: number) => {
+    enterHistoryReview(paneId)
+  }, [enterHistoryReview])
 
   if (!isInitialized || panes.length === 0) {
     return (
@@ -24,7 +28,10 @@ export const TerminalGrid = memo(function TerminalGrid() {
           style={getPaneStyle(index, pane.id, layout, activePaneId)}
           className="pane-transition min-h-0"
         >
-          <TerminalPane paneId={pane.id} />
+          <TerminalPane
+            paneId={pane.id}
+            onHistoryClick={() => handleHistoryClick(pane.id)}
+          />
         </div>
       ))}
     </div>

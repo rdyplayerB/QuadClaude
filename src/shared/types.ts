@@ -1,5 +1,6 @@
 // Layout types - all show 4 terminals (true to "QuadClaude" name)
-export type LayoutMode = 'grid' | 'focus' | 'focus-right'
+// 'history' is a special review mode showing one terminal + its history
+export type LayoutMode = 'grid' | 'focus' | 'focus-right' | 'history'
 
 // Git status for pane header
 export interface GitStatus {
