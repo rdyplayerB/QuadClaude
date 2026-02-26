@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, DragEvent, memo } from 'react'
+import { DragEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal } from './TerminalPane'
 
@@ -19,46 +19,30 @@ const PANE_COLORS = [
   '#a78bfa', // Purple (Terminal 4)
 ]
 
+// Extract folder/repo name from path
+function getFolderName(path: string): string {
+  if (!path) return 'Terminal'
+  const parts = path.split('/')
+  const name = parts[parts.length - 1] || parts[parts.length - 2]
+  // If it's home directory, show ~
+  if (path.match(/^\/Users\/[^/]+\/?$/)) {
+    return '~'
+  }
+  return name || 'Terminal'
+}
+
 export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, showHistoryButton = true }: PaneHeaderProps) {
-  const { panes, activePaneId, setPaneLabel, setActivePaneId } = useWorkspaceStore()
+  const { panes, activePaneId, setActivePaneId } = useWorkspaceStore()
 
   const pane = panes.find((p) => p.id === paneId)
   const paneIndex = panes.findIndex((p) => p.id === paneId)
   const isActive = activePaneId === paneId
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
-  const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus()
-      inputRef.current.select()
-    }
-  }, [isEditing])
-
   if (!pane) return null
 
-  const handleDoubleClick = () => {
-    setEditValue(pane.label)
-    setIsEditing(true)
-  }
-
-  const handleBlur = () => {
-    if (editValue.trim()) {
-      setPaneLabel(paneId, editValue.trim())
-    }
-    setIsEditing(false)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleBlur()
-    } else if (e.key === 'Escape') {
-      setIsEditing(false)
-    }
-  }
+  // Display name is the folder/repo name from working directory
+  const displayName = getFolderName(pane.workingDirectory)
 
   // Drag handlers for pane reordering
   const handleDragStart = (e: DragEvent<HTMLDivElement>) => {
@@ -99,26 +83,10 @@ export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, sho
         {/* State indicator */}
         {stateIndicator()}
 
-        {/* Label */}
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={handleBlur}
-            onKeyDown={handleKeyDown}
-            className="flex-1 bg-[--terminal-bg] text-[--ui-text-primary] text-[14px] px-2 py-1 outline-none border border-[--accent] rounded font-mono"
-          />
-        ) : (
-          <span
-            className="truncate cursor-pointer select-none"
-            onDoubleClick={handleDoubleClick}
-            title="Double-click to rename"
-          >
-            {pane.label}
-          </span>
-        )}
+        {/* Display name (auto from folder) */}
+        <span className="truncate select-none" title={pane.workingDirectory}>
+          {displayName}
+        </span>
       </div>
 
       {/* Action buttons - only visible on hover via group */}

@@ -164,7 +164,12 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
           {/* Sessions list */}
           {view === 'sessions' && (
             <div className="p-2">
-              {sessions.length === 0 ? (
+              {!projectId ? (
+                <div className="py-12 text-center text-[--ui-text-muted] text-sm">
+                  <p>Not a git repository</p>
+                  <p className="mt-1 text-xs">History is only tracked for git projects.</p>
+                </div>
+              ) : sessions.length === 0 ? (
                 <div className="py-12 text-center text-[--ui-text-muted] text-sm">
                   <p>No history yet.</p>
                   <p className="mt-1 text-xs">Conversations will appear here.</p>
@@ -347,7 +352,12 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
           {/* Sessions list */}
           {view === 'sessions' && (
             <div className="p-2">
-              {sessions.length === 0 ? (
+              {!projectId ? (
+                <div className="py-12 text-center text-[--ui-text-muted] text-sm">
+                  <p>Not a git repository</p>
+                  <p className="mt-1 text-xs">History is only tracked for git projects.</p>
+                </div>
+              ) : sessions.length === 0 ? (
                 <div className="py-12 text-center text-[--ui-text-muted] text-sm">
                   <p>No history yet.</p>
                   <p className="mt-1 text-xs">Conversations will appear here as you use Claude.</p>

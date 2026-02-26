@@ -137,18 +137,13 @@ function isTerminalAtBottom(terminal: Terminal): boolean {
   return buffer.baseY + terminal.rows >= buffer.length - 1
 }
 
-// Git Status Bar component - only displayed when Claude is active
+// Git Status Bar component - always visible
 const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) {
   const [showTooltip, setShowTooltip] = useState(false)
   const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
   const gitStatus = pane?.gitStatus
   const workingDir = pane?.workingDirectory || ''
   const shortPath = workingDir.replace(/^\/Users\/[^/]+/, '~')
-
-  // Only show status bar when Claude is active
-  if (pane?.state !== 'claude-active') {
-    return null
-  }
 
   return (
     <div className="flex items-center justify-between px-3 h-7 bg-[--terminal-bg] font-mono text-xs shrink-0">
@@ -685,9 +680,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
         store.setPaneCwd(paneId, cwd)
       }
 
-      // Only update git status every 3rd poll (15 seconds) AND only when Claude is active
+      // Update git status every 3rd poll (15 seconds)
       pollCount++
-      if (pollCount >= 3 && currentPane?.state === 'claude-active') {
+      if (pollCount >= 3) {
         pollCount = 0
         const gitStatus = await window.electronAPI.getGitStatus(paneId)
         if (gitStatus) {
@@ -801,7 +796,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
 
   return (
     <div
-      className={`h-full min-h-0 flex flex-col bg-[--ui-bg-elevated] overflow-hidden rounded-lg transition-all relative ${getBorderClass()}`}
+      className={`group h-full min-h-0 flex flex-col bg-[--ui-bg-elevated] overflow-hidden rounded-lg transition-all relative ${getBorderClass()}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}

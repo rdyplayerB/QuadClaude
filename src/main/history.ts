@@ -51,10 +51,39 @@ export class HistoryManager {
   }
 
   /**
+   * Checks if a path is inside a git repository.
+   */
+  private isGitRepo(projectPath: string): boolean {
+    try {
+      // Check for .git directory in this path or any parent
+      let currentPath = projectPath
+      const root = path.parse(currentPath).root
+
+      while (currentPath !== root) {
+        const gitDir = path.join(currentPath, '.git')
+        if (fs.existsSync(gitDir)) {
+          return true
+        }
+        currentPath = path.dirname(currentPath)
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * Gets or creates a project ID for the given project path.
+   * Only tracks history for git repositories.
    * Creates .quadclaude/project-id file if it doesn't exist.
    */
-  getOrCreateProjectId(projectPath: string): string {
+  getOrCreateProjectId(projectPath: string): string | null {
+    // Only track history for git repos
+    if (!this.isGitRepo(projectPath)) {
+      logger.info('history', 'Skipping non-git directory', projectPath)
+      return null
+    }
+
     const quadClaudeDir = path.join(projectPath, '.quadclaude')
     const projectIdFile = path.join(quadClaudeDir, 'project-id')
 
@@ -84,8 +113,7 @@ export class HistoryManager {
       return projectId
     } catch (error) {
       logger.error('history', 'Failed to get/create project ID', error instanceof Error ? error.message : String(error))
-      // Return a temporary ID that won't persist
-      return `temp-${crypto.randomUUID()}`
+      return null
     }
   }
 

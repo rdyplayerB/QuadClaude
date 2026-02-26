@@ -1,6 +1,6 @@
 {
   "name": "quadclaude",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Multi-terminal workspace for Claude - run 4 Claude sessions side by side with Zoom-like layouts",
   "main": "dist/main/index.js",
   "author": "rdyplayerB (https://x.com/rdyplayerB)",
