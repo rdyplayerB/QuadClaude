@@ -1,14 +1,17 @@
 # QuadClaude
 
-A multi-terminal workspace for Claude - run 4 Claude sessions side by side with Zoom-like layouts.
+A multi-terminal workspace for Claude Code - run 4 Claude sessions side by side with flexible layouts.
 
 ## Features
 
 - **4 Independent Terminals**: Run separate Claude sessions in each pane
-- **5 Layout Modes**: Grid, Focus, Split, Horizontal Stack, Vertical Stack
+- **3 Layout Modes**: Grid (2x2), Focus (1 large + 3 small), Focus-Right (3 small + 1 large)
+- **Conversation History**: Automatically tracks terminal I/O for git repositories
+- **History Review Mode**: Full-screen view to browse past conversations by terminal/project
+- **Auto-Named Terminals**: Headers show folder/repo name automatically
+- **Always-Visible Status Bar**: Git branch, ahead/behind counts, and working directory on every terminal
 - **Workspace Persistence**: Remembers your directories and layout between sessions
-- **Cold/Warm Start**: Choose to auto-restore Claude sessions or start fresh
-- **Keyboard Navigation**: Quick shortcuts to switch layouts and focus panes
+- **Drag & Drop Reordering**: Rearrange terminal positions by dragging headers
 
 ## Installation
 
@@ -16,7 +19,11 @@ A multi-terminal workspace for Claude - run 4 Claude sessions side by side with 
 
 - Node.js 18+
 - npm or yarn
-- Claude CLI installed and authenticated
+- Claude CLI installed and authenticated (`claude` command available)
+
+### From Release
+
+Download the latest `.dmg` from the [Releases](https://github.com/rdyplayerB/QuadClaude/releases) page.
 
 ### Development
 
@@ -48,17 +55,17 @@ The packaged app will be in the `release` directory.
 | Layout | Shortcut | Description |
 |--------|----------|-------------|
 | Grid | `Cmd+1` | 2x2 equal quadrants |
-| Focus | `Cmd+2` | 1 large + 3 small panes |
-| Split | `Cmd+3` | 2 side-by-side panes |
-| Horizontal | `Cmd+4` | 4 columns |
-| Vertical | `Cmd+5` | 4 rows |
+| Focus | `Cmd+2` | 1 large pane on left + 3 small on right |
+| Focus-Right | `Cmd+3` | 3 small panes on left + 1 large on right |
+
+**Tip**: Double-click any terminal header to toggle focus mode on that pane.
 
 ### Navigation
 
 | Action | Shortcut |
 |--------|----------|
 | Focus Terminal 1-4 | `Cmd+Shift+1-4` |
-| Reset Current Pane | `Cmd+K` |
+| Clear Current Terminal | `Cmd+K` |
 | Increase Font | `Cmd++` |
 | Decrease Font | `Cmd+-` |
 
@@ -69,34 +76,59 @@ The packaged app will be in the `release` directory.
 3. Run `claude` to start a Claude session
 4. When Claude exits, the pane returns to a shell in the same directory
 
+### Conversation History
+
+QuadClaude automatically records terminal conversations for **git repositories only**.
+
+- History is stored per-project using a unique project ID
+- Each terminal's working directory determines which project history it belongs to
+- Click the clock icon in a terminal header to enter History Review Mode
+- Browse conversations by date, search across history, and switch between terminal histories
+
+**Note**: History is not tracked for non-git directories (like your home folder).
+
+### Status Bar
+
+Each terminal displays a status bar showing:
+- Current working directory path
+- Git branch name (when in a git repo)
+- Commits ahead/behind remote
+- Number of uncommitted changes
+
 ### Workspace Persistence
 
-- **Cold Start** (default): Restores directories only; you start Claude manually
-- **Warm Start**: Restores directories AND auto-runs Claude where it was active
+Your workspace state is automatically saved and restored:
+- Terminal working directories
+- Current layout mode
+- Active pane selection
 
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
 src/
-├── main/           # Electron main process
-│   ├── index.ts    # App entry, window management
-│   ├── pty.ts      # PTY process management
-│   ├── preload.ts  # Preload script for IPC
-│   └── workspace.ts # State persistence
-├── renderer/       # React UI
+├── main/              # Electron main process
+│   ├── index.ts       # App entry, window management
+│   ├── pty.ts         # PTY process management
+│   ├── history.ts     # Conversation history tracking
+│   ├── preload.ts     # Preload script for IPC
+│   └── workspace.ts   # State persistence
+├── renderer/          # React UI
 │   ├── App.tsx
 │   ├── components/
+│   │   ├── TerminalPane.tsx
+│   │   ├── TerminalGrid.tsx
+│   │   ├── PaneHeader.tsx
+│   │   ├── HistoryPanel.tsx
+│   │   └── HistoryReviewView.tsx
 │   ├── hooks/
 │   ├── layouts/
 │   └── store/
-└── shared/         # Shared types
+└── shared/            # Shared types
 ```
 
-### Tech Stack
+## Tech Stack
 
-- Electron 28+
+- Electron 28
 - React 18 + TypeScript
 - xterm.js + node-pty
 - Zustand (state management)
