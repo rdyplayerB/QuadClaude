@@ -1,3 +1,11 @@
+// Parsed history exchange entry
+export interface HistoryExchangeEntry {
+  time: string
+  paneId: number
+  type: 'input' | 'output'
+  content: string
+}
+
 // Layout types - all show 4 terminals (true to "QuadClaude" name)
 // 'history' is a special review mode showing one terminal + its history
 export type LayoutMode = 'grid' | 'focus' | 'focus-right' | 'history'
@@ -74,6 +82,7 @@ export interface WorkspacePreferences {
   fontSize: number
   hotkeys: HotkeyBindings
   savedPrompts: SavedPrompt[]
+  favoriteDirectories: string[]
 }
 
 export interface WindowBounds {
@@ -110,6 +119,8 @@ export const IPC_CHANNELS = {
   HISTORY_GET_SESSIONS: 'history:get-sessions',
   HISTORY_GET_DAY: 'history:get-day',
   HISTORY_SEARCH: 'history:search',
+  HISTORY_GET_DAY_EXCHANGES: 'history:get-day-exchanges',
+  HISTORY_DELETE_DAY: 'history:delete-day',
 
   // App
   APP_QUIT: 'app:quit',

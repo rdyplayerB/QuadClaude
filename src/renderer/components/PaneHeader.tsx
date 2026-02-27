@@ -1,6 +1,7 @@
 import { DragEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal } from './TerminalPane'
+import { FavoritesDropdown } from './FavoritesDropdown'
 
 // Custom MIME type for pane drag operations
 export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
@@ -97,6 +98,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, sho
         onDragStart={(e) => e.preventDefault()}
         draggable={false}
       >
+        <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
         {showHistoryButton && onHistoryClick && (
           <button
             onClick={onHistoryClick}

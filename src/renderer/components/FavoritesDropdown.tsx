@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
 
@@ -81,7 +82,7 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
         </svg>
       </button>
 
-      {open && (
+      {open && createPortal(
         <div
           ref={panelRef}
           className="fixed z-50 w-[220px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
@@ -138,7 +139,8 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
               {isCwdStarred ? 'Unstar current directory' : 'Star current directory'}
             </span>
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )

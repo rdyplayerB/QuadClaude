@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, HistoryExchangeEntry } from '../shared/types'
 
 // History types (mirrored from main/history.ts)
 interface HistorySession {
@@ -101,6 +101,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getHistoryDay: (projectId: string, date: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_DAY, projectId, date) as Promise<string>,
 
+  getHistoryDayExchanges: (projectId: string, date: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_DAY_EXCHANGES, projectId, date) as Promise<HistoryExchangeEntry[]>,
+
+  deleteHistoryDay: (projectId: string, date: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE_DAY, projectId, date) as Promise<boolean>,
+
   searchHistory: (projectId: string, query: string, limit?: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.HISTORY_SEARCH, projectId, query, limit) as Promise<HistorySearchResult[]>,
 })
@@ -129,6 +135,8 @@ declare global {
       appendHistory: (projectId: string, paneId: number, type: 'input' | 'output', content: string) => void
       getHistorySessions: (projectId: string) => Promise<HistorySession[]>
       getHistoryDay: (projectId: string, date: string) => Promise<string>
+      getHistoryDayExchanges: (projectId: string, date: string) => Promise<HistoryExchangeEntry[]>
+      deleteHistoryDay: (projectId: string, date: string) => Promise<boolean>
       searchHistory: (projectId: string, query: string, limit?: number) => Promise<HistorySearchResult[]>
     }
   }

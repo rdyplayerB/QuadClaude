@@ -21,6 +21,94 @@ let ptyManager: PtyManager | null = null
 let workspaceManager: WorkspaceManager | null = null
 let historyManager: HistoryManager | null = null
 
+// Track paneId → projectId mapping for history capture
+const paneProjectIds = new Map<number, string>()
+// Buffer PTY output per pane for history (avoids writing every tiny chunk)
+const outputBuffers = new Map<number, string>()
+let historyFlushTimer: NodeJS.Timeout | null = null
+
+// Strip ANSI escape codes for readable history
+function stripAnsi(str: string): string {
+  return str
+    .replace(/\x1B\[\??[0-9;]*[a-zA-Z]/g, '') // CSI sequences (including DEC private modes like ?2004h)
+    .replace(/\x1B\[\?[0-9;]*[hl]/g, '') // Set/reset mode sequences
+    .replace(/\x1B\].*?\x07/g, '') // OSC sequences
+    .replace(/\x1B\][^\x07]*(?:\x1B\\)?/g, '') // OSC sequences with ST terminator
+    .replace(/\x1B[()][AB012]/g, '') // Character set sequences
+    .replace(/\x1B[\x20-\x2F]*[\x40-\x7E]/g, '') // Other escape sequences
+    .replace(/\x1B[=>]/g, '') // Keypad mode sequences
+    .replace(/\r/g, '') // Carriage returns (used in screen redraws)
+}
+
+// Clean TUI noise from terminal output for readable history
+function cleanTerminalOutput(str: string): string {
+  return str
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim()
+      if (!trimmed) return true // keep blank lines for now, collapse later
+      // Remove lines that are only spinner/progress glyphs
+      if (/^[✶✳✢·✽✻⏺▐▛▜▝▘⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷░▒▓█▌▀▄\s]+$/.test(trimmed)) return false
+      // Remove lines that are only box-drawing characters
+      if (/^[─│╭╮╰╯├┤┬┴┼═║╔╗╚╝╠╣╦╩╬┌┐└┘┊┈╌╎\s]+$/.test(trimmed)) return false
+      // Remove common TUI thinking/progress indicators
+      if (/^(Running|Cogitating|Thinking|Processing|Generating|Analyzing|Searching|Reading|Writing)…?\s*$/.test(trimmed)) return false
+      return true
+    })
+    .join('\n')
+    // Collapse runs of 3+ blank lines into a single blank line
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// Flush buffered output to history
+function flushOutputHistory() {
+  if (!historyManager) return
+  for (const [paneId, buffer] of outputBuffers.entries()) {
+    if (!buffer.trim()) continue
+    // Lazily resolve project ID if not cached
+    if (!paneProjectIds.has(paneId)) {
+      resolveProjectId(paneId)
+    }
+    const projectId = paneProjectIds.get(paneId)
+    if (!projectId) continue
+    const cleaned = cleanTerminalOutput(stripAnsi(buffer))
+    if (cleaned) {
+      historyManager.appendExchange(projectId, paneId, 'output', cleaned)
+    }
+  }
+  outputBuffers.clear()
+}
+
+// Resolve and cache project ID for a pane's working directory
+function resolveProjectId(paneId: number): string | null {
+  if (!historyManager || !ptyManager) return null
+  const cwd = ptyManager.getCwd(paneId)
+  if (!cwd) return null
+  const projectId = historyManager.getOrCreateProjectId(cwd)
+  if (projectId) {
+    paneProjectIds.set(paneId, projectId)
+  }
+  return projectId
+}
+
+// Start periodic flush of output buffers to history
+function startHistoryCapture() {
+  if (historyFlushTimer) return
+  historyFlushTimer = setInterval(() => {
+    flushOutputHistory()
+  }, 5000) // Flush every 5 seconds
+}
+
+// Stop history capture and flush remaining data
+function stopHistoryCapture() {
+  if (historyFlushTimer) {
+    clearInterval(historyFlushTimer)
+    historyFlushTimer = null
+  }
+  flushOutputHistory()
+}
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
 function openLogViewer() {
@@ -483,6 +571,11 @@ function setupIPC() {
       const result = await ptyManager?.createPty(paneId, cwd)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
+        // Resolve project ID for history tracking
+        const projectId = resolveProjectId(paneId)
+        if (projectId) {
+          logger.info('history', `Pane ${paneId} mapped to project ${projectId}`)
+        }
       } else {
         logger.error('pty', `Failed to create PTY for pane ${paneId}`)
       }
@@ -502,6 +595,20 @@ function setupIPC() {
   // Terminal input
   ipcMain.on(IPC_CHANNELS.TERMINAL_INPUT, (_, paneId: number, data: string) => {
     ptyManager?.write(paneId, data)
+    // Capture input for history (only meaningful text, not single keystrokes)
+    if (historyManager && (data.includes('\r') || data.includes('\n'))) {
+      const cleaned = stripAnsi(data).replace(/[\r\n]+/g, '\n').trim()
+      if (cleaned.length > 1) {
+        // Resolve project ID lazily
+        if (!paneProjectIds.has(paneId)) {
+          resolveProjectId(paneId)
+        }
+        const projectId = paneProjectIds.get(paneId)
+        if (projectId) {
+          historyManager.appendExchange(projectId, paneId, 'input', cleaned)
+        }
+      }
+    }
   })
 
   // Terminal resize
@@ -573,6 +680,14 @@ function setupIPC() {
     return historyManager?.getDayContent(projectId, date) || ''
   })
 
+  ipcMain.handle(IPC_CHANNELS.HISTORY_GET_DAY_EXCHANGES, async (_, projectId: string, date: string) => {
+    return historyManager?.getDayExchanges(projectId, date) || []
+  })
+
+  ipcMain.handle(IPC_CHANNELS.HISTORY_DELETE_DAY, async (_, projectId: string, date: string) => {
+    return historyManager?.deleteDay(projectId, date) || false
+  })
+
   ipcMain.handle(IPC_CHANNELS.HISTORY_SEARCH, async (_, projectId: string, query: string, limit?: number) => {
     return historyManager?.search(projectId, query, limit) || []
   })
@@ -609,11 +724,19 @@ app.whenReady().then(() => {
     logger.info('pty', 'Initializing PtyManager')
     ptyManager = new PtyManager((paneId, data) => {
       mainWindow?.webContents.send(IPC_CHANNELS.TERMINAL_OUTPUT, paneId, data)
+      // Buffer output for history capture
+      if (historyManager) {
+        const existing = outputBuffers.get(paneId) || ''
+        outputBuffers.set(paneId, existing + data)
+      }
     }, (paneId, exitCode) => {
       logger.info('pty', `PTY exited for pane ${paneId}`, `Exit code: ${exitCode}`)
       mainWindow?.webContents.send(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
     })
     logger.info('pty', 'PtyManager initialized')
+    // Start history output capture
+    startHistoryCapture()
+    logger.info('history', 'History capture started')
   } catch (error) {
     logger.error('pty', 'Failed to initialize PtyManager', error instanceof Error ? error.message : String(error))
   }
@@ -665,7 +788,8 @@ app.on('before-quit', () => {
       logger.info('app', 'Saved CWDs on quit', `${cwds.size} pane(s)`)
     }
   }
-  // Flush history before quitting
+  // Flush captured output and shut down history
+  stopHistoryCapture()
   historyManager?.shutdown()
   ptyManager?.killAll()
 })

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, memo } from 'react'
+import type { HistoryExchangeEntry } from '../../shared/types'
 
 interface HistorySession {
   date: string
@@ -23,11 +24,12 @@ interface HistoryPanelProps {
 export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projectId, embedded = false }: HistoryPanelProps) {
   const [sessions, setSessions] = useState<HistorySession[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
-  const [dayContent, setDayContent] = useState<string>('')
+  const [exchanges, setExchanges] = useState<HistoryExchangeEntry[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<HistorySearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [view, setView] = useState<'sessions' | 'content' | 'search'>('sessions')
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null)
 
   // Load sessions when panel opens
   useEffect(() => {
@@ -45,8 +47,8 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
   const loadDayContent = async (date: string) => {
     if (!projectId) return
     setSelectedDate(date)
-    const content = await window.electronAPI.getHistoryDay(projectId, date)
-    setDayContent(content)
+    const result = await window.electronAPI.getHistoryDayExchanges(projectId, date)
+    setExchanges(result)
     setView('content')
   }
 
@@ -103,6 +105,119 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
   }
+
+  const deleteDay = async (date: string, e?: React.MouseEvent) => {
+    e?.stopPropagation()
+    if (!projectId) return
+    const ok = await window.electronAPI.deleteHistoryDay(projectId, date)
+    if (ok) {
+      setSessions(prev => prev.filter(s => s.date !== date))
+      if (selectedDate === date) {
+        setView('sessions')
+        setSelectedDate(null)
+        setExchanges([])
+      }
+    }
+  }
+
+  const copyExchange = (index: number) => {
+    const ex = exchanges[index]
+    if (!ex) return
+    navigator.clipboard.writeText(ex.content)
+    setCopiedIndex(index)
+    setTimeout(() => setCopiedIndex(null), 1500)
+  }
+
+  const copyAllExchanges = () => {
+    const text = exchanges.map(ex =>
+      `[${ex.time}] Terminal ${ex.paneId + 1} - ${ex.type}\n${ex.content}`
+    ).join('\n\n')
+    navigator.clipboard.writeText(text)
+  }
+
+  // Shared exchange card renderer
+  const renderExchangeCards = () => (
+    <div className="p-4 space-y-2">
+      <div className="flex justify-end gap-1 mb-2">
+        <button
+          onClick={copyAllExchanges}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active] rounded-md transition-colors"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+            <path d="M10 0H2a2 2 0 0 0-2 2v8h1V2a1 1 0 0 1 1-1h8V0z"/>
+          </svg>
+          Copy all
+        </button>
+        {selectedDate && (
+          <button
+            onClick={() => deleteDay(selectedDate)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[--ui-text-muted] hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Delete
+          </button>
+        )}
+      </div>
+      {exchanges.length === 0 ? (
+        <div className="py-8 text-center text-[--ui-text-muted] text-sm">
+          No exchanges for this day.
+        </div>
+      ) : (
+        exchanges.map((ex, i) => (
+          <div
+            key={i}
+            className="group rounded-lg border border-[--ui-border-subtle] overflow-hidden"
+          >
+            {/* Header row */}
+            <div className={`flex items-center justify-between px-3 py-1.5 ${
+              ex.type === 'input'
+                ? 'bg-[--accent]/8'
+                : 'bg-[--ui-bg-primary]/60'
+            }`}>
+              <div className="flex items-center gap-2 text-xs text-[--ui-text-muted]">
+                <span>{ex.time}</span>
+                <span className="opacity-40">·</span>
+                <span>Terminal {ex.paneId + 1}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                  ex.type === 'input'
+                    ? 'text-[--accent] bg-[--accent]/15'
+                    : 'text-[--ui-text-muted] bg-[--ui-bg-active]/50'
+                }`}>
+                  {ex.type}
+                </span>
+                <button
+                  onClick={() => copyExchange(i)}
+                  className="p-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] opacity-0 group-hover:opacity-100 transition-opacity"
+                  aria-label={`Copy ${ex.type}`}
+                >
+                  {copiedIndex === i ? (
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 8l3 3 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
+                      <path d="M10 0H2a2 2 0 0 0-2 2v8h1V2a1 1 0 0 1 1-1h8V0z"/>
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+            {/* Content */}
+            <pre className="px-3 py-2 text-xs text-[--ui-text-secondary] font-mono whitespace-pre-wrap break-words leading-relaxed bg-[--ui-bg-primary]/30">
+              {ex.content}
+            </pre>
+          </div>
+        ))
+      )}
+    </div>
+  )
 
   if (!isOpen) return null
 
@@ -177,23 +292,37 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
               ) : (
                 <div className="space-y-1">
                   {sessions.map((session) => (
-                    <button
+                    <div
                       key={session.date}
-                      onClick={() => loadDayContent(session.date)}
-                      className="w-full p-3 text-left rounded-lg hover:bg-[--ui-bg-active]/50 transition-colors"
+                      className="group/row flex items-center rounded-lg hover:bg-[--ui-bg-active]/50 transition-colors"
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-[--ui-text-primary]">
-                          {formatDate(session.date)}
-                        </span>
-                        <span className="text-xs text-[--ui-text-muted]">
-                          {session.exchangeCount} exchanges
-                        </span>
-                      </div>
-                      <div className="text-xs text-[--ui-text-muted] truncate">
-                        {session.preview || 'No preview available'}
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => loadDayContent(session.date)}
+                        className="flex-1 p-3 text-left"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-[--ui-text-primary]">
+                            {formatDate(session.date)}
+                          </span>
+                          <span className="text-xs text-[--ui-text-muted]">
+                            {session.exchangeCount} exchanges
+                          </span>
+                        </div>
+                        <div className="text-xs text-[--ui-text-muted] truncate">
+                          {session.preview || 'No preview available'}
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => deleteDay(session.date, e)}
+                        className="p-2 mr-1 text-[--ui-text-muted] hover:text-red-400 opacity-0 group-hover/row:opacity-100 transition-all shrink-0"
+                        aria-label="Delete day"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -201,25 +330,7 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
           )}
 
           {/* Day content view */}
-          {view === 'content' && (
-            <div className="p-4">
-              <div className="flex justify-end mb-3">
-                <button
-                  onClick={() => copyToClipboard(dayContent)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active] rounded-md transition-colors"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-                    <path d="M10 0H2a2 2 0 0 0-2 2v8h1V2a1 1 0 0 1 1-1h8V0z"/>
-                  </svg>
-                  Copy all
-                </button>
-              </div>
-              <pre className="text-xs text-[--ui-text-secondary] whitespace-pre-wrap font-mono leading-relaxed">
-                {dayContent || 'No content for this day.'}
-              </pre>
-            </div>
-          )}
+          {view === 'content' && renderExchangeCards()}
 
           {/* Search results view */}
           {view === 'search' && (
@@ -365,26 +476,40 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
               ) : (
                 <div className="space-y-1">
                   {sessions.map((session) => (
-                    <button
+                    <div
                       key={session.date}
-                      onClick={() => loadDayContent(session.date)}
-                      className="w-full p-3 text-left rounded-lg hover:bg-[--ui-bg-active] transition-colors group"
+                      className="group/row flex items-center rounded-lg hover:bg-[--ui-bg-active] transition-colors"
                     >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-[--ui-text-primary]">
-                          {formatDate(session.date)}
-                        </span>
-                        <span className="text-xs text-[--ui-text-muted]">
-                          {session.exchangeCount} exchanges
-                        </span>
-                      </div>
-                      <div className="text-xs text-[--ui-text-muted] truncate">
-                        {session.preview || 'No preview available'}
-                      </div>
-                      <div className="text-xs text-[--ui-text-faint] mt-1">
-                        {formatFileSize(session.size)}
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => loadDayContent(session.date)}
+                        className="flex-1 p-3 text-left"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-[--ui-text-primary]">
+                            {formatDate(session.date)}
+                          </span>
+                          <span className="text-xs text-[--ui-text-muted]">
+                            {session.exchangeCount} exchanges
+                          </span>
+                        </div>
+                        <div className="text-xs text-[--ui-text-muted] truncate">
+                          {session.preview || 'No preview available'}
+                        </div>
+                        <div className="text-xs text-[--ui-text-faint] mt-1">
+                          {formatFileSize(session.size)}
+                        </div>
+                      </button>
+                      <button
+                        onClick={(e) => deleteDay(session.date, e)}
+                        className="p-2 mr-2 text-[--ui-text-muted] hover:text-red-400 opacity-0 group-hover/row:opacity-100 transition-all shrink-0"
+                        aria-label="Delete day"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1M6 7v5M10 7v5" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M3 4l1 10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1l1-10" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -392,25 +517,7 @@ export const HistoryPanel = memo(function HistoryPanel({ isOpen, onClose, projec
           )}
 
           {/* Day content view */}
-          {view === 'content' && (
-            <div className="p-4">
-              <div className="flex justify-end mb-3">
-                <button
-                  onClick={() => copyToClipboard(dayContent)}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active] rounded-md transition-colors"
-                >
-                  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M4 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4zm0 1h8a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>
-                    <path d="M10 0H2a2 2 0 0 0-2 2v8h1V2a1 1 0 0 1 1-1h8V0z"/>
-                  </svg>
-                  Copy all
-                </button>
-              </div>
-              <pre className="text-xs text-[--ui-text-secondary] whitespace-pre-wrap font-mono leading-relaxed">
-                {dayContent || 'No content for this day.'}
-              </pre>
-            </div>
-          )}
+          {view === 'content' && renderExchangeCards()}
 
           {/* Search results view */}
           {view === 'search' && (

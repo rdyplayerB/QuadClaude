@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { logger } from './logger'
+import { HistoryExchangeEntry } from '../shared/types'
 
 export interface HistorySession {
   date: string
@@ -282,6 +283,64 @@ export class HistoryManager {
     }
 
     return ''
+  }
+
+  /**
+   * Gets parsed exchanges for a specific day.
+   */
+  getDayExchanges(projectId: string, date: string): HistoryExchangeEntry[] {
+    const content = this.getDayContent(projectId, date)
+    if (!content) return []
+
+    const exchanges: HistoryExchangeEntry[] = []
+    // Split on exchange headers: ### [time] Terminal N - type
+    const sections = content.split(/^### /m)
+
+    for (const section of sections) {
+      const headerMatch = section.match(/^\[(.+?)\]\s+Terminal\s+(\d+)\s*-\s*(input|output)/i)
+      if (!headerMatch) continue
+
+      const time = headerMatch[1]
+      const paneId = parseInt(headerMatch[2], 10) - 1 // Convert 1-based to 0-based
+      const type = headerMatch[3].toLowerCase() as 'input' | 'output'
+
+      // Extract content from code fence
+      const fenceMatch = section.match(/```\n([\s\S]*?)```/)
+      const exchangeContent = fenceMatch ? fenceMatch[1].trimEnd() : ''
+
+      if (exchangeContent) {
+        exchanges.push({ time, paneId, type, content: exchangeContent })
+      }
+    }
+
+    return exchanges
+  }
+
+  /**
+   * Deletes history for a specific day.
+   */
+  deleteDay(projectId: string, date: string): boolean {
+    const filePath = path.join(this.historyBasePath, projectId, `${date}.md`)
+
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath)
+      }
+
+      // Update index to remove this session
+      const indexPath = path.join(this.historyBasePath, projectId, 'index.json')
+      if (fs.existsSync(indexPath)) {
+        const index: HistoryIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))
+        index.sessions = index.sessions.filter(s => s.date !== date)
+        fs.writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8')
+      }
+
+      logger.info('history', `Deleted history for ${date}`, projectId)
+      return true
+    } catch (error) {
+      logger.error('history', 'Failed to delete day', error instanceof Error ? error.message : String(error))
+      return false
+    }
   }
 
   /**
