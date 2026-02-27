@@ -152,75 +152,67 @@ function App() {
   const isHistoryMode = layout === 'history'
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-terminal-bg overflow-hidden">
-      {/* History review mode overlay */}
-      {isHistoryMode && (
-        <>
-          {/* Title bar with drag region */}
-          <div className="h-11 titlebar-drag-region bg-[--ui-bg-primary] border-b border-[--ui-border-subtle]" />
+    <div className="h-screen w-screen flex flex-col bg-terminal-bg overflow-hidden relative">
+      {/* Title bar - clean, minimal */}
+      <div className="h-11 titlebar-drag-region bg-[--ui-bg-primary] border-b border-[--ui-border-subtle] flex items-center justify-between px-3">
+        {/* Left side - breathing room for traffic lights */}
+        <div className="w-20" />
 
-          {/* History review view takes full area */}
-          <div className="flex-1 overflow-hidden">
-            <HistoryReviewView />
-          </div>
-        </>
-      )}
+        {/* Center - layout selector (hidden during history mode) */}
+        {!isHistoryMode && <LayoutSelector />}
 
-      {/* Normal mode - grid/focus layouts (hidden but mounted during history mode to preserve terminal state) */}
-      <div className={isHistoryMode ? 'hidden' : 'contents'}>
-        {/* Title bar - clean, minimal */}
-        <div className="h-11 titlebar-drag-region bg-[--ui-bg-primary] border-b border-[--ui-border-subtle] flex items-center justify-between px-3">
-          {/* Left side - breathing room for traffic lights */}
-          <div className="w-20" />
-
-          {/* Center - layout selector as segmented control */}
-          <LayoutSelector />
-
-          {/* Right side - utility buttons */}
-          <div className="flex items-center gap-1">
-            {/* Theme toggle */}
-            <button
-              onClick={() => updatePreferences({ theme: preferences.theme === 'light' ? 'dark' : 'light' })}
-              className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
-              title={`Switch to ${preferences.theme === 'light' ? 'dark' : 'light'} mode`}
-              aria-label="Toggle theme"
-            >
-              {preferences.theme === 'light' ? (
-                // Moon icon for switching to dark
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-                  <path d="M7 2a7 7 0 1 0 9 9 6 6 0 0 1-9-9Z"/>
-                </svg>
-              ) : (
-                // Sun icon for switching to light
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-                  <circle cx="9" cy="9" r="3.5"/>
-                  <path d="M9 1v2.5M9 14.5V17M1 9h2.5M14.5 9H17M3.4 3.4l1.77 1.77M12.83 12.83l1.77 1.77M3.4 14.6l1.77-1.77M12.83 5.17l1.77-1.77" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              )}
-            </button>
-            {/* Settings */}
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
-              title="Settings (Cmd+,)"
-              aria-label="Open settings"
-            >
+        {/* Right side - utility buttons */}
+        <div className="flex items-center gap-1">
+          {/* Theme toggle */}
+          <button
+            onClick={() => updatePreferences({ theme: preferences.theme === 'light' ? 'dark' : 'light' })}
+            className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
+            title={`Switch to ${preferences.theme === 'light' ? 'dark' : 'light'} mode`}
+            aria-label="Toggle theme"
+          >
+            {preferences.theme === 'light' ? (
               <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-                <path d="M9 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
-                <path fillRule="evenodd" d="M7.25 1a.75.75 0 0 0-.75.75v1.15a5.5 5.5 0 0 0-1.62.67l-.82-.82a.75.75 0 0 0-1.06 0L1.69 4.06a.75.75 0 0 0 0 1.06l.82.82A5.5 5.5 0 0 0 1.84 7.5H.75a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h1.1a5.5 5.5 0 0 0 .67 1.62l-.82.82a.75.75 0 0 0 0 1.06l1.36 1.36a.75.75 0 0 0 1.06 0l.82-.82a5.5 5.5 0 0 0 1.56.66v1.05a.75.75 0 0 0 .75.75h2a.75.75 0 0 0 .75-.75v-1.05a5.5 5.5 0 0 0 1.56-.66l.82.82a.75.75 0 0 0 1.06 0l1.36-1.36a.75.75 0 0 0 0-1.06l-.82-.82a5.5 5.5 0 0 0 .66-1.56h1.06a.75.75 0 0 0 .75-.75v-2a.75.75 0 0 0-.75-.75h-1.06a5.5 5.5 0 0 0-.66-1.56l.82-.82a.75.75 0 0 0 0-1.06l-1.36-1.36a.75.75 0 0 0-1.06 0l-.82.82a5.5 5.5 0 0 0-1.56-.66V1.75a.75.75 0 0 0-.75-.75h-2ZM9 12.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" clipRule="evenodd"/>
+                <path d="M7 2a7 7 0 1 0 9 9 6 6 0 0 1-9-9Z"/>
               </svg>
-            </button>
-          </div>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+                <circle cx="9" cy="9" r="3.5"/>
+                <path d="M9 1v2.5M9 14.5V17M1 9h2.5M14.5 9H17M3.4 3.4l1.77 1.77M12.83 12.83l1.77 1.77M3.4 14.6l1.77-1.77M12.83 5.17l1.77-1.77" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            )}
+          </button>
+          {/* Settings */}
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
+            title="Settings (Cmd+,)"
+            aria-label="Open settings"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+              <path d="M9 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
+              <path fillRule="evenodd" d="M7.25 1a.75.75 0 0 0-.75.75v1.15a5.5 5.5 0 0 0-1.62.67l-.82-.82a.75.75 0 0 0-1.06 0L1.69 4.06a.75.75 0 0 0 0 1.06l.82.82A5.5 5.5 0 0 0 1.84 7.5H.75a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h1.1a5.5 5.5 0 0 0 .67 1.62l-.82.82a.75.75 0 0 0 0 1.06l1.36 1.36a.75.75 0 0 0 1.06 0l.82-.82a5.5 5.5 0 0 0 1.56.66v1.05a.75.75 0 0 0 .75.75h2a.75.75 0 0 0 .75-.75v-1.05a5.5 5.5 0 0 0 1.56-.66l.82.82a.75.75 0 0 0 1.06 0l1.36-1.36a.75.75 0 0 0 0-1.06l-.82-.82a5.5 5.5 0 0 0 .66-1.56h1.06a.75.75 0 0 0 .75-.75v-2a.75.75 0 0 0-.75-.75h-1.06a5.5 5.5 0 0 0-.66-1.56l.82-.82a.75.75 0 0 0 0-1.06l-1.36-1.36a.75.75 0 0 0-1.06 0l-.82.82a5.5 5.5 0 0 0-1.56-.66V1.75a.75.75 0 0 0-.75-.75h-2ZM9 12.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" clipRule="evenodd"/>
+            </svg>
+          </button>
         </div>
+      </div>
 
-        {/* Terminal grid - full width now, no sidebar */}
-        <div className="flex-1 overflow-hidden">
+      {/* Main content area */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Terminal grid - always mounted to preserve terminal state */}
+        <div className={`overflow-hidden ${isHistoryMode ? 'flex-[2]' : 'flex-1'}`}>
           <TerminalGrid />
         </div>
 
-        {/* Floating prompt toolbar */}
-        <PromptToolbar onSelectPrompt={handlePromptClick} />
+        {/* History panel sidebar */}
+        {isHistoryMode && (
+          <div className="flex-1 border-l border-[--ui-border-subtle] bg-[--ui-bg-primary] flex flex-col overflow-hidden">
+            <HistoryReviewView />
+          </div>
+        )}
       </div>
+
+      {/* Floating prompt toolbar - hidden during history mode */}
+      {!isHistoryMode && <PromptToolbar onSelectPrompt={handlePromptClick} />}
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

@@ -60,6 +60,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     fontSize: 14,
     hotkeys: DEFAULT_HOTKEYS,
     savedPrompts: [],
+    favoriteDirectories: [],
   },
   isInitialized: false,
   historyReviewPaneId: null,
@@ -76,6 +77,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
       // Ensure new preference fields have defaults
       const savedPrompts = savedState.preferences?.savedPrompts ?? []
+      const favoriteDirectories = savedState.preferences?.favoriteDirectories ?? []
 
       // Migrate removed layouts to 'grid'
       let layout = savedState.layout
@@ -97,6 +99,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
           savedPrompts,
+          favoriteDirectories,
         },
         isInitialized: true,
       })
@@ -132,7 +135,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     if (currentLayout !== 'history') {
       set({ previousLayout: currentLayout })
     }
-    set({ layout: 'history', historyReviewPaneId: paneId, activePaneId: paneId })
+    // Swap reviewed pane to position 0 so it's the visible terminal
+    const panes = [...get().panes]
+    const targetIndex = panes.findIndex((p) => p.id === paneId)
+    if (targetIndex > 0) {
+      ;[panes[0], panes[targetIndex]] = [panes[targetIndex], panes[0]]
+    }
+    set({ panes, layout: 'history', historyReviewPaneId: paneId, activePaneId: paneId })
   },
 
   exitHistoryReview: () => {
@@ -141,7 +150,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setHistoryReviewPane: (paneId) => {
-    set({ historyReviewPaneId: paneId, activePaneId: paneId })
+    // Swap reviewed pane to position 0
+    const panes = [...get().panes]
+    const targetIndex = panes.findIndex((p) => p.id === paneId)
+    if (targetIndex > 0) {
+      ;[panes[0], panes[targetIndex]] = [panes[targetIndex], panes[0]]
+    }
+    set({ panes, historyReviewPaneId: paneId, activePaneId: paneId })
   },
 
   // Layout actions
