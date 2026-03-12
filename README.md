@@ -142,7 +142,7 @@ src/
 
 ## Acknowledgments
 
-- [Claude-Usage-Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) by [@hamed-elfayome](https://github.com/hamed-elfayome) - Inspiration for Claude Code statusline integration and usage tracking approach
+- [Claude-Usage-Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) by [@hamed-elfayome](https://github.com/hamed-elfayome) - Used for Claude Code statusline integration and usage tracking
 
 ## License
 
