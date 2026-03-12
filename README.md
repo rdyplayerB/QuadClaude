@@ -1,16 +1,19 @@
 # QuadClaude
 
-A multi-terminal workspace for Claude Code - run 4 Claude sessions side by side with flexible layouts.
+A multi-terminal workspace for Claude Code - run 4 Claude sessions side by side with flexible layouts and a glass-effect UI.
 
 ## Features
 
 - **4 Independent Terminals**: Run separate Claude sessions in each pane
 - **3 Layout Modes**: Grid (2x2), Focus (1 large + 3 small), Focus-Right (3 small + 1 large)
-- **Conversation History**: Automatically tracks terminal I/O for git repositories
-- **History Review Mode**: Full-screen view to browse past conversations by terminal/project
+- **Glass UI**: macOS Liquid Glass visual effects with dark-mode-only design
+- **Prompt Library**: Save and recall frequently used prompts via a floating toolbar
+- **Usage Tracking**: Real-time Claude API usage indicator in the title bar
+- **Custom Wallpapers**: Set background wallpapers with adjustable opacity
+- **Favorite Directories**: Star directories for quick access across terminals
+- **Git Status Bar**: Shows branch name and ahead/behind counts on every terminal
 - **Auto-Named Terminals**: Headers show folder/repo name automatically
-- **Always-Visible Status Bar**: Git branch, ahead/behind counts, and working directory on every terminal
-- **Workspace Persistence**: Remembers your directories and layout between sessions
+- **Workspace Persistence**: Remembers your directories, layout, and preferences between sessions
 - **Drag & Drop Reordering**: Rearrange terminal positions by dragging headers
 
 ## Installation
@@ -19,6 +22,7 @@ A multi-terminal workspace for Claude Code - run 4 Claude sessions side by side 
 
 - Node.js 18+
 - npm or yarn
+- macOS (Liquid Glass requires macOS)
 - Claude CLI installed and authenticated (`claude` command available)
 
 ### From Release
@@ -76,24 +80,19 @@ The packaged app will be in the `release` directory.
 3. Run `claude` to start a Claude session
 4. When Claude exits, the pane returns to a shell in the same directory
 
-### Conversation History
+### Prompt Library
 
-QuadClaude automatically records terminal conversations for **git repositories only**.
+Save frequently used prompts and inject them into any terminal with one click.
 
-- History is stored per-project using a unique project ID
-- Each terminal's working directory determines which project history it belongs to
-- Click the clock icon in a terminal header to enter History Review Mode
-- Browse conversations by date, search across history, and switch between terminal histories
+- Click the **+** button on the floating toolbar to create a prompt
+- Click a saved prompt to inject its text into the active terminal
+- Right-click a prompt to delete it
 
-**Note**: History is not tracked for non-git directories (like your home folder).
+### Git Status Bar
 
-### Status Bar
-
-Each terminal displays a status bar showing:
-- Current working directory path
+Each terminal displays a compact status bar showing:
 - Git branch name (when in a git repo)
 - Commits ahead/behind remote
-- Number of uncommitted changes
 
 ### Workspace Persistence
 
@@ -101,15 +100,17 @@ Your workspace state is automatically saved and restored:
 - Terminal working directories
 - Current layout mode
 - Active pane selection
+- Saved prompts and favorite directories
+- Background/wallpaper settings
 
 ## Project Structure
 
 ```
 src/
 ├── main/              # Electron main process
-│   ├── index.ts       # App entry, window management
-│   ├── pty.ts         # PTY process management
-│   ├── history.ts     # Conversation history tracking
+│   ├── index.ts       # App entry, window management, Liquid Glass
+│   ├── pty.ts         # PTY process management + git status caching
+│   ├── usage.ts       # Claude API usage polling
 │   ├── preload.ts     # Preload script for IPC
 │   └── workspace.ts   # State persistence
 ├── renderer/          # React UI
@@ -118,8 +119,11 @@ src/
 │   │   ├── TerminalPane.tsx
 │   │   ├── TerminalGrid.tsx
 │   │   ├── PaneHeader.tsx
-│   │   ├── HistoryPanel.tsx
-│   │   └── HistoryReviewView.tsx
+│   │   ├── PromptToolbar.tsx
+│   │   ├── UsageIndicator.tsx
+│   │   ├── FavoritesDropdown.tsx
+│   │   ├── LayoutSelector.tsx
+│   │   └── SettingsModal.tsx
 │   ├── hooks/
 │   ├── layouts/
 │   └── store/
@@ -128,12 +132,17 @@ src/
 
 ## Tech Stack
 
-- Electron 28
+- Electron 41
 - React 18 + TypeScript
 - xterm.js + node-pty
 - Zustand (state management)
 - Tailwind CSS
 - Vite
+- electron-liquid-glass
+
+## Acknowledgments
+
+- [Claude-Usage-Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) by [@hamed-elfayome](https://github.com/hamed-elfayome) - Inspiration for Claude Code statusline integration and usage tracking approach
 
 ## License
 

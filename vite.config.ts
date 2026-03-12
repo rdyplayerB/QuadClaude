@@ -14,7 +14,7 @@ export default defineConfig({
           build: {
             outDir: 'dist/main',
             rollupOptions: {
-              external: ['electron', 'node-pty', 'electron-store']
+              external: ['electron', 'node-pty', 'electron-store', 'electron-liquid-glass']
             }
           }
         }

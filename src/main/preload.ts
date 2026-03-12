@@ -1,19 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, HistoryExchangeEntry } from '../shared/types'
-
-// History types (mirrored from main/history.ts)
-interface HistorySession {
-  date: string
-  file: string
-  size: number
-  preview: string
-  exchangeCount: number
-}
-
-interface HistorySearchResult {
-  date: string
-  matches: string[]
-}
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -88,27 +74,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION) as Promise<string>,
 
-  // History
-  getProjectId: (projectPath: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_PROJECT_ID, projectPath) as Promise<string>,
+  // Usage tracking
+  onUsageUpdate: (callback: (data: UsageData) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, data: UsageData) => { callback(data) }
+    ipcRenderer.on(IPC_CHANNELS.USAGE_UPDATE, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.USAGE_UPDATE, handler)
+  },
+  fetchUsage: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.USAGE_FETCH) as Promise<UsageData | null>,
 
-  appendHistory: (projectId: string, paneId: number, type: 'input' | 'output', content: string) =>
-    ipcRenderer.send(IPC_CHANNELS.HISTORY_APPEND, projectId, paneId, type, content),
+  // Context usage per pane
+  getContextUsage: (paneId: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_CONTEXT_USAGE, paneId) as Promise<ContextUsage | null>,
 
-  getHistorySessions: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_SESSIONS, projectId) as Promise<HistorySession[]>,
-
-  getHistoryDay: (projectId: string, date: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_DAY, projectId, date) as Promise<string>,
-
-  getHistoryDayExchanges: (projectId: string, date: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_GET_DAY_EXCHANGES, projectId, date) as Promise<HistoryExchangeEntry[]>,
-
-  deleteHistoryDay: (projectId: string, date: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE_DAY, projectId, date) as Promise<boolean>,
-
-  searchHistory: (projectId: string, query: string, limit?: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.HISTORY_SEARCH, projectId, query, limit) as Promise<HistorySearchResult[]>,
+  // File dialogs
+  openImageDialog: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_IMAGE) as Promise<string | null>,
 })
 
 // Type declaration for the renderer
@@ -130,14 +111,10 @@ declare global {
       onMenuAction: (callback: (action: MenuAction) => void) => () => void
       onSystemResume: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
-      // History
-      getProjectId: (projectPath: string) => Promise<string>
-      appendHistory: (projectId: string, paneId: number, type: 'input' | 'output', content: string) => void
-      getHistorySessions: (projectId: string) => Promise<HistorySession[]>
-      getHistoryDay: (projectId: string, date: string) => Promise<string>
-      getHistoryDayExchanges: (projectId: string, date: string) => Promise<HistoryExchangeEntry[]>
-      deleteHistoryDay: (projectId: string, date: string) => Promise<boolean>
-      searchHistory: (projectId: string, query: string, limit?: number) => Promise<HistorySearchResult[]>
+      onUsageUpdate: (callback: (data: UsageData) => void) => () => void
+      fetchUsage: () => Promise<UsageData | null>
+      getContextUsage: (paneId: number) => Promise<ContextUsage | null>
+      openImageDialog: () => Promise<string | null>
     }
   }
 }

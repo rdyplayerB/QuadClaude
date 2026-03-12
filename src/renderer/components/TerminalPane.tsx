@@ -2,11 +2,10 @@ import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
-import { DEFAULT_HOTKEYS } from '../../shared/types'
+import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND } from '../../shared/types'
 
 // Module-level tracking to persist across component remounts
 const initializedPtys = new Set<number>()
@@ -43,29 +42,6 @@ const DARK_THEME = {
   brightWhite: '#ffffff',
 }
 
-const LIGHT_THEME = {
-  background: '#f5f5f5',
-  foreground: '#1a1a1a',
-  cursor: '#1a1a1a',
-  cursorAccent: '#f5f5f5',
-  selectionBackground: '#b4d5fe',
-  black: '#1a1a1a',
-  red: '#c4314b',
-  green: '#4e8a3e',
-  yellow: '#a5850e',
-  blue: '#0070c1',
-  magenta: '#a855a8',
-  cyan: '#1a9e9e',
-  white: '#d4d4d4',
-  brightBlack: '#666666',
-  brightRed: '#c4314b',
-  brightGreen: '#4e8a3e',
-  brightYellow: '#a5850e',
-  brightBlue: '#0070c1',
-  brightMagenta: '#a855a8',
-  brightCyan: '#1a9e9e',
-  brightWhite: '#1a1a1a',
-}
 
 // Exported functions to control terminals from outside
 export function clearTerminal(paneId: number) {
@@ -90,13 +66,6 @@ export function focusTerminal(paneId: number) {
   }
 }
 
-export function scrollTerminalToBottom(paneId: number) {
-  const entry = terminals.get(paneId)
-  if (entry) {
-    entry.terminal.scrollToBottom()
-  }
-}
-
 export function scrollAllTerminalsToBottom() {
   terminals.forEach((entry) => {
     entry.terminal.scrollToBottom()
@@ -104,7 +73,7 @@ export function scrollAllTerminalsToBottom() {
 }
 
 // Dispose and cleanup a terminal when pane is deleted or app closes
-export function disposeTerminal(paneId: number) {
+function disposeTerminal(paneId: number) {
   const entry = terminals.get(paneId)
   if (entry) {
     // Remove focus listener if exists
@@ -142,14 +111,12 @@ const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) 
   const [showTooltip, setShowTooltip] = useState(false)
   const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
   const gitStatus = pane?.gitStatus
-  const workingDir = pane?.workingDirectory || ''
-  const shortPath = workingDir.replace(/^\/Users\/[^/]+/, '~')
 
   return (
-    <div className="flex items-center justify-between px-3 h-7 bg-[--terminal-bg] font-mono text-xs shrink-0">
-      {/* Left side - git info */}
+    <div className="flex items-center justify-end px-3 h-7 glass-header font-mono text-xs shrink-0 border-t border-white/[0.04] overflow-hidden min-w-0">
+      {/* Right side - branch and changes */}
       <div
-        className="relative flex items-center gap-2"
+        className="relative flex items-center gap-2 min-w-0 shrink-0"
         onMouseEnter={() => gitStatus?.isGitRepo && setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
       >
@@ -181,7 +148,7 @@ const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) 
             )}
             {/* Tooltip - positioned above */}
             {showTooltip && (
-              <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-lg shadow-xl text-xs whitespace-nowrap z-50">
+              <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-lg shadow-xl text-xs whitespace-nowrap z-50">
                 <div className="text-[--ui-text-primary] mb-1.5">
                   <span className="text-[--git-green]">{gitStatus.branch}</span> branch
                 </div>
@@ -203,10 +170,6 @@ const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) 
         ) : (
           <span className="text-[--ui-text-faint]">—</span>
         )}
-      </div>
-      {/* Right side - path */}
-      <div className="text-[--ui-text-dimmed] truncate max-w-[300px]" title={workingDir}>
-        {shortPath}
       </div>
     </div>
   )
@@ -230,11 +193,9 @@ function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
 
 interface TerminalPaneProps {
   paneId: number
-  showHistoryButton?: boolean
-  onHistoryClick?: () => void
 }
 
-export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButton = true, onHistoryClick }: TerminalPaneProps) {
+export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneProps) {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -243,7 +204,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
     panes,
     activePaneId,
     setActivePaneId,
-    setLayout,
     setFocusPaneId,
     focusPaneId,
     preferences,
@@ -292,12 +252,14 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
       })
     } else {
       // Create new terminal with optimized settings
+      // allowTransparency enables background image to show through terminal
       const terminal = new Terminal({
         fontSize: preferences.fontSize,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
         theme: DARK_THEME,
         cursorBlink: true,
         allowProposedApi: true,
+        allowTransparency: true,
         scrollback: 1000, // Limit scrollback to prevent memory bloat
         scrollOnUserInput: false, // Preserve scroll position when user types
       })
@@ -310,17 +272,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
 
       terminal.open(terminalRef.current)
 
-      // Load WebGL addon for GPU-accelerated rendering (with fallback)
-      try {
-        const webglAddon = new WebglAddon()
-        webglAddon.onContextLoss(() => {
-          webglAddon.dispose()
-        })
-        terminal.loadAddon(webglAddon)
-      } catch (e) {
-        // WebGL not available, fall back to default canvas renderer
-        console.warn('WebGL addon failed to load, using default renderer:', e)
-      }
+      // Skip WebGL addon - canvas2d renderer is needed for transparent backgrounds
+      // (WebGL doesn't support allowTransparency). Canvas2d is performant enough for 4 terminals.
 
       xtermRef.current = terminal
       fitAddonRef.current = fitAddon
@@ -502,14 +455,20 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
     return () => clearTimeout(timeoutId)
   }, [preferences.fontSize, paneId])
 
-  // Update terminal theme when preference changes
+  // Update terminal theme when preference changes (including background transparency)
   useEffect(() => {
     if (xtermRef.current) {
-      const isLight = preferences.theme === 'light' ||
-        (preferences.theme === 'system' && !window.matchMedia('(prefers-color-scheme: dark)').matches)
-      xtermRef.current.options.theme = isLight ? LIGHT_THEME : DARK_THEME
+      const baseTheme = DARK_THEME
+      const bg = preferences.background ?? DEFAULT_BACKGROUND
+
+      if (bg.enabled && bg.image) {
+        // Fully transparent background so the background image shows through
+        xtermRef.current.options.theme = { ...baseTheme, background: '#00000000' }
+      } else {
+        xtermRef.current.options.theme = baseTheme
+      }
     }
-  }, [preferences.theme])
+  }, [preferences.background?.enabled, preferences.background?.image])
 
   // Handle layout changes - ensure terminal stays at bottom after resize settles
   useEffect(() => {
@@ -659,11 +618,13 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
       }
     }
 
-    // Check Claude status every 2 seconds (pgrep is lightweight)
-    checkClaudeStatus()
-    const interval = setInterval(checkClaudeStatus, 2000)
+    // Stagger initial check by paneId to avoid all 4 panes hitting IPC at once
+    const startDelay = setTimeout(() => {
+      checkClaudeStatus()
+    }, 500 + paneId * 300)
+    const interval = setInterval(checkClaudeStatus, 3000)
 
-    return () => clearInterval(interval)
+    return () => { clearTimeout(startDelay); clearInterval(interval) }
   }, [paneId])
 
   // Poll for CWD and git status (heavier operations, less frequent)
@@ -691,11 +652,13 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
       }
     }
 
-    // Initial update
-    updateCwdAndGitStatus()
+    // Stagger initial update by paneId
+    const startDelay = setTimeout(() => {
+      updateCwdAndGitStatus()
+    }, 2000 + paneId * 500)
     const interval = setInterval(updateCwdAndGitStatus, 5000)
 
-    return () => clearInterval(interval)
+    return () => { clearTimeout(startDelay); clearInterval(interval) }
   }, [paneId])
 
   // Handle click to focus
@@ -783,33 +746,61 @@ export const TerminalPane = memo(function TerminalPane({ paneId, showHistoryButt
 
   if (!pane) return null
 
-  // Border styling - always visible to define pane boundaries
+  const background = preferences.background ?? DEFAULT_BACKGROUND
+  const bgEnabled = background.enabled && !!background.image
+
+  // Border styling - thin glass-style borders
   const getBorderClass = () => {
-    if (isPaneDragOver) return 'border-2 border-[--accent]'
-    if (isDragOver) return 'border-2 border-[--accent]/50'
-    if (isActive) return 'border-2 border-[--accent]/70'
-    return 'border border-[#444]'  // Visible gray border for inactive panes
+    if (isPaneDragOver) return 'border border-[--accent]'
+    if (isDragOver) return 'border border-[--accent]/50'
+    if (isActive) return 'border border-white/[0.1]'
+    return 'border border-white/[0.05]'
   }
+
+  // Background image for this pane (per-pane mode allows different images per pane)
+  const paneBgImage = bgEnabled
+    ? (background.mode === 'per-pane'
+      ? (background.paneImages?.[paneId] ?? background.image)
+      : background.image)
+    : null
 
   return (
     <div
-      className={`group h-full min-h-0 flex flex-col bg-[--ui-bg-elevated] overflow-hidden rounded-lg transition-all relative ${getBorderClass()}`}
+      className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <PaneHeader paneId={paneId} showHistoryButton={showHistoryButton} onHistoryClick={onHistoryClick} />
-      {/* Terminal + status bar wrapper - shared background eliminates black band */}
-      <div className="flex-1 min-h-0 flex flex-col bg-[--terminal-bg]">
+      <PaneHeader paneId={paneId} />
+      {/* Terminal + status bar wrapper */}
+      <div
+        className="flex-1 min-h-0 flex flex-col relative"
+        style={paneBgImage ? {
+          backgroundImage: `url(${paneBgImage?.startsWith('/') ? `file://${paneBgImage}` : paneBgImage})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          ...(background.mode === 'unified' ? { backgroundAttachment: 'fixed' } : {}),
+        } : undefined}
+      >
+        {/* Opacity overlay - controls how much wallpaper shows through */}
+        {bgEnabled && (
+          <div
+            className="absolute inset-0 pointer-events-none z-0"
+            style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity})` }}
+          />
+        )}
         <div
           ref={terminalRef}
-          className="flex-1 min-h-0 terminal-container"
+          className="flex-1 min-h-0 terminal-container relative z-[1]"
           role="application"
           aria-label={`Terminal ${paneId + 1}`}
         />
-        <GitStatusBar paneId={paneId} />
+        <div className="relative z-[1]">
+          <GitStatusBar paneId={paneId} />
+        </div>
       </div>
       {isDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">

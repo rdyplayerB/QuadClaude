@@ -28,6 +28,16 @@
   /* Status bar */
   --statusbar-bg: #1e1e1e;
 
+  /* RGB values for transparency support */
+  --pane-bg-rgb: 37, 37, 37; /* #252525 */
+  --terminal-bg-rgb: 30, 30, 30; /* #1e1e1e */
+
+  /* Glass effect - low opacity to let macOS vibrancy show through */
+  --glass-bg: rgba(20, 20, 20, 0.3);
+  --glass-bg-elevated: rgba(30, 30, 30, 0.25);
+  --glass-bg-header: rgba(20, 20, 20, 0.2);
+  --glass-blur: 0px; /* Disable CSS blur - let macOS vibrancy handle it */
+
   /* Git colors */
   --git-green: #4ade80;
   --git-cyan: #22d3ee;
@@ -35,37 +45,6 @@
   --git-orange: #fb923c;
 }
 
-:root.light {
-  --terminal-bg: #f5f5f5;
-  --terminal-fg: #222222;
-  --terminal-border: #d0d0d0;
-  --terminal-header: #e8e8e8;
-  --terminal-muted: #555555;
-  --accent: #0891b2;
-  --accent-muted: #0e7490;
-
-  /* UI colors - light mode */
-  --ui-bg-base: #e8e8e8;
-  --ui-bg-primary: #f5f5f5;
-  --ui-bg-elevated: #ffffff;
-  --ui-bg-active: #e0e0e0;
-  --ui-border: #c0c0c0;
-  --ui-border-subtle: #d8d8d8;
-  --ui-text-primary: #1a1a1a;
-  --ui-text-secondary: #666;
-  --ui-text-muted: #888;
-  --ui-text-dimmed: #999;
-  --ui-text-faint: #aaa;
-
-  /* Status bar */
-  --statusbar-bg: #e0e0e0;
-
-  /* Git colors - slightly darker for light mode */
-  --git-green: #16a34a;
-  --git-cyan: #0891b2;
-  --git-yellow: #ca8a04;
-  --git-orange: #ea580c;
-}
 
 /* Base styles */
 * {
@@ -78,6 +57,7 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  background: transparent !important;
 }
 
 body {
@@ -92,7 +72,7 @@ body {
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
-  background: var(--terminal-bg);
+  background: transparent;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
@@ -104,16 +84,13 @@ body {
   background: #4c4c4c;
 }
 
-:root.light .xterm-viewport::-webkit-scrollbar-thumb:hover {
-  background: #aaa;
-}
 
 /* Pane header - fixed height to prevent shifting during layout changes */
 .pane-header {
-  height: 40px;
-  min-height: 40px;
-  max-height: 40px;
-  flex: 0 0 40px;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  flex: 0 0 32px;
 }
 
 /* Terminal container - with performance optimizations */
@@ -121,23 +98,23 @@ body {
   width: 100%;
   height: 100%;
   min-height: 0; /* Critical for flexbox - allows proper shrinking */
-  contain: layout paint style;
-  background: var(--terminal-bg); /* Ensure container matches terminal bg */
+  contain: layout style;
+  background: rgba(var(--terminal-bg-rgb), 0.5);
 }
 
 .terminal-container .xterm {
   height: 100%;
   padding: 4px;
-  background: var(--terminal-bg) !important; /* Override xterm default */
+  background: transparent !important;
 }
 
-/* Force xterm internal elements to match terminal background */
+/* Force xterm internal elements to be transparent so glass shows through */
 .terminal-container .xterm-viewport {
-  background: var(--terminal-bg) !important;
+  background: transparent !important;
 }
 
 .terminal-container .xterm-screen {
-  background: var(--terminal-bg) !important;
+  background: transparent !important;
 }
 
 /* Titlebar drag region */
@@ -149,25 +126,48 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* Pane transitions - optimized for performance */
+/* When background is enabled, make all terminal layers transparent */
+.bg-transparent .terminal-container {
+  background: transparent !important;
+  contain: layout style; /* Remove 'paint' from contain - it blocks transparency */
+}
+
+.bg-transparent .terminal-container .xterm,
+.bg-transparent .terminal-container .xterm-viewport,
+.bg-transparent .terminal-container .xterm-screen {
+  background: transparent !important;
+}
+
+/* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */
+.glass {
+  background: var(--glass-bg);
+}
+
+.glass-elevated {
+  background: var(--glass-bg-elevated);
+}
+
+.glass-header {
+  background: var(--glass-bg-header);
+}
+
+/* Glass control surfaces - theme-aware for settings/modals */
+.glass-control {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-control-active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.glass-border {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+
+/* Pane transitions */
 .pane-transition {
-  transition: opacity 0.15s ease-out, transform 0.15s ease-out;
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  will-change: transform, opacity;
-  contain: layout style;
-}
-
-/* History panel slide-in animation */
-@keyframes slide-in-right {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
-}
-
-.animate-slide-in-right {
-  animation: slide-in-right 0.2s ease-out;
+  transition: opacity 0.15s ease-out;
+  isolation: isolate;
 }

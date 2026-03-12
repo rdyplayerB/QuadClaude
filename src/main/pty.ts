@@ -1,12 +1,15 @@
 import * as pty from 'node-pty'
+import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { execSync } from 'child_process'
 import { logger } from './logger'
-import { GitStatus } from '../shared/types'
+import { GitStatus, ContextUsage } from '../shared/types'
 
 type OutputCallback = (paneId: number, data: string) => void
 type ExitCallback = (paneId: number, exitCode: number) => void
+
+const CD_REGEX = /^cd\s+(.+)/
 
 interface PtyInstance {
   pty: pty.IPty
@@ -64,6 +67,14 @@ function getShellEnv(): NodeJS.ProcessEnv {
     TERM_PROGRAM_VERSION: '1.0.0-beta',
   }
 }
+
+// Git status cache - avoids re-running 4+ shell commands when cwd hasn't changed
+interface GitStatusCacheEntry {
+  status: GitStatus
+  timestamp: number
+}
+const gitStatusCache = new Map<string, GitStatusCacheEntry>()
+const GIT_STATUS_CACHE_TTL = 10_000 // 10 seconds
 
 export class PtyManager {
   private ptys: Map<number, PtyInstance> = new Map()
@@ -124,7 +135,7 @@ export class PtyManager {
       // This is a simple heuristic - could be improved with shell integration
       // Remove any trailing newlines/carriage returns before matching
       const cleanData = data.replace(/[\r\n]+$/, '')
-      const cdMatch = cleanData.match(/^cd\s+(.+)/)
+      const cdMatch = cleanData.match(CD_REGEX)
       if (cdMatch) {
         const newDir = cdMatch[1].trim().replace(/['"]/g, '').replace(/[\r\n]/g, '')
         if (newDir.startsWith('/')) {
@@ -164,7 +175,9 @@ export class PtyManager {
           timeout: 2000,
         }).trim()
         if (result && result.startsWith('/')) {
-          logger.info('pty', `Got cwd for pane ${paneId}`, result)
+          if (result !== instance.cwd) {
+            logger.info('pty', `Pane ${paneId} cwd changed`, `${instance.cwd} → ${result}`)
+          }
           instance.cwd = result
         } else {
           logger.warn('pty', `lsof returned unexpected result for pane ${paneId}`, result || '(empty)')
@@ -193,6 +206,12 @@ export class PtyManager {
 
     const cwd = this.getCwd(paneId) || instance.cwd
 
+    // Check cache first - avoids spawning 4+ shell processes if recently checked
+    const cached = gitStatusCache.get(cwd)
+    if (cached && Date.now() - cached.timestamp < GIT_STATUS_CACHE_TTL) {
+      return cached.status
+    }
+
     try {
       // Check if this is a git repo
       execSync('git rev-parse --is-inside-work-tree', {
@@ -203,7 +222,9 @@ export class PtyManager {
       })
     } catch {
       // Not a git repo
-      return { isGitRepo: false }
+      const status: GitStatus = { isGitRepo: false }
+      gitStatusCache.set(cwd, { status, timestamp: Date.now() })
+      return status
     }
 
     try {
@@ -248,13 +269,26 @@ export class PtyManager {
         // Ignore errors
       }
 
-      return {
+      const result: GitStatus = {
         isGitRepo: true,
         branch,
         ahead,
         behind,
         dirty,
       }
+      gitStatusCache.set(cwd, { status: result, timestamp: Date.now() })
+
+      // Evict stale cache entries to prevent unbounded growth
+      if (gitStatusCache.size > 20) {
+        const now = Date.now()
+        for (const [key, entry] of gitStatusCache) {
+          if (now - entry.timestamp > GIT_STATUS_CACHE_TTL * 3) {
+            gitStatusCache.delete(key)
+          }
+        }
+      }
+
+      return result
     } catch (error) {
       logger.warn('pty', `Failed to get git status for pane ${paneId}`, error instanceof Error ? error.message : String(error))
       return { isGitRepo: false }
@@ -281,6 +315,41 @@ export class PtyManager {
       // pgrep returns non-zero if no process found - this is expected
     }
     return false
+  }
+
+  // Get the Claude process PID running in this pane's PTY
+  getClaudePid(paneId: number): number | null {
+    const instance = this.ptys.get(paneId)
+    if (!instance) return null
+    try {
+      const pid = instance.pty.pid
+      const result = execSync(`pgrep -P ${pid} -f "claude" 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 500,
+      }).trim()
+      return result ? parseInt(result.split('\n')[0], 10) : null
+    } catch {
+      return null
+    }
+  }
+
+  // Read context usage from statusline temp file for this pane
+  getContextUsage(paneId: number): ContextUsage | null {
+    const claudePid = this.getClaudePid(paneId)
+    if (!claudePid) return null
+    try {
+      const data = fs.readFileSync(`/tmp/quadclaude-ctx-${claudePid}.json`, 'utf-8')
+      const parsed = JSON.parse(data)
+      // Only return if data is fresh (< 30 seconds old)
+      if (Date.now() / 1000 - parsed.ts > 30) return null
+      return {
+        contextPct: parsed.context_pct ?? 0,
+        model: parsed.model ?? '',
+        updatedAt: parsed.ts ?? 0,
+      }
+    } catch {
+      return null
+    }
   }
 
   killPty(paneId: number): void {

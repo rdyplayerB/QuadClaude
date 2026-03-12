@@ -8,8 +8,6 @@ export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
 
 interface PaneHeaderProps {
   paneId: number
-  onHistoryClick?: () => void
-  showHistoryButton?: boolean
 }
 
 // Unique colors for each terminal's indicator (work well in dark & light modes)
@@ -32,7 +30,7 @@ function getFolderName(path: string): string {
   return name || 'Terminal'
 }
 
-export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, showHistoryButton = true }: PaneHeaderProps) {
+export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) {
   const { panes, activePaneId, setActivePaneId } = useWorkspaceStore()
 
   const pane = panes.find((p) => p.id === paneId)
@@ -58,7 +56,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, sho
     if (pane.state === 'claude-active') {
       return (
         <span
-          className="w-2 h-2 rounded-full animate-pulse"
+          className="w-1.5 h-1.5 rounded-full animate-pulse"
           style={{ backgroundColor: paneColor }}
           title="Claude Active"
         />
@@ -69,56 +67,47 @@ export const PaneHeader = memo(function PaneHeader({ paneId, onHistoryClick, sho
 
   return (
     <div
-      className={`pane-header overflow-hidden flex items-center font-mono text-[14px] titlebar-no-drag transition-all h-10 border-b border-[#444] ${
-        isActive
-          ? 'bg-[--ui-bg-elevated] text-[--ui-text-primary]'
-          : 'bg-[--ui-bg-elevated] text-[--ui-text-secondary]'
-      }`}
+      className="pane-header overflow-hidden flex items-center font-mono text-[12px] titlebar-no-drag transition-colors h-8"
+      style={{
+        borderBottom: `1px solid ${isActive ? paneColor + '40' : 'rgba(255,255,255,0.04)'}`,
+      }}
     >
       {/* Draggable zone */}
       <div
         draggable
         onDragStart={handleDragStart}
-        className="flex-1 flex items-center gap-2 px-3 cursor-grab active:cursor-grabbing overflow-hidden h-full"
+        className="flex-1 flex items-center gap-1.5 px-2.5 cursor-grab active:cursor-grabbing overflow-hidden h-full"
       >
         {/* State indicator */}
         {stateIndicator()}
 
         {/* Display name (auto from folder) */}
-        <span className="truncate select-none" title={pane.workingDirectory}>
+        <span
+          className={`truncate select-none ${isActive ? 'text-[--ui-text-primary]' : 'text-[--ui-text-muted]'}`}
+          title={pane.workingDirectory}
+        >
           {displayName}
         </span>
       </div>
 
-      {/* Action buttons - only visible on hover via group */}
+      {/* Action buttons */}
       <div
-        className="flex items-center gap-1 pr-2 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="flex items-center gap-1 pr-2 shrink-0"
         style={{ cursor: 'default' }}
         onMouseDown={(e) => e.stopPropagation()}
         onDragStart={(e) => e.preventDefault()}
         draggable={false}
       >
         <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
-        {showHistoryButton && onHistoryClick && (
-          <button
-            onClick={onHistoryClick}
-            className="p-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
-            title="View History"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
-              <path d="M7 1.17a5.83 5.83 0 1 0 0 11.66A5.83 5.83 0 0 0 7 1.17ZM0 7a7 7 0 1 1 14 0A7 7 0 0 1 0 7Z"/>
-              <path d="M7 3.5a.58.58 0 0 1 .58.58v2.67l1.58 1.58a.58.58 0 1 1-.82.82l-1.75-1.75A.58.58 0 0 1 6.42 7V4.08A.58.58 0 0 1 7 3.5Z"/>
-            </svg>
-          </button>
-        )}
         <button
           onClick={() => clearTerminal(paneId)}
-          className="p-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
+          className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors rounded"
           title="Clear (Cmd+K)"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M3 3l8 8M11 3l-8 8" strokeLinecap="round"/>
           </svg>
+          <span className="text-[10px] leading-none">Clear</span>
         </button>
       </div>
     </div>

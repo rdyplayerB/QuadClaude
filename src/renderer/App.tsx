@@ -3,7 +3,7 @@ import { TerminalGrid } from './components/TerminalGrid'
 import { SettingsModal } from './components/SettingsModal'
 import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
-import { HistoryReviewView } from './components/HistoryReviewView'
+import { UsageIndicator } from './components/UsageIndicator'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
@@ -13,42 +13,12 @@ function App() {
   const {
     initialize,
     layout,
-    setLayout,
     activePaneId,
     setActivePaneId,
     setFocusPaneId,
-    preferences,
-    updatePreferences,
   } = useWorkspaceStore()
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-
-  // Initialize workspace on mount
-  useEffect(() => {
-    initialize()
-  }, [initialize])
-
-
-  // Apply theme to document
-  useEffect(() => {
-    const root = document.documentElement
-    if (preferences.theme === 'light') {
-      root.classList.add('light')
-    } else if (preferences.theme === 'dark') {
-      root.classList.remove('light')
-    } else {
-      // System preference
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      if (prefersDark) {
-        root.classList.remove('light')
-      } else {
-        root.classList.add('light')
-      }
-    }
-  }, [preferences.theme])
-
-  // Enable global hotkeys (disabled when settings modal is open)
-  useHotkeys(!isSettingsOpen)
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {
@@ -56,6 +26,14 @@ function App() {
     focusTerminal(activePaneId)
   }, [activePaneId])
 
+  // Initialize workspace on mount
+  useEffect(() => {
+    initialize()
+  }, [initialize])
+
+
+  // Enable global hotkeys (disabled when settings modal is open)
+  useHotkeys(!isSettingsOpen)
 
   // Shared logic for focusing a terminal (used by both menu actions and hotkeys)
   const handleTerminalFocus = useCallback(
@@ -72,17 +50,19 @@ function App() {
   )
 
   // Listen for menu actions
+  // Uses getState() inside handler to always read latest values, avoiding re-subscriptions
   useEffect(() => {
     const unsubscribe = window.electronAPI.onMenuAction((action: MenuAction) => {
+      const store = useWorkspaceStore.getState()
       switch (action) {
         case 'layout-grid':
-          setLayout('grid')
+          store.setLayout('grid')
           break
         case 'layout-focus':
-          setLayout('focus')
+          store.setLayout('focus')
           break
         case 'layout-focus-right':
-          setLayout('focus-right')
+          store.setLayout('focus-right')
           break
         case 'focus-pane-1':
           handleTerminalFocus(0)
@@ -97,21 +77,16 @@ function App() {
           handleTerminalFocus(3)
           break
         case 'clear-pane':
-          clearTerminal(activePaneId)
+          clearTerminal(store.activePaneId)
           break
         case 'launch-claude':
-          sendToTerminal(activePaneId, 'claude\n')
+          sendToTerminal(store.activePaneId, 'claude\n')
           break
         case 'increase-font':
-          updatePreferences({ fontSize: Math.min(24, preferences.fontSize + 1) })
+          store.updatePreferences({ fontSize: Math.min(24, store.preferences.fontSize + 1) })
           break
         case 'decrease-font':
-          updatePreferences({ fontSize: Math.max(10, preferences.fontSize - 1) })
-          break
-        case 'toggle-theme':
-          updatePreferences({
-            theme: preferences.theme === 'dark' ? 'light' : 'dark',
-          })
+          store.updatePreferences({ fontSize: Math.max(10, store.preferences.fontSize - 1) })
           break
         case 'open-settings':
           setIsSettingsOpen(true)
@@ -123,7 +98,7 @@ function App() {
     })
 
     return unsubscribe
-  }, [setLayout, activePaneId, handleTerminalFocus, preferences, updatePreferences])
+  }, [handleTerminalFocus])
 
   // Scroll all terminals to bottom when system resumes from sleep
   useEffect(() => {
@@ -149,46 +124,32 @@ function App() {
     }
   }, [])
 
-  const isHistoryMode = layout === 'history'
-
   return (
-    <div className="h-screen w-screen flex flex-col bg-terminal-bg overflow-hidden relative">
-      {/* Title bar - clean, minimal */}
-      <div className="h-11 titlebar-drag-region bg-[--ui-bg-primary] border-b border-[--ui-border-subtle] flex items-center justify-between px-3">
-        {/* Left side - breathing room for traffic lights */}
-        <div className="w-20" />
+    <div className="h-screen w-screen flex flex-col bg-transparent overflow-hidden relative font-mono">
+      {/* Title bar - glass effect */}
+      <div className="h-9 titlebar-drag-region border-b border-white/[0.06] flex items-center justify-between px-3 glass-header">
+        {/* Left side - after traffic lights */}
+        <div className="flex items-center gap-2 pl-[72px]">
+          <span className="text-[11px] tracking-widest uppercase text-[--ui-text-dimmed]">quadclaude</span>
+          <span className="text-[--ui-text-faint]">│</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.6.0</span>
+        </div>
 
-        {/* Center - layout selector (hidden during history mode) */}
-        {!isHistoryMode && <LayoutSelector />}
+        {/* Center - layout selector */}
+        <LayoutSelector />
 
-        {/* Right side - utility buttons */}
-        <div className="flex items-center gap-1">
-          {/* Theme toggle */}
-          <button
-            onClick={() => updatePreferences({ theme: preferences.theme === 'light' ? 'dark' : 'light' })}
-            className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
-            title={`Switch to ${preferences.theme === 'light' ? 'dark' : 'light'} mode`}
-            aria-label="Toggle theme"
-          >
-            {preferences.theme === 'light' ? (
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-                <path d="M7 2a7 7 0 1 0 9 9 6 6 0 0 1-9-9Z"/>
-              </svg>
-            ) : (
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
-                <circle cx="9" cy="9" r="3.5"/>
-                <path d="M9 1v2.5M9 14.5V17M1 9h2.5M14.5 9H17M3.4 3.4l1.77 1.77M12.83 12.83l1.77 1.77M3.4 14.6l1.77-1.77M12.83 5.17l1.77-1.77" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-            )}
-          </button>
+        {/* Right side - usage + utility buttons */}
+        <div className="flex items-center gap-0.5">
+          <UsageIndicator />
+          <span className="text-[--ui-text-faint] text-xs px-1">│</span>
           {/* Settings */}
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="p-2 text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all titlebar-no-drag rounded-md"
+            className="px-1.5 py-1 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
             title="Settings (Cmd+,)"
             aria-label="Open settings"
           >
-            <svg width="18" height="18" viewBox="0 0 18 18" fill="currentColor">
+            <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor">
               <path d="M9 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/>
               <path fillRule="evenodd" d="M7.25 1a.75.75 0 0 0-.75.75v1.15a5.5 5.5 0 0 0-1.62.67l-.82-.82a.75.75 0 0 0-1.06 0L1.69 4.06a.75.75 0 0 0 0 1.06l.82.82A5.5 5.5 0 0 0 1.84 7.5H.75a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h1.1a5.5 5.5 0 0 0 .67 1.62l-.82.82a.75.75 0 0 0 0 1.06l1.36 1.36a.75.75 0 0 0 1.06 0l.82-.82a5.5 5.5 0 0 0 1.56.66v1.05a.75.75 0 0 0 .75.75h2a.75.75 0 0 0 .75-.75v-1.05a5.5 5.5 0 0 0 1.56-.66l.82.82a.75.75 0 0 0 1.06 0l1.36-1.36a.75.75 0 0 0 0-1.06l-.82-.82a5.5 5.5 0 0 0 .66-1.56h1.06a.75.75 0 0 0 .75-.75v-2a.75.75 0 0 0-.75-.75h-1.06a5.5 5.5 0 0 0-.66-1.56l.82-.82a.75.75 0 0 0 0-1.06l-1.36-1.36a.75.75 0 0 0-1.06 0l-.82.82a5.5 5.5 0 0 0-1.56-.66V1.75a.75.75 0 0 0-.75-.75h-2ZM9 12.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" clipRule="evenodd"/>
             </svg>
@@ -199,20 +160,13 @@ function App() {
       {/* Main content area */}
       <div className="flex-1 overflow-hidden flex">
         {/* Terminal grid - always mounted to preserve terminal state */}
-        <div className={`overflow-hidden ${isHistoryMode ? 'flex-[2]' : 'flex-1'}`}>
+        <div className="overflow-hidden flex-1">
           <TerminalGrid />
         </div>
-
-        {/* History panel sidebar */}
-        {isHistoryMode && (
-          <div className="flex-1 border-l border-[--ui-border-subtle] bg-[--ui-bg-primary] flex flex-col overflow-hidden">
-            <HistoryReviewView />
-          </div>
-        )}
       </div>
 
-      {/* Floating prompt toolbar - hidden during history mode */}
-      {!isHistoryMode && <PromptToolbar onSelectPrompt={handlePromptClick} />}
+      {/* Floating prompt toolbar */}
+      <PromptToolbar onSelectPrompt={handlePromptClick} />
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

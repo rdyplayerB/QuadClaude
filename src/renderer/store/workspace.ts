@@ -6,7 +6,9 @@ import {
   WorkspacePreferences,
   WorkspaceState,
   DEFAULT_HOTKEYS,
+  DEFAULT_BACKGROUND,
   GitStatus,
+  BackgroundConfig,
 } from '../../shared/types'
 
 interface WorkspaceStore extends WorkspaceState {
@@ -14,19 +16,11 @@ interface WorkspaceStore extends WorkspaceState {
   initialize: () => Promise<void>
   isInitialized: boolean
 
-  // History review mode
-  historyReviewPaneId: number | null  // Which pane is being reviewed (null = not in review mode)
-  previousLayout: LayoutMode | null   // Layout to return to after exiting history mode
-  enterHistoryReview: (paneId: number) => void
-  exitHistoryReview: () => void
-  setHistoryReviewPane: (paneId: number) => void  // Switch pane within history mode
-
   // Layout actions
   setLayout: (layout: LayoutMode) => void
   setFocusPaneId: (id: number) => void
   setActivePaneId: (id: number) => void
   swapPanes: (paneId1: number, paneId2: number) => void
-  resetPaneOrder: () => void
 
   // Pane actions
   updatePane: (id: number, updates: Partial<PaneConfig>) => void
@@ -35,12 +29,20 @@ interface WorkspaceStore extends WorkspaceState {
   setPaneCwd: (id: number, cwd: string) => void
   setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
 
+  // Background
+  updateBackground: (updates: Partial<BackgroundConfig>) => void
+
   // Preferences
   updatePreferences: (updates: Partial<WorkspacePreferences>) => void
 
   // Persistence
   saveWorkspace: () => void
 }
+
+// Array size limits to prevent unbounded memory growth
+const MAX_SAVED_PROMPTS = 100
+const MAX_FAVORITE_DIRS = 50
+const MAX_CUSTOM_WALLPAPERS = 30
 
 // Debounce helper
 let saveTimeout: ReturnType<typeof setTimeout> | null = null
@@ -61,10 +63,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     hotkeys: DEFAULT_HOTKEYS,
     savedPrompts: [],
     favoriteDirectories: [],
+    background: DEFAULT_BACKGROUND,
   },
   isInitialized: false,
-  historyReviewPaneId: null,
-  previousLayout: null,
 
   // Initialize from saved state
   initialize: async () => {
@@ -76,12 +77,16 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ...savedState.preferences?.hotkeys,
       }
       // Ensure new preference fields have defaults
-      const savedPrompts = savedState.preferences?.savedPrompts ?? []
-      const favoriteDirectories = savedState.preferences?.favoriteDirectories ?? []
+      const savedPrompts = (savedState.preferences?.savedPrompts ?? []).slice(-MAX_SAVED_PROMPTS)
+      const favoriteDirectories = (savedState.preferences?.favoriteDirectories ?? []).slice(-MAX_FAVORITE_DIRS)
+      const background = { ...DEFAULT_BACKGROUND, ...savedState.preferences?.background }
+      if (background.customWallpapers && background.customWallpapers.length > MAX_CUSTOM_WALLPAPERS) {
+        background.customWallpapers = background.customWallpapers.slice(-MAX_CUSTOM_WALLPAPERS)
+      }
 
       // Migrate removed layouts to 'grid'
       let layout = savedState.layout
-      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen' || layout === 'split') {
+      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen' || layout === 'split' || layout === 'history') {
         layout = 'grid'
       }
 
@@ -100,6 +105,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           hotkeys: mergedHotkeys,
           savedPrompts,
           favoriteDirectories,
+          background,
         },
         isInitialized: true,
       })
@@ -122,48 +128,25 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           fontSize: 14,
           hotkeys: DEFAULT_HOTKEYS,
           savedPrompts: [],
+          favoriteDirectories: [],
+          background: DEFAULT_BACKGROUND,
         },
         isInitialized: true,
       })
     }
   },
 
-  // History review mode actions
-  enterHistoryReview: (paneId) => {
-    const currentLayout = get().layout
-    // Don't save 'history' as previous layout
-    if (currentLayout !== 'history') {
-      set({ previousLayout: currentLayout })
-    }
-    // Swap reviewed pane to position 0 so it's the visible terminal
-    const panes = [...get().panes]
-    const targetIndex = panes.findIndex((p) => p.id === paneId)
-    if (targetIndex > 0) {
-      ;[panes[0], panes[targetIndex]] = [panes[targetIndex], panes[0]]
-    }
-    set({ panes, layout: 'history', historyReviewPaneId: paneId, activePaneId: paneId })
-  },
-
-  exitHistoryReview: () => {
-    const previousLayout = get().previousLayout || 'grid'
-    set({ layout: previousLayout, historyReviewPaneId: null, previousLayout: null })
-  },
-
-  setHistoryReviewPane: (paneId) => {
-    // Swap reviewed pane to position 0
-    const panes = [...get().panes]
-    const targetIndex = panes.findIndex((p) => p.id === paneId)
-    if (targetIndex > 0) {
-      ;[panes[0], panes[targetIndex]] = [panes[targetIndex], panes[0]]
-    }
-    set({ panes, historyReviewPaneId: paneId, activePaneId: paneId })
-  },
-
   // Layout actions
   setLayout: (layout) => {
-    // If switching away from history mode, clear review state
-    if (get().layout === 'history' && layout !== 'history') {
-      set({ historyReviewPaneId: null, previousLayout: null })
+    // When switching to a focus layout, swap the active pane to position 0 (the large pane)
+    if (layout === 'focus' || layout === 'focus-right') {
+      const activePaneId = get().activePaneId
+      const panes = [...get().panes]
+      const activeIndex = panes.findIndex((p) => p.id === activePaneId)
+      if (activeIndex > 0) {
+        ;[panes[0], panes[activeIndex]] = [panes[activeIndex], panes[0]]
+        set({ panes, focusPaneId: activePaneId })
+      }
     }
     set({ layout })
     debouncedSave(() => get().saveWorkspace())
@@ -198,15 +181,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         ;[panes[index1], panes[index2]] = [panes[index2], panes[index1]]
       }
       return { panes }
-    })
-    debouncedSave(() => get().saveWorkspace())
-  },
-
-  resetPaneOrder: () => {
-    set((state) => {
-      // Sort panes by their ID to restore sequential order
-      const panes = [...state.panes].sort((a, b) => a.id - b.id)
-      return { panes, activePaneId: panes[0]?.id ?? 0 }
     })
     debouncedSave(() => get().saveWorkspace())
   },
@@ -261,9 +235,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setPaneGitStatus: (id, gitStatus) => {
-    // Avoid unnecessary re-renders - compare stringified values
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (JSON.stringify(currentPane?.gitStatus) === JSON.stringify(gitStatus)) return
+    // Avoid unnecessary re-renders - shallow compare known fields
+    const current = get().panes.find((p) => p.id === id)?.gitStatus
+    if (current && gitStatus &&
+      current.isGitRepo === gitStatus.isGitRepo &&
+      current.branch === gitStatus.branch &&
+      current.ahead === gitStatus.ahead &&
+      current.behind === gitStatus.behind &&
+      current.dirty === gitStatus.dirty) return
 
     set((state) => ({
       panes: state.panes.map((pane) =>
@@ -273,8 +252,29 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     // Don't save on git status changes - too frequent and not worth persisting
   },
 
+  // Background
+  updateBackground: (updates) => {
+    if (updates.customWallpapers && updates.customWallpapers.length > MAX_CUSTOM_WALLPAPERS) {
+      updates = { ...updates, customWallpapers: updates.customWallpapers.slice(-MAX_CUSTOM_WALLPAPERS) }
+    }
+    set((state) => ({
+      preferences: {
+        ...state.preferences,
+        background: { ...state.preferences.background ?? DEFAULT_BACKGROUND, ...updates },
+      },
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
   // Preferences
   updatePreferences: (updates) => {
+    // Enforce array size limits
+    if (updates.savedPrompts && updates.savedPrompts.length > MAX_SAVED_PROMPTS) {
+      updates = { ...updates, savedPrompts: updates.savedPrompts.slice(-MAX_SAVED_PROMPTS) }
+    }
+    if (updates.favoriteDirectories && updates.favoriteDirectories.length > MAX_FAVORITE_DIRS) {
+      updates = { ...updates, favoriteDirectories: updates.favoriteDirectories.slice(-MAX_FAVORITE_DIRS) }
+    }
     set((state) => ({
       preferences: { ...state.preferences, ...updates },
     }))
@@ -283,14 +283,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, previousLayout, focusPaneId, activePaneId, panes, preferences } = get()
-    // Don't persist 'history' layout - save the previous layout instead
-    const layoutToSave = layout === 'history' ? (previousLayout || 'grid') : layout
+    const { layout, focusPaneId, activePaneId, panes, preferences } = get()
+    // Strip transient data (gitStatus) from panes before persisting
+    const cleanPanes = panes.map(({ gitStatus: _, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
-      layout: layoutToSave,
+      layout,
       focusPaneId,
       activePaneId,
-      panes,
+      panes: cleanPanes,
       preferences,
     })
   },

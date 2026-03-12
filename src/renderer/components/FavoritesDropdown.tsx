@@ -74,12 +74,13 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
       <button
         ref={buttonRef}
         onClick={toggleOpen}
-        className="p-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
+        className="flex items-center gap-1 px-1.5 py-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
         title="Favorite Directories"
       >
-        <svg width="14" height="14" viewBox="0 0 14 14" fill={isCwdStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.2">
+        <svg width="15" height="15" viewBox="0 0 14 14" fill={isCwdStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.2">
           <path d="M7 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L7 10.5l-3.52 1.85.67-3.93L1.3 5.64l3.94-.57L7 1.5z"/>
         </svg>
+        <span className="text-[10px] font-mono leading-none">Favorites</span>
       </button>
 
       {open && createPortal(

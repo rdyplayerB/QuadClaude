@@ -1,14 +1,5 @@
-// Parsed history exchange entry
-export interface HistoryExchangeEntry {
-  time: string
-  paneId: number
-  type: 'input' | 'output'
-  content: string
-}
-
 // Layout types - all show 4 terminals (true to "QuadClaude" name)
-// 'history' is a special review mode showing one terminal + its history
-export type LayoutMode = 'grid' | 'focus' | 'focus-right' | 'history'
+export type LayoutMode = 'grid' | 'focus' | 'focus-right'
 
 // Git status for pane header
 export interface GitStatus {
@@ -74,8 +65,24 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   layoutFocusRight: `${metaKey}+3`,
 }
 
-// All available layouts
-export const ALL_LAYOUTS: LayoutMode[] = ['grid', 'focus', 'focus-right']
+// Background configuration
+export type BackgroundMode = 'unified' | 'per-pane'
+
+export interface BackgroundConfig {
+  enabled: boolean
+  mode: BackgroundMode
+  image: string | null // path to background image (unified mode)
+  opacity: number // terminal background opacity (0.5 - 1.0, lower = more background visible)
+  paneImages?: Record<number, string | null> // per-pane backgrounds
+  customWallpapers?: string[] // user-added wallpaper file paths
+}
+
+export const DEFAULT_BACKGROUND: BackgroundConfig = {
+  enabled: false,
+  mode: 'unified',
+  image: 'backgrounds/bg.png',
+  opacity: 0.85,
+}
 
 export interface WorkspacePreferences {
   theme: 'dark' | 'light' | 'system'
@@ -83,6 +90,7 @@ export interface WorkspacePreferences {
   hotkeys: HotkeyBindings
   savedPrompts: SavedPrompt[]
   favoriteDirectories: string[]
+  background?: BackgroundConfig
 }
 
 export interface WindowBounds {
@@ -98,8 +106,6 @@ export const IPC_CHANNELS = {
   TERMINAL_INPUT: 'terminal:input',
   TERMINAL_OUTPUT: 'terminal:output',
   TERMINAL_RESIZE: 'terminal:resize',
-  TERMINAL_READY: 'terminal:ready',
-
   // PTY management
   PTY_CREATE: 'pty:create',
   PTY_KILL: 'pty:kill',
@@ -113,17 +119,7 @@ export const IPC_CHANNELS = {
   WORKSPACE_LOAD: 'workspace:load',
   WORKSPACE_GET_HOME: 'workspace:get-home',
 
-  // History
-  HISTORY_GET_PROJECT_ID: 'history:get-project-id',
-  HISTORY_APPEND: 'history:append',
-  HISTORY_GET_SESSIONS: 'history:get-sessions',
-  HISTORY_GET_DAY: 'history:get-day',
-  HISTORY_SEARCH: 'history:search',
-  HISTORY_GET_DAY_EXCHANGES: 'history:get-day-exchanges',
-  HISTORY_DELETE_DAY: 'history:delete-day',
-
   // App
-  APP_QUIT: 'app:quit',
   APP_MENU_ACTION: 'app:menu-action',
 
   // System
@@ -131,7 +127,29 @@ export const IPC_CHANNELS = {
 
   // App info
   APP_GET_VERSION: 'app:get-version',
+
+  // Dialog
+  DIALOG_OPEN_IMAGE: 'dialog:open-image',
+
+  // Usage tracking
+  USAGE_UPDATE: 'usage:update',
+  USAGE_FETCH: 'usage:fetch',
+  PTY_CONTEXT_USAGE: 'pty:context-usage',
 } as const
+
+// Rate limit usage data from Anthropic API
+export interface UsageData {
+  fiveHour: { utilization: number; resetsAt: string | null }
+  weekly: { utilization: number; resetsAt: string | null }
+  fetchedAt: number
+}
+
+// Per-pane context window usage from statusline
+export interface ContextUsage {
+  contextPct: number
+  model: string
+  updatedAt: number
+}
 
 // Menu actions
 export type MenuAction =

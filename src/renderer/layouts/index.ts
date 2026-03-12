@@ -45,21 +45,8 @@ export const LAYOUTS: Record<LayoutMode, LayoutConfig> = {
 
 export function getGridStyle(
   layout: LayoutMode,
-  _focusPaneId: number,
-  _activePaneId: number = 0
 ): React.CSSProperties {
   const config = LAYOUTS[layout] || LAYOUTS.grid
-
-  // For history layout, show only the first pane (the reviewed terminal) fullscreen
-  if (layout === 'history') {
-    return {
-      display: 'grid',
-      gridTemplate: '1fr / 1fr',
-      gridTemplateAreas: '"pane0"',
-      gap: '0px',
-      height: '100%',
-    }
-  }
 
   // For focus layout, position 0 is always the large focus area (on left)
   if (layout === 'focus') {
@@ -104,16 +91,8 @@ export function getGridStyle(
 
 export function getPaneStyle(
   position: number,
-  _paneId: number,
   layout: LayoutMode,
-  _activePaneId: number = 0
 ): React.CSSProperties {
-  // History mode: only show position 0 (the reviewed terminal)
-  if (layout === 'history') {
-    if (position !== 0) return { display: 'none' }
-    return { gridArea: 'pane0', minWidth: 0, minHeight: 0, overflow: 'hidden' }
-  }
-
   const config = LAYOUTS[layout] || LAYOUTS.grid
 
   if (!config.visiblePanes.includes(position)) {

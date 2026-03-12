@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, KeyboardEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { HotkeyBindings, DEFAULT_HOTKEYS } from '../../shared/types'
+import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode } from '../../shared/types'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -10,8 +10,9 @@ interface SettingsModalProps {
 type HotkeyField = keyof HotkeyBindings
 
 export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { preferences, updatePreferences } = useWorkspaceStore()
-  const { hotkeys, fontSize, theme } = preferences
+  const { preferences, updatePreferences, updateBackground } = useWorkspaceStore()
+  const { hotkeys, fontSize } = preferences
+  const background = preferences.background ?? DEFAULT_BACKGROUND
   const modalRef = useRef<HTMLDivElement>(null)
   const firstFocusableRef = useRef<HTMLButtonElement>(null)
 
@@ -132,25 +133,25 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
       onClick={handleBackdropClick}
       role="presentation"
     >
       <div
         ref={modalRef}
-        className="bg-[--ui-bg-elevated] border border-[--ui-border] rounded-xl shadow-2xl w-full max-w-md mx-4"
+        className="glass-elevated glass-border rounded-xl shadow-2xl w-full max-w-md mx-4 backdrop-blur-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[--ui-border]">
+        <div className="flex items-center justify-between px-5 py-4 border-b glass-border">
           <h2 id="settings-title" className="text-lg font-semibold text-[--ui-text-primary]">Settings</h2>
           <button
             ref={firstFocusableRef}
             onClick={onClose}
-            className="p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active] rounded-lg transition-all"
+            className="p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 rounded-lg transition-all"
             aria-label="Close settings"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
@@ -173,7 +174,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 <div className="flex items-center gap-2" role="group" aria-labelledby="font-size-label">
                   <button
                     onClick={() => updatePreferences({ fontSize: Math.max(10, fontSize - 1) })}
-                    className="w-8 h-8 flex items-center justify-center text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                    className="w-8 h-8 flex items-center justify-center text-sm glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                     aria-label="Decrease font size"
                   >
                     −
@@ -183,7 +184,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   </span>
                   <button
                     onClick={() => updatePreferences({ fontSize: Math.min(24, fontSize + 1) })}
-                    className="w-8 h-8 flex items-center justify-center text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                    className="w-8 h-8 flex items-center justify-center text-sm glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                     aria-label="Increase font size"
                   >
                     +
@@ -191,28 +192,181 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 </div>
               </div>
 
-              {/* Theme */}
+            </div>
+          </div>
+
+          {/* Background Section */}
+          <div role="group" aria-labelledby="background-heading">
+            <h3 id="background-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-4">
+              Background
+            </h3>
+            <div className="space-y-4">
+              {/* Enable toggle */}
               <div className="flex items-center justify-between">
-                <span className="text-sm text-[--ui-text-primary]" id="theme-label">Theme</span>
-                <div className="flex items-center bg-[--ui-bg-primary] rounded-lg p-1 border border-[--ui-border]" role="radiogroup" aria-labelledby="theme-label">
-                  {(['dark', 'light', 'system'] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => updatePreferences({ theme: t })}
-                      className={`px-3 py-1.5 text-sm capitalize rounded-md transition-all ${
-                        theme === t
-                          ? 'bg-[--ui-bg-active] text-[--ui-text-primary] font-medium'
-                          : 'text-[--ui-text-muted] hover:text-[--ui-text-secondary]'
-                      }`}
-                      role="radio"
-                      aria-checked={theme === t}
-                      aria-label={`${t} theme`}
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
+                <span className="text-sm text-[--ui-text-primary]">Show Background</span>
+                <button
+                  onClick={() => updateBackground({ enabled: !background.enabled })}
+                  className={`w-10 h-6 rounded-full transition-all relative ${
+                    background.enabled ? 'bg-[--accent]' : 'glass-control'
+                  }`}
+                  role="switch"
+                  aria-checked={background.enabled}
+                  aria-label="Toggle background"
+                >
+                  <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-all ${
+                    background.enabled ? 'left-5' : 'left-1'
+                  }`} />
+                </button>
               </div>
+
+              {background.enabled && (
+                <>
+                  {/* Mode */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-[--ui-text-primary]" id="bg-mode-label">Mode</span>
+                    <div className="flex items-center glass-control rounded-lg p-1" role="radiogroup" aria-labelledby="bg-mode-label">
+                      {(['unified', 'per-pane'] as BackgroundMode[]).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => updateBackground({ mode: m })}
+                          className={`px-3 py-1.5 text-sm rounded-md transition-all ${
+                            background.mode === m
+                              ? 'glass-control-active text-[--ui-text-primary] font-medium'
+                              : 'text-[--ui-text-muted] hover:text-[--ui-text-secondary]'
+                          }`}
+                          role="radio"
+                          aria-checked={background.mode === m}
+                        >
+                          {m === 'unified' ? 'All Windows' : 'Per Window'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Wallpaper gallery */}
+                  <div>
+                    <span className="text-sm text-[--ui-text-primary] mb-2 block">Wallpaper</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      {/* Bundled wallpapers */}
+                      {[
+                        { src: 'backgrounds/bg.png', label: 'Rooftop' },
+                      ].map((wp) => (
+                        <button
+                          key={wp.src}
+                          onClick={() => updateBackground({ image: wp.src })}
+                          className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all ${
+                            background.image === wp.src
+                              ? 'border-[--accent] shadow-lg shadow-[--accent]/20'
+                              : 'glass-border hover:border-[--ui-text-muted]'
+                          }`}
+                          title={wp.label}
+                        >
+                          <img
+                            src={wp.src}
+                            alt={wp.label}
+                            className="w-full h-full object-cover"
+                            draggable={false}
+                          />
+                          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1">
+                            <span className="text-[10px] text-white/80">{wp.label}</span>
+                          </div>
+                          {background.image === wp.src && (
+                            <div className="absolute top-1 right-1 w-4 h-4 bg-[--accent] rounded-full flex items-center justify-center">
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="white">
+                                <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>
+                              </svg>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                      {/* Custom wallpapers from user */}
+                      {(preferences.background?.customWallpapers ?? []).map((wp) => (
+                        <div
+                          key={wp}
+                          onClick={() => updateBackground({ image: wp })}
+                          className={`relative aspect-video rounded-lg overflow-hidden border-2 transition-all group cursor-pointer ${
+                            background.image === wp
+                              ? 'border-[--accent] shadow-lg shadow-[--accent]/20'
+                              : 'glass-border hover:border-[--ui-text-muted]'
+                          }`}
+                          title={wp.split('/').pop()}
+                        >
+                          <img
+                            src={`file://${wp}`}
+                            alt={wp.split('/').pop()}
+                            className="w-full h-full object-cover"
+                            draggable={false}
+                          />
+                          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1">
+                            <span className="text-[10px] text-white/80 truncate block">{wp.split('/').pop()}</span>
+                          </div>
+                          {background.image === wp && (
+                            <div className="absolute top-1 right-1 w-4 h-4 bg-[--accent] rounded-full flex items-center justify-center">
+                              <svg width="10" height="10" viewBox="0 0 16 16" fill="white">
+                                <path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"/>
+                              </svg>
+                            </div>
+                          )}
+                          {/* Remove button */}
+                          <div
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              const customs = (preferences.background?.customWallpapers ?? []).filter(w => w !== wp)
+                              updateBackground({
+                                customWallpapers: customs,
+                                ...(background.image === wp ? { image: DEFAULT_BACKGROUND.image } : {}),
+                              })
+                            }}
+                            className="absolute top-1 left-1 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 cursor-pointer"
+                            title="Remove wallpaper"
+                          >
+                            <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                              <path d="M4 4l8 8M12 4l-8 8" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+                            </svg>
+                          </div>
+                        </div>
+                      ))}
+                      {/* Add custom wallpaper button */}
+                      <button
+                        onClick={async () => {
+                          const filePath = await window.electronAPI.openImageDialog()
+                          if (filePath) {
+                            const customs = [...(preferences.background?.customWallpapers ?? []), filePath]
+                            updateBackground({ image: filePath, customWallpapers: customs })
+                          }
+                        }}
+                        className="aspect-video rounded-lg border-2 border-dashed glass-border hover:border-[--accent] flex flex-col items-center justify-center gap-1 transition-all text-[--ui-text-muted] hover:text-[--accent]"
+                        title="Add custom wallpaper"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                          <path d="M8 3v10M3 8h10"/>
+                        </svg>
+                        <span className="text-[10px]">Add</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Opacity slider */}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-[--ui-text-primary]" id="bg-opacity-label">Opacity</span>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.02"
+                        value={background.opacity}
+                        onChange={(e) => updateBackground({ opacity: parseFloat(e.target.value) })}
+                        className="w-28 accent-[--accent]"
+                        aria-labelledby="bg-opacity-label"
+                      />
+                      <span className="text-xs text-[--ui-text-muted] w-10 text-right">
+                        {Math.round(background.opacity * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -247,7 +401,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                       className={`px-3 py-1.5 min-w-[100px] text-sm text-center rounded-lg transition-all ${
                         editingHotkey === field
                           ? 'bg-[--accent]/10 border-2 border-[--accent] text-[--accent]'
-                          : 'bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
+                          : 'glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
                       }`}
                       aria-labelledby={`hotkey-label-${field}`}
                     >
@@ -274,7 +428,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                       className={`px-3 py-1.5 min-w-[100px] text-sm text-center rounded-lg transition-all ${
                         editingHotkey === field
                           ? 'bg-[--accent]/10 border-2 border-[--accent] text-[--accent]'
-                          : 'bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
+                          : 'glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
                       }`}
                       aria-labelledby={`hotkey-label-${field}`}
                     >
@@ -288,7 +442,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t border-[--ui-border]">
+        <div className="px-5 py-4 border-t glass-border">
           <div className="text-xs text-[--ui-text-muted] text-center">
             crafted by{' '}
             <a
