@@ -21,9 +21,9 @@
   --ui-border-subtle: #2a2a2a;
   --ui-text-primary: #ffffff;
   --ui-text-secondary: #888;
-  --ui-text-muted: #666;
-  --ui-text-dimmed: #555;
-  --ui-text-faint: #444;
+  --ui-text-muted: #999;
+  --ui-text-dimmed: #999;
+  --ui-text-faint: #888;
 
   /* Status bar */
   --statusbar-bg: #1e1e1e;
@@ -35,7 +35,8 @@
   /* Glass effect - low opacity to let macOS vibrancy show through */
   --glass-bg: rgba(20, 20, 20, 0.3);
   --glass-bg-elevated: rgba(30, 30, 30, 0.25);
-  --glass-bg-header: rgba(20, 20, 20, 0.2);
+  --glass-bg-header: rgba(20, 20, 20, 0.65);
+  --glass-bg-pane-header: rgba(20, 20, 20, 0.55);
   --glass-blur: 0px; /* Disable CSS blur - let macOS vibrancy handle it */
 
   /* Git colors */
@@ -93,29 +94,30 @@ body {
   flex: 0 0 32px;
 }
 
-/* Terminal container - with performance optimizations */
+/* Terminal container */
 .terminal-container {
   width: 100%;
   height: 100%;
-  min-height: 0; /* Critical for flexbox - allows proper shrinking */
-  contain: layout style;
+  min-height: 0;
   background: rgba(var(--terminal-bg-rgb), 0.5);
 }
 
 .terminal-container .xterm {
   height: 100%;
-  padding: 4px;
+  padding: 4px 4px 0 4px;
   background: transparent !important;
 }
 
-/* Force xterm internal elements to be transparent so glass shows through */
+/* Force xterm internal elements to be transparent so glass/wallpaper shows through */
 .terminal-container .xterm-viewport {
   background: transparent !important;
+  background-color: transparent !important;
 }
 
 .terminal-container .xterm-screen {
   background: transparent !important;
 }
+
 
 /* Titlebar drag region */
 .titlebar-drag-region {
@@ -126,17 +128,6 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* When background is enabled, make all terminal layers transparent */
-.bg-transparent .terminal-container {
-  background: transparent !important;
-  contain: layout style; /* Remove 'paint' from contain - it blocks transparency */
-}
-
-.bg-transparent .terminal-container .xterm,
-.bg-transparent .terminal-container .xterm-viewport,
-.bg-transparent .terminal-container .xterm-screen {
-  background: transparent !important;
-}
 
 /* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */
 .glass {
@@ -149,6 +140,10 @@ body {
 
 .glass-header {
   background: var(--glass-bg-header);
+}
+
+.glass-pane-header {
+  background: var(--glass-bg-pane-header);
 }
 
 /* Glass control surfaces - theme-aware for settings/modals */

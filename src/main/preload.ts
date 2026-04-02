@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage } from '../shared/types'
 
 // Expose protected methods to the renderer process
@@ -90,6 +90,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // File dialogs
   openImageDialog: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_IMAGE) as Promise<string | null>,
+
+  // File utilities
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 })
 
 // Type declaration for the renderer
@@ -115,6 +118,7 @@ declare global {
       fetchUsage: () => Promise<UsageData | null>
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
       openImageDialog: () => Promise<string | null>
+      getPathForFile: (file: File) => string
     }
   }
 }

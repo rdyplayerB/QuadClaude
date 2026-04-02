@@ -195,6 +195,23 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
             </div>
           </div>
 
+          {/* Prompt Bar Section */}
+          <div role="group" className="mb-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-[--ui-text-primary]">{preferences.showPromptBar !== false ? 'Hide' : 'Show'} Prompt Bar</span>
+              <button
+                onClick={() => updatePreferences({ showPromptBar: preferences.showPromptBar === false ? true : false })}
+                className={`w-10 h-6 rounded-full transition-all relative ${
+                  preferences.showPromptBar !== false ? 'bg-[--accent]' : 'glass-control'
+                }`}
+              >
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                  preferences.showPromptBar !== false ? 'left-5' : 'left-1'
+                }`} />
+              </button>
+            </div>
+          </div>
+
           {/* Background Section */}
           <div role="group" aria-labelledby="background-heading">
             <h3 id="background-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-4">

@@ -91,6 +91,7 @@ export interface WorkspacePreferences {
   savedPrompts: SavedPrompt[]
   favoriteDirectories: string[]
   background?: BackgroundConfig
+  showPromptBar?: boolean
 }
 
 export interface WindowBounds {
@@ -167,3 +168,4 @@ export type MenuAction =
   | 'increase-font'
   | 'decrease-font'
   | 'open-settings'
+  | 'toggle-prompt-bar'

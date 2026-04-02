@@ -32,6 +32,17 @@ function App() {
   }, [initialize])
 
 
+  // Prevent Electron from navigating when files are dropped outside a terminal pane
+  useEffect(() => {
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener('dragover', prevent)
+    document.addEventListener('drop', prevent)
+    return () => {
+      document.removeEventListener('dragover', prevent)
+      document.removeEventListener('drop', prevent)
+    }
+  }, [])
+
   // Enable global hotkeys (disabled when settings modal is open)
   useHotkeys(!isSettingsOpen)
 
@@ -91,8 +102,8 @@ function App() {
         case 'open-settings':
           setIsSettingsOpen(true)
           break
-        case 'open-command-palette':
-          // Prompt toolbar is now always visible
+        case 'toggle-prompt-bar':
+          store.updatePreferences({ showPromptBar: store.preferences.showPromptBar === false })
           break
       }
     })
@@ -157,6 +168,9 @@ function App() {
         </div>
       </div>
 
+      {/* Prompt bookmarks bar */}
+      <PromptToolbar onSelectPrompt={handlePromptClick} />
+
       {/* Main content area */}
       <div className="flex-1 overflow-hidden flex">
         {/* Terminal grid - always mounted to preserve terminal state */}
@@ -164,9 +178,6 @@ function App() {
           <TerminalGrid />
         </div>
       </div>
-
-      {/* Floating prompt toolbar */}
-      <PromptToolbar onSelectPrompt={handlePromptClick} />
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />

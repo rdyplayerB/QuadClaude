@@ -16,6 +16,9 @@ const focusListeners = new Map<number, () => void>()
 const userScrolledUp = new Map<number, boolean>()
 // Guard to prevent onScroll from resetting userScrolledUp during programmatic writes
 const isWritingOutput = new Map<number, boolean>()
+// Pending output buffer - when user is scrolled up, batch writes to reduce flicker
+const pendingOutput = new Map<number, string[]>()
+const pendingFlush = new Map<number, number>() // RAF handle per pane
 
 // Terminal theme constants (extracted to avoid recreation on every render)
 const DARK_THEME = {
@@ -84,6 +87,10 @@ function disposeTerminal(paneId: number) {
     focusListeners.delete(paneId)
     userScrolledUp.delete(paneId)
     isWritingOutput.delete(paneId)
+    pendingOutput.delete(paneId)
+    const raf = pendingFlush.get(paneId)
+    if (raf) cancelAnimationFrame(raf)
+    pendingFlush.delete(paneId)
 
     // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
     entry.terminal.dispose()
@@ -184,7 +191,6 @@ function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
     // Ignore fit errors during transitions
     return
   }
-  // Always scroll to bottom if we were at the bottom before fit
   if (wasAtBottom) {
     terminal.scrollToBottom()
   }
@@ -242,7 +248,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           } catch (e) {
             // Ignore fit errors
           }
-          // Always scroll to bottom if we were at bottom before reattachment
           if (wasAtBottom) {
             existing.terminal.scrollToBottom()
           }
@@ -286,7 +291,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         if (terminalRef.current && terminalRef.current.offsetWidth > 0) {
           try {
             fitAddon.fit()
-            terminal.scrollToBottom() // New terminal always starts at bottom
+            terminal.scrollToBottom()
           } catch (e) {
             // Ignore fit errors
           }
@@ -486,6 +491,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
         try {
           fitAddon.fit()
+          if (terminalRef.current) closeRowGap(terminalRef.current)
         } catch (e) {
           // Ignore fit errors
         }
@@ -517,31 +523,43 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           const terminal = xtermRef.current
           const hasUserScrolledUp = userScrolledUp.get(paneId)
 
-          // If user has scrolled up, save position before write (xterm auto-scrolls on write)
-          let savedViewportY: number | null = null
-          if (hasUserScrolledUp) {
-            savedViewportY = terminal.buffer.active.viewportY
-            isWritingOutput.set(paneId, true) // Guard against onScroll resetting our flag
-          }
-
-          // Write data
-          terminal.write(data)
-
-          // Restore scroll position if user was scrolled up, otherwise scroll to bottom
-          if (hasUserScrolledUp && savedViewportY !== null) {
-            // xterm auto-scrolls on write, so scroll back up to where user was
-            // viewportY is the top line visible; after write it's at baseY (bottom)
-            const currentViewportY = terminal.buffer.active.viewportY
-            const linesToScrollBack = savedViewportY - currentViewportY
-            if (linesToScrollBack !== 0) {
-              terminal.scrollLines(linesToScrollBack)
-            }
-            isWritingOutput.set(paneId, false) // Clear guard
-          } else {
+          if (!hasUserScrolledUp) {
+            // Normal mode: write immediately and stay at bottom
+            terminal.write(data)
             terminal.scrollToBottom()
-          }
+          } else {
+            // User is scrolled up: batch writes and flush once per frame
+            // This avoids per-chunk save/restore flicker during rapid output
+            let buf = pendingOutput.get(paneId)
+            if (!buf) {
+              buf = []
+              pendingOutput.set(paneId, buf)
+            }
+            buf.push(data)
 
-          // Claude status is now detected via process polling, not output matching
+            // Schedule a single flush per animation frame
+            if (!pendingFlush.has(paneId)) {
+              const savedViewportY = terminal.buffer.active.viewportY
+              pendingFlush.set(paneId, requestAnimationFrame(() => {
+                pendingFlush.delete(paneId)
+                const chunks = pendingOutput.get(paneId)
+                if (!chunks || !chunks.length) return
+                pendingOutput.set(paneId, [])
+
+                // Write all buffered chunks at once
+                isWritingOutput.set(paneId, true)
+                terminal.write(chunks.join(''))
+
+                // Restore scroll position to where user was
+                const currentViewportY = terminal.buffer.active.viewportY
+                const delta = savedViewportY - currentViewportY
+                if (delta !== 0) {
+                  terminal.scrollLines(delta)
+                }
+                isWritingOutput.set(paneId, false)
+              }))
+            }
+          }
         }
       }
     )
@@ -585,7 +603,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
             if (terminalRef.current.offsetWidth > 0) {
               try {
                 fitAddonRef.current.fit()
-                xtermRef.current.scrollToBottom() // After clear, always at bottom
+                    xtermRef.current.scrollToBottom() // After clear, always at bottom
                 const { cols, rows } = xtermRef.current
                 window.electronAPI.resizeTerminal(paneId, cols, rows)
               } catch (e) {
@@ -641,10 +659,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         store.setPaneCwd(paneId, cwd)
       }
 
-      // Update git status every 3rd poll (15 seconds)
+      // Update git status on first poll, then every 3rd poll (15 seconds)
       pollCount++
-      if (pollCount >= 3) {
-        pollCount = 0
+      if (pollCount === 1 || pollCount >= 3) {
+        if (pollCount >= 3) pollCount = 0
         const gitStatus = await window.electronAPI.getGitStatus(paneId)
         if (gitStatus) {
           store.setPaneGitStatus(paneId, gitStatus)
@@ -727,10 +745,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // Build a string of all file paths, space-separated and quoted if needed
       const paths: string[] = []
       for (let i = 0; i < files.length; i++) {
-        const file = files[i] as File & { path?: string }
-        if (file.path) {
+        const filePath = window.electronAPI.getPathForFile(files[i])
+        if (filePath) {
           // Escape spaces and special characters by quoting
-          const path = file.path.includes(' ') ? `"${file.path}"` : file.path
+          const path = filePath.includes(' ') ? `"${filePath}"` : filePath
           paths.push(path)
         }
       }
@@ -774,9 +792,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       onDrop={handleDrop}
     >
       <PaneHeader paneId={paneId} />
-      {/* Terminal + status bar wrapper */}
+      {/* Terminal wrapper - fills all remaining space */}
       <div
-        className="flex-1 min-h-0 flex flex-col relative"
+        className="flex-1 min-h-0 relative"
         style={paneBgImage ? {
           backgroundImage: `url(${paneBgImage?.startsWith('/') ? `file://${paneBgImage}` : paneBgImage})`,
           backgroundSize: 'cover',
@@ -794,13 +812,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         )}
         <div
           ref={terminalRef}
-          className="flex-1 min-h-0 terminal-container relative z-[1]"
+          className="absolute inset-0 terminal-container z-[1]"
           role="application"
           aria-label={`Terminal ${paneId + 1}`}
         />
-        <div className="relative z-[1]">
-          <GitStatusBar paneId={paneId} />
-        </div>
       </div>
       {isDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">

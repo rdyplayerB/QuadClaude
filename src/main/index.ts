@@ -759,9 +759,14 @@ function createApplicationMenu() {
           }
         },
         {
-          label: 'Prompt Palette',
+          label: 'Always Show Prompt Bar',
           accelerator: 'CmdOrCtrl+P',
-          click: () => sendMenuAction('open-command-palette')
+          type: 'checkbox',
+          checked: true,
+          click: (menuItem) => {
+            sendMenuAction('toggle-prompt-bar')
+            // Menu item checked state toggles automatically
+          }
         },
         { type: 'separator' },
         {
