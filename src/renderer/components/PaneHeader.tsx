@@ -1,6 +1,6 @@
 import { DragEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { clearTerminal } from './TerminalPane'
+import { clearTerminal, sendToTerminal } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
 
 // Custom MIME type for pane drag operations
@@ -31,14 +31,37 @@ function getFolderName(path: string): string {
 }
 
 export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) {
-  const { panes, activePaneId, setActivePaneId } = useWorkspaceStore()
+  // Atomic selectors so this header only re-renders for its own pane's
+  // changes, not every other pane's state/git/cwd churn.
+  const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
+  const paneIndex = useWorkspaceStore((s) => s.panes.findIndex((p) => p.id === paneId))
+  const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
+  const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
+  const skipPermissions = useWorkspaceStore(
+    (s) => s.preferences.dangerouslySkipPermissions === true
+  )
 
-  const pane = panes.find((p) => p.id === paneId)
-  const paneIndex = panes.findIndex((p) => p.id === paneId)
-  const isActive = activePaneId === paneId
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
+  const claudeRunning = pane.state === 'claude-active' || pane.state === 'claude-waiting'
+  const startClaude = () => {
+    if (claudeRunning) return
+    const cmd = skipPermissions
+      ? 'claude --dangerously-skip-permissions\n'
+      : 'claude\n'
+    sendToTerminal(paneId, cmd)
+  }
+
+  const servers = pane.servers ?? []
+  const killServers = async () => {
+    // Kill every detected server in this pane (process-group kill usually
+    // takes the whole dev server + workers down), then clear optimistically.
+    for (const s of servers) {
+      await window.electronAPI.killServer(paneId, s.pid)
+    }
+    useWorkspaceStore.getState().setPaneServers(paneId, [])
+  }
 
   // Display name is the folder/repo name from working directory
   const displayName = getFolderName(pane.workingDirectory)
@@ -53,6 +76,15 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
 
   // State indicators - each pane gets its own unique color
   const stateIndicator = () => {
+    if (pane.state === 'claude-waiting') {
+      return (
+        <span
+          className="w-2 h-2 rounded-full animate-pulse"
+          style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 6px var(--git-orange)' }}
+          title="Claude is waiting for your decision"
+        />
+      )
+    }
     if (pane.state === 'claude-active') {
       return (
         <span
@@ -98,6 +130,30 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         onDragStart={(e) => e.preventDefault()}
         draggable={false}
       >
+        {/* Local server badge + kill */}
+        {servers.length > 0 && (
+          <button
+            onClick={killServers}
+            title={`Kill server${servers.length > 1 ? 's' : ''}: ${servers
+              .map((s) => `${s.command} :${s.port}`)
+              .join(', ')}`}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] leading-none text-[--git-orange] hover:bg-[--git-orange]/15 transition-colors"
+          >
+            <span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 5px var(--git-orange)' }}
+            />
+            <span>
+              {servers.length <= 2
+                ? servers.map((s) => `:${s.port}`).join(' ')
+                : `:${servers[0].port} +${servers.length - 1}`}
+            </span>
+            <svg width="9" height="9" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3l8 8M11 3l-8 8" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+
         {/* Git status - compact inline */}
         {pane.gitStatus?.isGitRepo && (
           <div className="flex items-center gap-1.5 font-mono text-[10px] mr-1">
@@ -119,6 +175,31 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           </div>
         )}
         <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
+        <button
+          onClick={startClaude}
+          disabled={claudeRunning}
+          className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
+            claudeRunning
+              ? 'opacity-40 cursor-default text-[--ui-text-dimmed]'
+              : skipPermissions
+                ? 'text-[--git-orange] hover:brightness-125'
+                : 'text-[--ui-text-dimmed] hover:text-[--ui-text-primary]'
+          }`}
+          title={
+            claudeRunning
+              ? 'Claude is already running in this pane'
+              : skipPermissions
+                ? 'Start Claude with --dangerously-skip-permissions (bypasses all permission prompts) in this directory'
+                : 'Start Claude in this directory'
+          }
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M4 4l4 4-4 4M9 12h3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="text-[10px] leading-none">
+            {claudeRunning ? 'Running' : skipPermissions ? 'Claude ⚡' : 'Claude'}
+          </span>
+        </button>
         <button
           onClick={() => clearTerminal(paneId)}
           className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors rounded"

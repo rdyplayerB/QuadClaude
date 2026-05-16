@@ -10,13 +10,14 @@ import { useHotkeys } from './hooks/useHotkeys'
 import { MenuAction, SavedPrompt } from '../shared/types'
 
 function App() {
-  const {
-    initialize,
-    layout,
-    activePaneId,
-    setActivePaneId,
-    setFocusPaneId,
-  } = useWorkspaceStore()
+  // Atomic selectors: App is the root, so a whole-store subscription here
+  // re-renders the entire tree on every pane git/state/cwd update during
+  // streaming. Subscribe only to what App actually reacts to.
+  const initialize = useWorkspaceStore((s) => s.initialize)
+  const layout = useWorkspaceStore((s) => s.layout)
+  const activePaneId = useWorkspaceStore((s) => s.activePaneId)
+  const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
+  const setFocusPaneId = useWorkspaceStore((s) => s.setFocusPaneId)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
@@ -30,6 +31,32 @@ function App() {
   useEffect(() => {
     initialize()
   }, [initialize])
+
+  // Single shared poll for local servers across all panes (one lsof+ps in
+  // main, not per-pane). Visibility-gated so it pauses when hidden.
+  useEffect(() => {
+    let cancelled = false
+    const poll = async () => {
+      if (document.hidden) return
+      try {
+        const byPane = await window.electronAPI.detectServers()
+        if (cancelled) return
+        const store = useWorkspaceStore.getState()
+        for (const pane of store.panes) {
+          store.setPaneServers(pane.id, byPane[pane.id] ?? [])
+        }
+      } catch {
+        // ignore - transient
+      }
+    }
+    const startDelay = setTimeout(poll, 3000)
+    const interval = setInterval(poll, 10000)
+    return () => {
+      cancelled = true
+      clearTimeout(startDelay)
+      clearInterval(interval)
+    }
+  }, [])
 
 
   // Prevent Electron from navigating when files are dropped outside a terminal pane

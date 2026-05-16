@@ -107,9 +107,11 @@ export class WorkspaceManager {
   }
 
   save(state: Partial<WorkspaceState>): void {
-    const current = this.load()
-    const updated = { ...current, ...state }
-    this.store.set('workspace', updated)
+    // Merge against the in-memory store value directly. Do NOT call load() here:
+    // load() runs fs.existsSync() for every pane, and save() is called on a
+    // debounced cadence for many UI changes (focus, layout, settings).
+    const current = this.store.get('workspace', createDefaultWorkspace())
+    this.store.set('workspace', { ...current, ...state })
   }
 
   getWindowBounds(): WindowBounds | undefined {

@@ -92,7 +92,8 @@ class Logger {
       }
 
       const line = `[${entry.timestamp}] [${entry.level.toUpperCase()}] [${entry.category}] ${entry.message}${entry.details ? ' | ' + entry.details : ''}\n`
-      fs.appendFileSync(this.logFilePath, line)
+      // Async, fire-and-forget: never block the main thread on disk I/O.
+      fs.appendFile(this.logFilePath, line, () => {})
     } catch {
       // Silently fail file writes - don't cause issues if we can't write
     }

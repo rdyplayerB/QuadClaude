@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
@@ -19,6 +20,130 @@ const isWritingOutput = new Map<number, boolean>()
 // Pending output buffer - when user is scrolled up, batch writes to reduce flicker
 const pendingOutput = new Map<number, string[]>()
 const pendingFlush = new Map<number, number>() // RAF handle per pane
+// Debounced timer per pane for scanning the buffer for Claude decision prompts
+const promptScanTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+// Scan the visible terminal buffer for Claude Code's yes/no decision prompt.
+// Claude renders a selectable list ("❯ 1. Yes") inside a question box; we look
+// for the selector arrow on a numbered option together with prompt wording.
+function scanForClaudePrompt(terminal: Terminal): boolean {
+  const buf = terminal.buffer.active
+  const end = buf.baseY + terminal.rows
+  const start = Math.max(0, end - 40)
+  let text = ''
+  for (let i = start; i < end; i++) {
+    const line = buf.getLine(i)
+    if (line) text += line.translateToString(true) + '\n'
+  }
+  const hasSelector = /❯\s*\d+\.\s/.test(text)
+  const hasDecision =
+    /\b\d+\.\s*Yes\b/i.test(text) ||
+    /Do you want to (proceed|continue|make this edit|create|run)/i.test(text)
+  return hasSelector && hasDecision
+}
+
+// Soft two-note chime synthesized via WebAudio (no asset needed)
+let chimeCtx: AudioContext | null = null
+function playDecisionChime() {
+  try {
+    const prefs = useWorkspaceStore.getState().preferences
+    if (prefs.decisionSoundEnabled === false) return
+    chimeCtx = chimeCtx || new AudioContext()
+    const ctx = chimeCtx
+    const now = ctx.currentTime
+    ;[880, 1174.7].forEach((freq, i) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      const t = now + i * 0.13
+      gain.gain.setValueAtTime(0, t)
+      gain.gain.linearRampToValueAtTime(0.14, t + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.35)
+      osc.start(t)
+      osc.stop(t + 0.4)
+    })
+  } catch {
+    // Audio unavailable - visual indicator still applies
+  }
+}
+
+// Coalesced terminal write: drain all chunks buffered this frame in ONE
+// terminal.write() + ONE scroll op. A dev server emits dozens-hundreds of
+// tiny chunks/sec; writing+scrolling per chunk (the old common path) was the
+// single biggest CPU cost across 4 panes.
+function flushOutput(paneId: number, terminal: Terminal) {
+  const chunks = pendingOutput.get(paneId)
+  if (!chunks || chunks.length === 0) return
+  pendingOutput.set(paneId, [])
+  const joined = chunks.join('')
+  isWritingOutput.set(paneId, true)
+  if (userScrolledUp.get(paneId)) {
+    // Preserve the user's scroll position across the batched write
+    const savedViewportY = terminal.buffer.active.viewportY
+    terminal.write(joined)
+    const delta = savedViewportY - terminal.buffer.active.viewportY
+    if (delta !== 0) terminal.scrollLines(delta)
+  } else {
+    terminal.write(joined)
+    terminal.scrollToBottom()
+  }
+  isWritingOutput.set(paneId, false)
+}
+
+// Re-evaluate active vs waiting from the buffer, transitioning state and
+// chiming once when a pane newly enters the waiting state.
+function refreshClaudeWaitingState(paneId: number, terminal: Terminal | null) {
+  const store = useWorkspaceStore.getState()
+  const current = store.panes.find((p) => p.id === paneId)?.state
+  // Only meaningful while Claude is believed to be running
+  if (current !== 'claude-active' && current !== 'claude-waiting') return
+  const waiting = terminal ? scanForClaudePrompt(terminal) : false
+  const next = waiting ? 'claude-waiting' : 'claude-active'
+  if (current !== next) {
+    store.setPaneState(paneId, next)
+    if (next === 'claude-waiting') playDecisionChime()
+  }
+}
+
+// Cached parsed hotkeys for fast key event matching
+interface ParsedHotkey {
+  key: string
+  ctrl: boolean
+  alt: boolean
+  shift: boolean
+  meta: boolean
+}
+let cachedHotkeys: { raw: typeof DEFAULT_HOTKEYS; parsed: Map<string, ParsedHotkey> } | null = null
+
+function parseHotkey(hotkeyStr: string): ParsedHotkey {
+  const parts = hotkeyStr.toLowerCase().split('+')
+  const key = parts.pop() || ''
+  return {
+    key,
+    ctrl: parts.includes('ctrl'),
+    alt: parts.includes('alt'),
+    shift: parts.includes('shift'),
+    meta: parts.includes('meta') || parts.includes('cmd'),
+  }
+}
+
+function getParsedHotkeys(hotkeys: typeof DEFAULT_HOTKEYS): Map<string, ParsedHotkey> {
+  // Return cached if hotkeys haven't changed
+  if (cachedHotkeys && cachedHotkeys.raw === hotkeys) {
+    return cachedHotkeys.parsed
+  }
+  // Parse and cache
+  const parsed = new Map<string, ParsedHotkey>()
+  parsed.set('focusTerminal1', parseHotkey(hotkeys.focusTerminal1))
+  parsed.set('focusTerminal2', parseHotkey(hotkeys.focusTerminal2))
+  parsed.set('focusTerminal3', parseHotkey(hotkeys.focusTerminal3))
+  parsed.set('focusTerminal4', parseHotkey(hotkeys.focusTerminal4))
+  cachedHotkeys = { raw: hotkeys, parsed }
+  return parsed
+}
 
 // Terminal theme constants (extracted to avoid recreation on every render)
 const DARK_THEME = {
@@ -91,6 +216,9 @@ function disposeTerminal(paneId: number) {
     const raf = pendingFlush.get(paneId)
     if (raf) cancelAnimationFrame(raf)
     pendingFlush.delete(paneId)
+    const scanTimer = promptScanTimers.get(paneId)
+    if (scanTimer) clearTimeout(scanTimer)
+    promptScanTimers.delete(paneId)
 
     // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
     entry.terminal.dispose()
@@ -104,6 +232,10 @@ export function disposeAllTerminals() {
   terminals.forEach((_, paneId) => {
     disposeTerminal(paneId)
   })
+  if (chimeCtx) {
+    chimeCtx.close().catch(() => {})
+    chimeCtx = null
+  }
 }
 
 // Helper to check if terminal is scrolled to bottom
@@ -206,19 +338,17 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   const xtermRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
 
-  const {
-    panes,
-    activePaneId,
-    setActivePaneId,
-    setFocusPaneId,
-    focusPaneId,
-    preferences,
-    layout,
-    swapPanes,
-  } = useWorkspaceStore()
-
-  const pane = panes.find((p) => p.id === paneId)
-  const isActive = activePaneId === paneId
+  // Atomic selectors: this pane only re-renders when ITS OWN slice changes,
+  // not when any other pane's state/git/cwd updates (the old whole-store
+  // subscription caused all 4 panes to re-render on every pane change).
+  const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
+  const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
+  const focusPaneId = useWorkspaceStore((s) => s.focusPaneId)
+  const layout = useWorkspaceStore((s) => s.layout)
+  const preferences = useWorkspaceStore((s) => s.preferences)
+  const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
+  const setFocusPaneId = useWorkspaceStore((s) => s.setFocusPaneId)
+  const swapPanes = useWorkspaceStore((s) => s.swapPanes)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isPaneDragOver, setIsPaneDragOver] = useState(false)
 
@@ -277,8 +407,15 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
       terminal.open(terminalRef.current)
 
-      // Skip WebGL addon - canvas2d renderer is needed for transparent backgrounds
-      // (WebGL doesn't support allowTransparency). Canvas2d is performant enough for 4 terminals.
+      // GPU-accelerated Canvas renderer. Must be loaded AFTER open(). Canvas
+      // (unlike WebGL) honors allowTransparency, so the glass/wallpaper UI
+      // still shows through. This is the big CPU win under heavy log output
+      // vs xterm's fallback DOM renderer.
+      try {
+        terminal.loadAddon(new CanvasAddon())
+      } catch (e) {
+        // If the canvas context can't be created, xterm falls back to DOM
+      }
 
       xtermRef.current = terminal
       fitAddonRef.current = fitAddon
@@ -339,45 +476,29 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       })
 
       // Custom key handler to intercept hotkeys before xterm processes them
+      // Uses cached parsed hotkeys to avoid string parsing on every keystroke
       terminal.attachCustomKeyEventHandler((e) => {
         // Only handle keydown events
         if (e.type !== 'keydown') return true
 
         const key = e.key.toLowerCase()
 
-        // Get current hotkeys from store or use defaults
+        // Get cached parsed hotkeys (re-parses only when hotkeys change)
         const hotkeys = useWorkspaceStore.getState().preferences.hotkeys || DEFAULT_HOTKEYS
+        const parsed = getParsedHotkeys(hotkeys)
 
-        // Parse hotkey to check for match
-        const matchHotkey = (hotkeyStr: string): boolean => {
-          const parts = hotkeyStr.toLowerCase().split('+')
-          const hotkeyKey = parts.pop() || ''
-          const needsCtrl = parts.includes('ctrl')
-          const needsAlt = parts.includes('alt')
-          const needsShift = parts.includes('shift')
-          const needsMeta = parts.includes('meta') || parts.includes('cmd')
-
-          return (
-            key === hotkeyKey &&
-            e.ctrlKey === needsCtrl &&
-            e.altKey === needsAlt &&
-            e.shiftKey === needsShift &&
-            e.metaKey === needsMeta
-          )
-        }
-
-        // Check terminal focus hotkeys FIRST (Ctrl+1-4 by default)
-        const hotkeyMap = [
-          { hotkey: hotkeys.focusTerminal1, index: 0 },
-          { hotkey: hotkeys.focusTerminal2, index: 1 },
-          { hotkey: hotkeys.focusTerminal3, index: 2 },
-          { hotkey: hotkeys.focusTerminal4, index: 3 },
+        // Check terminal focus hotkeys (Ctrl+1-4 by default)
+        const focusKeys = [
+          { name: 'focusTerminal1', index: 0 },
+          { name: 'focusTerminal2', index: 1 },
+          { name: 'focusTerminal3', index: 2 },
+          { name: 'focusTerminal4', index: 3 },
         ]
 
-        for (const { hotkey, index } of hotkeyMap) {
-          if (matchHotkey(hotkey)) {
+        for (const { name, index } of focusKeys) {
+          const hk = parsed.get(name)
+          if (hk && key === hk.key && e.ctrlKey === hk.ctrl && e.altKey === hk.alt && e.shiftKey === hk.shift && e.metaKey === hk.meta) {
             e.preventDefault()
-            // Dispatch a custom event that useHotkeys can listen for
             window.dispatchEvent(new CustomEvent('terminal-hotkey', { detail: { index } }))
             return false
           }
@@ -388,7 +509,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
         if (isMac && e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
           if (['1', '2', '3', 'p'].includes(key)) {
-            // Return false to prevent xterm from handling, let window handler take it
             return false
           }
         } else if (!isMac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
@@ -521,44 +641,40 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       (outputPaneId, data) => {
         if (outputPaneId === paneId && xtermRef.current) {
           const terminal = xtermRef.current
-          const hasUserScrolledUp = userScrolledUp.get(paneId)
 
-          if (!hasUserScrolledUp) {
-            // Normal mode: write immediately and stay at bottom
-            terminal.write(data)
-            terminal.scrollToBottom()
-          } else {
-            // User is scrolled up: batch writes and flush once per frame
-            // This avoids per-chunk save/restore flicker during rapid output
-            let buf = pendingOutput.get(paneId)
-            if (!buf) {
-              buf = []
-              pendingOutput.set(paneId, buf)
-            }
-            buf.push(data)
-
-            // Schedule a single flush per animation frame
-            if (!pendingFlush.has(paneId)) {
-              const savedViewportY = terminal.buffer.active.viewportY
-              pendingFlush.set(paneId, requestAnimationFrame(() => {
+          // Accumulate; flush once per animation frame (both at-bottom and
+          // scrolled-up paths). One write + one scroll per frame per pane.
+          let buf = pendingOutput.get(paneId)
+          if (!buf) {
+            buf = []
+            pendingOutput.set(paneId, buf)
+          }
+          buf.push(data)
+          if (!pendingFlush.has(paneId)) {
+            pendingFlush.set(
+              paneId,
+              requestAnimationFrame(() => {
                 pendingFlush.delete(paneId)
-                const chunks = pendingOutput.get(paneId)
-                if (!chunks || !chunks.length) return
-                pendingOutput.set(paneId, [])
+                flushOutput(paneId, terminal)
+              })
+            )
+          }
 
-                // Write all buffered chunks at once
-                isWritingOutput.set(paneId, true)
-                terminal.write(chunks.join(''))
-
-                // Restore scroll position to where user was
-                const currentViewportY = terminal.buffer.active.viewportY
-                const delta = savedViewportY - currentViewportY
-                if (delta !== 0) {
-                  terminal.scrollLines(delta)
-                }
-                isWritingOutput.set(paneId, false)
-              }))
-            }
+          // Debounced prompt scan: only meaningful while Claude is running, so
+          // don't even arm the timer (or build the scan string) in shell state.
+          const st = useWorkspaceStore
+            .getState()
+            .panes.find((p) => p.id === paneId)?.state
+          if (st === 'claude-active' || st === 'claude-waiting') {
+            const existingTimer = promptScanTimers.get(paneId)
+            if (existingTimer) clearTimeout(existingTimer)
+            promptScanTimers.set(
+              paneId,
+              setTimeout(() => {
+                promptScanTimers.delete(paneId)
+                refreshClaudeWaitingState(paneId, xtermRef.current)
+              }, 400)
+            )
           }
         }
       }
@@ -622,6 +738,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   // Note: Only paneId in deps - use getState() for store access to prevent re-registration
   useEffect(() => {
     const checkClaudeStatus = async () => {
+      // Don't poll while the window is hidden/minimized/occluded
+      if (document.hidden) return
       const store = useWorkspaceStore.getState()
       const currentPane = store.panes.find((p) => p.id === paneId)
       const currentState = currentPane?.state || 'shell'
@@ -629,10 +747,19 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // Check if Claude process is actually running - this is the source of truth
       const isClaudeRunning = await window.electronAPI.isClaudeRunning(paneId)
 
-      if (isClaudeRunning && currentState !== 'claude-active') {
-        store.setPaneState(paneId, 'claude-active')
-      } else if (!isClaudeRunning && currentState === 'claude-active') {
-        store.setPaneState(paneId, 'shell')
+      if (!isClaudeRunning) {
+        if (currentState !== 'shell') store.setPaneState(paneId, 'shell')
+        return
+      }
+
+      // Claude is running: classify active vs waiting from the buffer.
+      const waiting = xtermRef.current ? scanForClaudePrompt(xtermRef.current) : false
+      const next = waiting ? 'claude-waiting' : 'claude-active'
+      if (currentState !== next) {
+        store.setPaneState(paneId, next)
+        // Chime on any transition into waiting (poll covers cases the
+        // output-settle scan missed); guarded so it fires once per prompt.
+        if (next === 'claude-waiting') playDecisionChime()
       }
     }
 
@@ -650,6 +777,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     let pollCount = 0
 
     const updateCwdAndGitStatus = async () => {
+      // Don't poll while the window is hidden/minimized/occluded
+      if (document.hidden) return
       const store = useWorkspaceStore.getState()
       const currentPane = store.panes.find((p) => p.id === paneId)
 
@@ -784,7 +913,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   return (
     <div
-      className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated`}
+      className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}

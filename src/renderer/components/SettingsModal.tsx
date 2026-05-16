@@ -212,6 +212,50 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
             </div>
           </div>
 
+          {/* Claude Launch Section */}
+          <div role="group" className="mb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-0.5 pr-3">
+                <span className="text-sm text-[--ui-text-primary]">Skip permission prompts</span>
+                <span className="text-[11px] text-[--ui-text-dimmed]">
+                  Launch the pane "Claude" button with <code>--dangerously-skip-permissions</code>
+                </span>
+              </div>
+              <button
+                onClick={() => updatePreferences({ dangerouslySkipPermissions: !preferences.dangerouslySkipPermissions })}
+                className={`shrink-0 w-10 h-6 rounded-full transition-all relative ${
+                  preferences.dangerouslySkipPermissions ? 'bg-[--accent]' : 'glass-control'
+                }`}
+              >
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                  preferences.dangerouslySkipPermissions ? 'left-5' : 'left-1'
+                }`} />
+              </button>
+            </div>
+          </div>
+
+          {/* Decision Chime Section */}
+          <div role="group" className="mb-2">
+            <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-0.5 pr-3">
+                <span className="text-sm text-[--ui-text-primary]">Decision chime</span>
+                <span className="text-[11px] text-[--ui-text-dimmed]">
+                  Play a sound when a pane starts waiting on a yes/no decision
+                </span>
+              </div>
+              <button
+                onClick={() => updatePreferences({ decisionSoundEnabled: preferences.decisionSoundEnabled === false ? true : false })}
+                className={`shrink-0 w-10 h-6 rounded-full transition-all relative ${
+                  preferences.decisionSoundEnabled !== false ? 'bg-[--accent]' : 'glass-control'
+                }`}
+              >
+                <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${
+                  preferences.decisionSoundEnabled !== false ? 'left-5' : 'left-1'
+                }`} />
+              </button>
+            </div>
+          </div>
+
           {/* Background Section */}
           <div role="group" aria-labelledby="background-heading">
             <h3 id="background-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-4">

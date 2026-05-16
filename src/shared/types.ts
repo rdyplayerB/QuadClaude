@@ -19,7 +19,14 @@ export interface SavedPrompt {
 }
 
 // Pane state
-export type PaneState = 'shell' | 'claude-active'
+export type PaneState = 'shell' | 'claude-active' | 'claude-waiting'
+
+// A local server (listening TCP port) running in a pane's process tree
+export interface ServerInfo {
+  pid: number
+  port: number
+  command: string
+}
 
 // Individual pane configuration
 export interface PaneConfig {
@@ -28,6 +35,7 @@ export interface PaneConfig {
   workingDirectory: string
   state: PaneState
   gitStatus?: GitStatus // Git status for pane header
+  servers?: ServerInfo[] // Transient: detected listening servers (not persisted)
 }
 
 // Workspace state (persisted)
@@ -92,6 +100,10 @@ export interface WorkspacePreferences {
   favoriteDirectories: string[]
   background?: BackgroundConfig
   showPromptBar?: boolean
+  // When true, the pane "Claude" button launches `claude --dangerously-skip-permissions`
+  dangerouslySkipPermissions?: boolean
+  // When false, suppress the chime played when a pane starts waiting on a decision (default: enabled)
+  decisionSoundEnabled?: boolean
 }
 
 export interface WindowBounds {
@@ -136,6 +148,8 @@ export const IPC_CHANNELS = {
   USAGE_UPDATE: 'usage:update',
   USAGE_FETCH: 'usage:fetch',
   PTY_CONTEXT_USAGE: 'pty:context-usage',
+  PTY_DETECT_SERVERS: 'pty:detect-servers',
+  PTY_KILL_SERVER: 'pty:kill-server',
 } as const
 
 // Rate limit usage data from Anthropic API

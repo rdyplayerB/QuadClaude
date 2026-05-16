@@ -9,42 +9,39 @@ import { LayoutMode } from '../../shared/types'
  * @param enabled - Whether hotkeys are currently enabled (default: true)
  */
 export function useHotkeys(enabled: boolean = true) {
-  const {
-    preferences,
-    activePaneId,
-    setActivePaneId,
-    setLayout,
-    swapPanes,
-  } = useWorkspaceStore()
+  // Subscribe ONLY to hotkeys (not the whole preferences object), so editing
+  // font size / background / prompts doesn't tear down & re-register the
+  // global keydown listener.
+  const hotkeys = useWorkspaceStore((s) => s.preferences.hotkeys)
+  const setLayout = useWorkspaceStore((s) => s.setLayout)
 
-  const handleTerminalFocus = useCallback(
-    (terminalIndex: number) => {
-      const targetPaneId = terminalIndex // 0-indexed (Terminal 1 = paneId 0)
+  // Stable callback: reads activePaneId via getState() so it doesn't change
+  // identity on every pane focus (which would re-register the listener).
+  const handleTerminalFocus = useCallback((terminalIndex: number) => {
+    const targetPaneId = terminalIndex // 0-indexed (Terminal 1 = paneId 0)
+    const store = useWorkspaceStore.getState()
+    const activePaneId = store.activePaneId
 
-      // Don't do anything if selecting the already active pane
-      if (targetPaneId === activePaneId) {
-        focusTerminal(targetPaneId)
-        return
-      }
+    // Don't do anything if selecting the already active pane
+    if (targetPaneId === activePaneId) {
+      focusTerminal(targetPaneId)
+      return
+    }
 
-      // Swap positions in the panes array
-      swapPanes(activePaneId, targetPaneId)
+    // Swap positions in the panes array
+    store.swapPanes(activePaneId, targetPaneId)
 
-      // Make the target pane active and focus it
-      setActivePaneId(targetPaneId)
+    // Make the target pane active and focus it
+    store.setActivePaneId(targetPaneId)
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          focusTerminal(targetPaneId)
-        })
+        focusTerminal(targetPaneId)
       })
-    },
-    [activePaneId, setActivePaneId, swapPanes]
-  )
+    })
+  }, [])
 
   useEffect(() => {
     if (!enabled) return
-
-    const { hotkeys } = preferences
 
     // Parse a hotkey string like "Ctrl+1" or "F1" into parts
     const parseHotkey = (hotkey: string) => {
@@ -131,5 +128,5 @@ export function useHotkeys(enabled: boolean = true) {
       window.removeEventListener('keydown', handleKeyDown, true)
       window.removeEventListener('terminal-hotkey', handleTerminalHotkey)
     }
-  }, [enabled, preferences, handleTerminalFocus, setLayout])
+  }, [enabled, hotkeys, handleTerminalFocus, setLayout])
 }

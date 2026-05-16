@@ -9,6 +9,7 @@ import {
   DEFAULT_BACKGROUND,
   GitStatus,
   BackgroundConfig,
+  ServerInfo,
 } from '../../shared/types'
 
 interface WorkspaceStore extends WorkspaceState {
@@ -28,6 +29,7 @@ interface WorkspaceStore extends WorkspaceState {
   setPaneLabel: (id: number, label: string) => void
   setPaneCwd: (id: number, cwd: string) => void
   setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
+  setPaneServers: (id: number, servers: ServerInfo[]) => void
 
   // Background
   updateBackground: (updates: Partial<BackgroundConfig>) => void
@@ -252,6 +254,24 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     // Don't save on git status changes - too frequent and not worth persisting
   },
 
+  setPaneServers: (id, servers) => {
+    // Avoid re-renders when the server list is unchanged (same ports)
+    const current = get().panes.find((p) => p.id === id)?.servers ?? []
+    const sameLength = current.length === servers.length
+    if (
+      sameLength &&
+      current.every((s, i) => s.port === servers[i].port && s.pid === servers[i].pid)
+    ) {
+      return
+    }
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === id ? { ...pane, servers } : pane
+      ),
+    }))
+    // Transient - never persisted
+  },
+
   // Background
   updateBackground: (updates) => {
     if (updates.customWallpapers && updates.customWallpapers.length > MAX_CUSTOM_WALLPAPERS) {
@@ -284,8 +304,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
     const { layout, focusPaneId, activePaneId, panes, preferences } = get()
-    // Strip transient data (gitStatus) from panes before persisting
-    const cleanPanes = panes.map(({ gitStatus: _, ...rest }) => rest)
+    // Strip transient data (gitStatus, servers) from panes before persisting
+    const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
       layout,
       focusPaneId,

@@ -41,7 +41,14 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
       '@main': resolve(__dirname, 'src/main'),
       '@renderer': resolve(__dirname, 'src/renderer'),
-      '@shared': resolve(__dirname, 'src/shared')
+      '@shared': resolve(__dirname, 'src/shared'),
+      // @xterm/addon-canvas@0.8.0-beta.48 ships a broken package.json whose
+      // "module" points at lib/addon-canvas.mjs, but the real file is
+      // lib/xterm-addon-canvas.mjs. Alias straight to the file that exists.
+      '@xterm/addon-canvas': resolve(
+        __dirname,
+        'node_modules/@xterm/addon-canvas/lib/xterm-addon-canvas.mjs'
+      )
     }
   },
   build: {

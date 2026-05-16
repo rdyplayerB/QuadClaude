@@ -978,6 +978,18 @@ function setupIPC() {
     return ptyManager?.getContextUsage(paneId) ?? null
   })
 
+  // Detect listening servers for all panes (one shared lsof+ps).
+  // Returns a plain object keyed by paneId for easy renderer consumption.
+  ipcMain.handle(IPC_CHANNELS.PTY_DETECT_SERVERS, async () => {
+    const map = (await ptyManager?.detectServers()) ?? new Map()
+    return Object.fromEntries(map)
+  })
+
+  // Kill a detected server in a pane
+  ipcMain.handle(IPC_CHANNELS.PTY_KILL_SERVER, async (_, paneId: number, pid: number) => {
+    return (await ptyManager?.killServer(paneId, pid)) ?? false
+  })
+
   // File dialog for background image selection
   ipcMain.handle(IPC_CHANNELS.DIALOG_OPEN_IMAGE, async () => {
     if (!mainWindow) return null

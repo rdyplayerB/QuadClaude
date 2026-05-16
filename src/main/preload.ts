@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -87,6 +87,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getContextUsage: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_CONTEXT_USAGE, paneId) as Promise<ContextUsage | null>,
 
+  // Local server detection / kill
+  detectServers: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_DETECT_SERVERS) as Promise<Record<number, ServerInfo[]>>,
+  killServer: (paneId: number, pid: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_KILL_SERVER, paneId, pid) as Promise<boolean>,
+
   // File dialogs
   openImageDialog: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_IMAGE) as Promise<string | null>,
@@ -117,6 +123,8 @@ declare global {
       onUsageUpdate: (callback: (data: UsageData) => void) => () => void
       fetchUsage: () => Promise<UsageData | null>
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
+      detectServers: () => Promise<Record<number, ServerInfo[]>>
+      killServer: (paneId: number, pid: number) => Promise<boolean>
       openImageDialog: () => Promise<string | null>
       getPathForFile: (file: File) => string
     }
