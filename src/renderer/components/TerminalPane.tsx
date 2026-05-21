@@ -17,11 +17,40 @@ const focusListeners = new Map<number, () => void>()
 const userScrolledUp = new Map<number, boolean>()
 // Guard to prevent onScroll from resetting userScrolledUp during programmatic writes
 const isWritingOutput = new Map<number, boolean>()
-// Pending output buffer - when user is scrolled up, batch writes to reduce flicker
+// Pending output chunks per pane, drained on the next flush.
 const pendingOutput = new Map<number, string[]>()
-const pendingFlush = new Map<number, number>() // RAF handle per pane
+// Live byte total + cumulative dropped bytes per pane. With PENDING_OUTPUT_CAP,
+// these bound the renderer's heap when Chromium pauses RAF on a hidden /
+// occluded window while dev servers and Claude keep streaming output (the
+// 204 GB blowup path - oldest chunks get evicted, never accumulate forever).
+const pendingBytes = new Map<number, number>()
+const droppedBytes = new Map<number, number>()
+const PENDING_OUTPUT_CAP = 256 * 1024
+// Each scheduled flush holds BOTH a RAF (smooth path while visible) and a
+// setTimeout backstop (drains when RAF is paused). Whichever fires first
+// drains the buffer and cancels the other.
+interface PendingFlushHandles {
+  raf: number | null
+  timer: ReturnType<typeof setTimeout> | null
+}
+const pendingFlush = new Map<number, PendingFlushHandles>()
 // Debounced timer per pane for scanning the buffer for Claude decision prompts
 const promptScanTimers = new Map<number, ReturnType<typeof setTimeout>>()
+// Per-pane Canvas renderer addon. Kept so it can be reloaded when the
+// background toggles (the canvas addon bakes in transparency at load time
+// and won't honor a later theme-background alpha change reliably).
+const canvasAddons = new Map<number, CanvasAddon>()
+
+// xterm theme with a fully-transparent background lets the wallpaper show
+// through. Used both at terminal creation and on background toggle.
+function themeForBackground(bgEnabled: boolean) {
+  return bgEnabled ? { ...DARK_THEME, background: '#00000000' } : DARK_THEME
+}
+
+function isBackgroundEnabled(): boolean {
+  const bg = useWorkspaceStore.getState().preferences.background
+  return !!(bg && bg.enabled && bg.image)
+}
 
 // Scan the visible terminal buffer for Claude Code's yes/no decision prompt.
 // Claude renders a selectable list ("❯ 1. Yes") inside a question box; we look
@@ -78,7 +107,16 @@ function flushOutput(paneId: number, terminal: Terminal) {
   const chunks = pendingOutput.get(paneId)
   if (!chunks || chunks.length === 0) return
   pendingOutput.set(paneId, [])
-  const joined = chunks.join('')
+  pendingBytes.set(paneId, 0)
+
+  let joined = chunks.join('')
+  const dropped = droppedBytes.get(paneId) ?? 0
+  if (dropped > 0) {
+    droppedBytes.set(paneId, 0)
+    const kb = Math.max(1, Math.round(dropped / 1024))
+    joined = `\r\n\x1b[33m[QuadClaude: dropped ${kb} KB of buffered output]\x1b[0m\r\n` + joined
+  }
+
   isWritingOutput.set(paneId, true)
   if (userScrolledUp.get(paneId)) {
     // Preserve the user's scroll position across the batched write
@@ -91,6 +129,25 @@ function flushOutput(paneId: number, terminal: Terminal) {
     terminal.scrollToBottom()
   }
   isWritingOutput.set(paneId, false)
+}
+
+// Schedule a single drain for this pane. Arms RAF + setTimeout in parallel;
+// the first to fire drains and cancels the other. RAF alone is unreliable
+// because Chromium pauses it for hidden/occluded windows.
+function schedulePendingFlush(paneId: number, terminal: Terminal) {
+  if (pendingFlush.has(paneId)) return
+  const drain = () => {
+    const handles = pendingFlush.get(paneId)
+    if (!handles) return
+    if (handles.raf !== null) cancelAnimationFrame(handles.raf)
+    if (handles.timer !== null) clearTimeout(handles.timer)
+    pendingFlush.delete(paneId)
+    flushOutput(paneId, terminal)
+  }
+  pendingFlush.set(paneId, {
+    raf: requestAnimationFrame(drain),
+    timer: setTimeout(drain, 250),
+  })
 }
 
 // Re-evaluate active vs waiting from the buffer, transitioning state and
@@ -213,12 +270,18 @@ function disposeTerminal(paneId: number) {
     userScrolledUp.delete(paneId)
     isWritingOutput.delete(paneId)
     pendingOutput.delete(paneId)
-    const raf = pendingFlush.get(paneId)
-    if (raf) cancelAnimationFrame(raf)
+    pendingBytes.delete(paneId)
+    droppedBytes.delete(paneId)
+    const handles = pendingFlush.get(paneId)
+    if (handles) {
+      if (handles.raf !== null) cancelAnimationFrame(handles.raf)
+      if (handles.timer !== null) clearTimeout(handles.timer)
+    }
     pendingFlush.delete(paneId)
     const scanTimer = promptScanTimers.get(paneId)
     if (scanTimer) clearTimeout(scanTimer)
     promptScanTimers.delete(paneId)
+    canvasAddons.delete(paneId) // addon is disposed with terminal.dispose()
 
     // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
     entry.terminal.dispose()
@@ -388,10 +451,13 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     } else {
       // Create new terminal with optimized settings
       // allowTransparency enables background image to show through terminal
+      // Initialize with the CORRECT transparency up front - the canvas addon
+      // (loaded below) honors transparency from its initial theme, not a
+      // later mutation, so passing opaque here would hide the wallpaper.
       const terminal = new Terminal({
         fontSize: preferences.fontSize,
         fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        theme: DARK_THEME,
+        theme: themeForBackground(isBackgroundEnabled()),
         cursorBlink: true,
         allowProposedApi: true,
         allowTransparency: true,
@@ -407,12 +473,16 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
       terminal.open(terminalRef.current)
 
-      // GPU-accelerated Canvas renderer. Must be loaded AFTER open(). Canvas
-      // (unlike WebGL) honors allowTransparency, so the glass/wallpaper UI
-      // still shows through. This is the big CPU win under heavy log output
-      // vs xterm's fallback DOM renderer.
+      // GPU-accelerated Canvas renderer, used in ALL cases (wallpaper or
+      // not). Must be loaded AFTER open() AND after the theme background is
+      // already transparent (set above via themeForBackground) - the canvas
+      // addon bakes transparency in at load time. Canvas honors
+      // allowTransparency (WebGL does not), so the wallpaper shows through
+      // while still getting the GPU CPU win under heavy log output.
       try {
-        terminal.loadAddon(new CanvasAddon())
+        const canvasAddon = new CanvasAddon()
+        terminal.loadAddon(canvasAddon)
+        canvasAddons.set(paneId, canvasAddon)
       } catch (e) {
         // If the canvas context can't be created, xterm falls back to DOM
       }
@@ -583,17 +653,28 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   // Update terminal theme when preference changes (including background transparency)
   useEffect(() => {
     if (xtermRef.current) {
-      const baseTheme = DARK_THEME
       const bg = preferences.background ?? DEFAULT_BACKGROUND
+      const bgOn = !!(bg.enabled && bg.image)
+      xtermRef.current.options.theme = themeForBackground(bgOn)
 
-      if (bg.enabled && bg.image) {
-        // Fully transparent background so the background image shows through
-        xtermRef.current.options.theme = { ...baseTheme, background: '#00000000' }
-      } else {
-        xtermRef.current.options.theme = baseTheme
+      // Keep the Canvas renderer in all cases, but RELOAD it so it re-bakes
+      // transparency from the new theme background. The canvas addon reads
+      // transparency at load time and won't pick up a later alpha change on
+      // its own, so toggling the wallpaper requires a fresh addon instance.
+      const existing = canvasAddons.get(paneId)
+      try {
+        if (existing) {
+          existing.dispose()
+          canvasAddons.delete(paneId)
+        }
+        const fresh = new CanvasAddon()
+        xtermRef.current.loadAddon(fresh)
+        canvasAddons.set(paneId, fresh)
+      } catch {
+        // Canvas unavailable - xterm falls back to the DOM renderer
       }
     }
-  }, [preferences.background?.enabled, preferences.background?.image])
+  }, [preferences.background?.enabled, preferences.background?.image, paneId])
 
   // Handle layout changes - ensure terminal stays at bottom after resize settles
   useEffect(() => {
@@ -642,23 +723,31 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         if (outputPaneId === paneId && xtermRef.current) {
           const terminal = xtermRef.current
 
-          // Accumulate; flush once per animation frame (both at-bottom and
-          // scrolled-up paths). One write + one scroll per frame per pane.
+          // Accumulate, then schedule one drain per pane (RAF + setTimeout
+          // backstop). Enforces a per-pane byte cap: if RAF is paused (window
+          // hidden / occluded) and the setTimeout fallback is also throttled,
+          // oldest chunks are evicted so heap can't grow unboundedly while
+          // dev servers stream MB/s of output in the background.
           let buf = pendingOutput.get(paneId)
           if (!buf) {
             buf = []
             pendingOutput.set(paneId, buf)
           }
           buf.push(data)
-          if (!pendingFlush.has(paneId)) {
-            pendingFlush.set(
-              paneId,
-              requestAnimationFrame(() => {
-                pendingFlush.delete(paneId)
-                flushOutput(paneId, terminal)
-              })
-            )
+          let total = (pendingBytes.get(paneId) ?? 0) + data.length
+          if (total > PENDING_OUTPUT_CAP) {
+            let dropped = droppedBytes.get(paneId) ?? 0
+            // Always keep at least one chunk - a single oversized chunk just
+            // passes through whole so we don't slice mid-ANSI-escape.
+            while (total > PENDING_OUTPUT_CAP && buf.length > 1) {
+              const removed = buf.shift()!
+              total -= removed.length
+              dropped += removed.length
+            }
+            droppedBytes.set(paneId, dropped)
           }
+          pendingBytes.set(paneId, total)
+          schedulePendingFlush(paneId, terminal)
 
           // Debounced prompt scan: only meaningful while Claude is running, so
           // don't even arm the timer (or build the scan string) in shell state.
@@ -871,23 +960,43 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     // Get dropped files
     const files = e.dataTransfer.files
     if (files.length > 0) {
-      // Build a string of all file paths, space-separated and quoted if needed
-      const paths: string[] = []
+      const state = useWorkspaceStore.getState().panes.find((p) => p.id === paneId)?.state
+      const claudeRunning = state === 'claude-active' || state === 'claude-waiting'
+
+      const imagePaths: string[] = []
+      const otherPaths: string[] = []
+      const imageRe = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|tiff?)$/i
       for (let i = 0; i < files.length; i++) {
-        const filePath = window.electronAPI.getPathForFile(files[i])
-        if (filePath) {
-          // Escape spaces and special characters by quoting
-          const path = filePath.includes(' ') ? `"${filePath}"` : filePath
-          paths.push(path)
+        const f = files[i]
+        const filePath = window.electronAPI.getPathForFile(f)
+        if (!filePath) continue
+        const isImage = f.type.startsWith('image/') || imageRe.test(filePath)
+        if (isImage && claudeRunning) {
+          imagePaths.push(filePath)
+        } else {
+          // Quote paths with spaces so the shell / Claude reads them as one arg
+          otherPaths.push(filePath.includes(' ') ? `"${filePath}"` : filePath)
         }
       }
 
-      if (paths.length > 0) {
-        // Insert paths into the terminal
-        const pathString = paths.join(' ')
-        window.electronAPI.sendInput(paneId, pathString)
-        xtermRef.current?.focus()
+      if (otherPaths.length > 0) {
+        window.electronAPI.sendInput(paneId, otherPaths.join(' '))
       }
+
+      // Hand images to Claude Code as real [Image #N] attachments. Sequential
+      // with a small gap so each clipboard write is consumed before the next.
+      if (imagePaths.length > 0) {
+        ;(async () => {
+          for (const p of imagePaths) {
+            await window.electronAPI.pasteImage(paneId, p)
+            if (imagePaths.length > 1) {
+              await new Promise((r) => setTimeout(r, 200))
+            }
+          }
+        })()
+      }
+
+      xtermRef.current?.focus()
     }
   }, [paneId, setActivePaneId, layout, swapPanes])
 

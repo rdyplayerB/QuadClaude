@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog, clipboard, nativeImage } from 'electron'
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
@@ -566,6 +566,11 @@ function createWindow() {
       hasShadow: true,
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 15, y: 12 },
+      // Hold until first paint so the Dock animation doesn't expand into a
+      // fully-transparent empty rectangle while the renderer is still
+      // parsing the bundle. ready-to-show is unreliable with transparent
+      // windows, so did-finish-load (below) drives show() instead.
+      show: false,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -614,6 +619,9 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     logger.info('renderer', 'Page finished loading')
+    // Reveal the window now that content has painted - avoids the empty
+    // transparent flash during the Dock launch animation.
+    mainWindow?.show()
     // Ensure zoom is exactly 1.0 to prevent scaling differences
     mainWindow?.webContents.setZoomFactor(1.0)
 
@@ -990,6 +998,21 @@ function setupIPC() {
     return (await ptyManager?.killServer(paneId, pid)) ?? false
   })
 
+  // Paste an image into a pane the way Claude Code expects: put the image
+  // bytes on the system clipboard, then send Ctrl+V so Claude Code reads it
+  // and shows an [Image #N] attachment instead of a literal file path.
+  ipcMain.handle(IPC_CHANNELS.PTY_PASTE_IMAGE, async (_, paneId: number, filePath: string) => {
+    try {
+      const img = nativeImage.createFromPath(filePath)
+      if (img.isEmpty()) return false
+      clipboard.writeImage(img)
+      ptyManager?.write(paneId, '\x16') // Ctrl+V
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // File dialog for background image selection
   ipcMain.handle(IPC_CHANNELS.DIALOG_OPEN_IMAGE, async () => {
     if (!mainWindow) return null
@@ -1047,8 +1070,11 @@ app.whenReady().then(() => {
   usagePoller = new UsagePoller()
   if (mainWindow) usagePoller.start(mainWindow)
 
-  // Install statusline script for context window tracking
-  installStatuslineScript()
+  // Install statusline script for context window tracking. Deferred so the
+  // sync FS work (settings.json read/write, /tmp scan + statSync per file)
+  // doesn't block the main thread while the renderer is loading its bundle
+  // and making its first workspace:load IPC call.
+  setImmediate(() => installStatuslineScript())
 
   app.on('activate', () => {
     logger.info('app', 'App activated')
