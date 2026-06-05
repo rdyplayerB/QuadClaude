@@ -100,7 +100,9 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
       }
       const isStatic = resolved.command.startsWith('npx -y serve')
       showNotice({
-        text: isStatic ? 'No dev script — serving folder as static site' : `Running ${resolved.command}…`,
+        text: isStatic
+          ? 'No dev script — serving folder as static site'
+          : `Running ${resolved.command}${resolved.subdir ? ` in ${resolved.subdir}/` : ''}…`,
         kind: 'info',
       })
 
@@ -115,10 +117,15 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           return
         }
       } else {
-        // Plain shell: type the resolved command. \r (carriage return =
-        // Enter key) actually submits in a PTY; \n alone gets typed but not
-        // executed by zsh's line editor.
-        sendToTerminal(paneId, `${resolved.command}\r`)
+        // Plain shell: type the resolved command — in a subshell when the
+        // app lives in a subfolder, so the pane's cwd is back where it was
+        // once the server stops. \r (carriage return = Enter key) actually
+        // submits in a PTY; \n alone gets typed but not executed by zsh's
+        // line editor.
+        const cmd = resolved.subdir
+          ? `(cd "${resolved.subdir}" && ${resolved.command})`
+          : resolved.command
+        sendToTerminal(paneId, `${cmd}\r`)
       }
       // Hold "Starting…" until the listener appears; give up after ~12s
       // (slow installs/compiles) and fall back to the regular poll.

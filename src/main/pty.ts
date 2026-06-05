@@ -138,24 +138,31 @@ async function detectPackageManager(cwd: string): Promise<string> {
   return 'npm'
 }
 
+// package.json in `dir` with a runnable script -> "<pm> run <script>", else null.
+async function npmStartCommand(dir: string): Promise<string | null> {
+  const raw = await fs.promises.readFile(path.join(dir, 'package.json'), 'utf-8')
+  const scripts = JSON.parse(raw)?.scripts ?? {}
+  const pick = ['dev', 'start', 'serve', 'develop'].find((s) => typeof scripts[s] === 'string')
+  if (!pick) return null
+  const pm = await detectPackageManager(dir)
+  // `npm start` is the idiomatic form; everything else is `<pm> run <script>`
+  return pm === 'npm' && pick === 'start' ? 'npm start' : `${pm} run ${pick}`
+}
+
 // Decide what command starts a server in this directory, instead of blindly
 // assuming `npm run dev`:
 //   1. package.json with a dev/start/serve/develop script -> run it with the
 //      project's package manager
 //   2. no package.json but an index.html -> static file server
-//   3. neither -> a human-readable error for the pane header
+//   3. neither, but exactly ONE immediate subdirectory is a runnable app ->
+//      run it there (repos often keep the app in a subfolder, content at the
+//      root); several candidates -> name them instead of guessing
+//   4. nothing anywhere -> a human-readable error for the pane header
 export async function resolveStartCommand(cwd: string): Promise<StartCommand> {
   const folder = path.basename(cwd)
   try {
-    const raw = await fs.promises.readFile(path.join(cwd, 'package.json'), 'utf-8')
-    const scripts = JSON.parse(raw)?.scripts ?? {}
-    const pick = ['dev', 'start', 'serve', 'develop'].find((s) => typeof scripts[s] === 'string')
-    if (pick) {
-      const pm = await detectPackageManager(cwd)
-      // `npm start` is the idiomatic form; everything else is `<pm> run <script>`
-      const command = pm === 'npm' && pick === 'start' ? 'npm start' : `${pm} run ${pick}`
-      return { command }
-    }
+    const command = await npmStartCommand(cwd)
+    if (command) return { command }
     return { error: `No dev/start/serve script in ${folder}/package.json` }
   } catch (e) {
     if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') {
@@ -167,8 +174,37 @@ export async function resolveStartCommand(cwd: string): Promise<StartCommand> {
     await fs.promises.access(path.join(cwd, 'index.html'))
     return { command: 'npx -y serve .' }
   } catch {
-    return { error: `Nothing to start in ${folder} (no package.json or index.html)` }
+    // fall through to the subdirectory scan
   }
+  // Look one level down for a runnable app.
+  try {
+    const entries = await fs.promises.readdir(cwd, { withFileTypes: true })
+    const candidates: Array<{ name: string; command: string }> = []
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue
+      try {
+        const command = await npmStartCommand(path.join(cwd, e.name))
+        if (command) candidates.push({ name: e.name, command })
+      } catch {
+        // not an npm project - skip
+      }
+    }
+    if (candidates.length === 1) {
+      return {
+        command: candidates[0].command,
+        cwd: path.join(cwd, candidates[0].name),
+        subdir: candidates[0].name,
+      }
+    }
+    if (candidates.length > 1) {
+      return {
+        error: `Multiple apps in ${folder}: ${candidates.map((c) => c.name).join(', ')} — cd into one`,
+      }
+    }
+  } catch {
+    // unreadable directory - fall through to the generic error
+  }
+  return { error: `Nothing to start in ${folder} (no package.json or index.html)` }
 }
 
 // Walk pid's ancestry up to `ancestor` (or give up after 40 hops / pid 1).
@@ -599,6 +635,9 @@ export class PtyManager {
     if (!resolved.command) {
       return { ok: false, error: resolved.error ?? 'Nothing to start here' }
     }
+    // App may live in a subfolder of the pane's cwd (e.g. repo/app) — run it
+    // there so npm and any .nvmrc resolve against the right directory.
+    const runCwd = resolved.cwd ?? cwd
 
     try {
       // Resolve a usable node: respect .nvmrc via nvm when present, otherwise
@@ -612,7 +651,7 @@ export class PtyManager {
         `exec ${resolved.command}`,
       ].join('\n')
       const child = spawn('/bin/zsh', ['-lc', script], {
-        cwd,
+        cwd: runCwd,
         detached: true, // own pgid = child.pid, so kill(-pgid) takes the whole tree
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -643,7 +682,7 @@ export class PtyManager {
         }
       })
       serverCache = null // surface the new listener on the next poll
-      logger.info('pty', `Started server pid ${rootPid} for pane ${paneId} in ${cwd}`, resolved.command)
+      logger.info('pty', `Started server pid ${rootPid} for pane ${paneId} in ${runCwd}`, resolved.command)
       // Grace window: instant failures (missing script, unsupported node)
       // exit well under a second; report them to the caller instead of
       // pretending the server started.

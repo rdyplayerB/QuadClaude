@@ -38,8 +38,12 @@ export interface ServerStartResult {
 }
 
 // What "Start" would run in a given directory: exactly one of command/error.
+// When the app lives in a subfolder of the requested directory, `cwd` is the
+// absolute dir to run in and `subdir` its name relative to the request.
 export interface StartCommand {
   command?: string
+  cwd?: string
+  subdir?: string
   error?: string
 }
 
