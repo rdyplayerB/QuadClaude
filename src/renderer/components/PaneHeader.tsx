@@ -1,7 +1,8 @@
-import { DragEvent, memo } from 'react'
+import { DragEvent, memo, useEffect, useRef, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal, sendToTerminal } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
+import { OpenInPaneButton } from './OpenInPaneButton'
 
 // Custom MIME type for pane drag operations
 export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
@@ -37,30 +38,78 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const paneIndex = useWorkspaceStore((s) => s.panes.findIndex((p) => p.id === paneId))
   const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
   const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
-  const skipPermissions = useWorkspaceStore(
-    (s) => s.preferences.dangerouslySkipPermissions === true
-  )
+
+  // Why the last main-process server start failed (the spawn has no terminal,
+  // so this chip is the user's only feedback). Auto-clears after a while.
+  const [serverError, setServerError] = useState<string | null>(null)
+  // True from Start press until the listener shows up (or we give up).
+  // Without it the button looks inert for seconds and gets mashed, stacking
+  // duplicate servers on auto-incrementing ports.
+  const [starting, setStarting] = useState(false)
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showServerError = (msg: string | null) => {
+    if (errorTimer.current) clearTimeout(errorTimer.current)
+    setServerError(msg)
+    if (msg) errorTimer.current = setTimeout(() => setServerError(null), 10000)
+  }
+  useEffect(() => () => { if (errorTimer.current) clearTimeout(errorTimer.current) }, [])
 
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
   const claudeRunning = pane.state === 'claude-active' || pane.state === 'claude-waiting'
+  const skipPermissions = useWorkspaceStore((s) => s.preferences.dangerouslySkipPermissions === true)
   const startClaude = () => {
     if (claudeRunning) return
-    const cmd = skipPermissions
-      ? 'claude --dangerously-skip-permissions\n'
-      : 'claude\n'
+    const cmd = skipPermissions ? 'claude --dangerously-skip-permissions\r' : 'claude\r'
     sendToTerminal(paneId, cmd)
   }
 
   const servers = pane.servers ?? []
-  const killServers = async () => {
-    // Kill every detected server in this pane (process-group kill usually
-    // takes the whole dev server + workers down), then clear optimistically.
-    for (const s of servers) {
-      await window.electronAPI.killServer(paneId, s.pid)
+  const openPort = (port: number) => {
+    window.electronAPI.openExternal(`http://localhost:${port}`)
+  }
+  // Start a plain `npm run dev` for this pane. Owning the process as a
+  // one-shot (no restart wrapper) is what makes the Stop button below an
+  // actual stop — nothing is left babysitting it to bring it back.
+  // Re-detect this pane's servers now (instead of waiting for the 10s poll)
+  // so the port chip replaces "Starting…" as soon as the listener is up.
+  const refreshServers = async (): Promise<boolean> => {
+    const byPane = await window.electronAPI.detectServers()
+    const list = byPane[paneId] ?? []
+    useWorkspaceStore.getState().setPaneServers(paneId, list)
+    return list.length > 0
+  }
+
+  const startServer = async () => {
+    if (starting) return
+    setStarting(true)
+    showServerError(null)
+    try {
+      if (claudeRunning) {
+        // Claude owns the prompt: spawn via the main process in the pane's
+        // cwd instead of typing into the terminal. The process has no
+        // terminal, so surface a failure here — otherwise the button
+        // silently does nothing.
+        const result = await window.electronAPI.startServer(paneId, pane.workingDirectory)
+        if (!result.ok) {
+          showServerError(result.error ?? 'Failed to start')
+          return
+        }
+      } else {
+        // \r (carriage return = Enter key) actually submits in a PTY; \n
+        // alone gets typed but not executed by zsh's line editor.
+        sendToTerminal(paneId, 'npm run dev\r')
+      }
+      // Hold "Starting…" until the listener appears; give up after ~12s
+      // (slow installs/compiles) and fall back to the regular poll.
+      for (let i = 0; i < 12; i++) {
+        await new Promise((r) => setTimeout(r, 1000))
+        if (await refreshServers()) return
+      }
+    } finally {
+      setStarting(false)
     }
-    useWorkspaceStore.getState().setPaneServers(paneId, [])
   }
 
   // Display name is the folder/repo name from working directory
@@ -130,27 +179,77 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         onDragStart={(e) => e.preventDefault()}
         draggable={false}
       >
-        {/* Local server badge + kill */}
         {servers.length > 0 && (
+          <div className="flex items-center gap-1.5 font-mono text-[10px] leading-none">
+            {servers.map((s) => (
+              <div
+                key={s.pid}
+                className="flex items-center gap-0.5 rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1"
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 5px var(--git-orange)' }}
+                />
+                <button
+                  onClick={() => openPort(s.port)}
+                  className="underline decoration-[--git-orange]/40 hover:decoration-[--git-orange] transition-colors"
+                  title={`Open http://localhost:${s.port} in browser`}
+                >
+                  Port {s.port}
+                </button>
+                <span className="text-[--git-orange]/30 mx-0.5">|</span>
+                <button
+                  onClick={async () => {
+                    await window.electronAPI.killServer(paneId, s.pid)
+                    const remaining = servers.filter((x) => x.pid !== s.pid)
+                    useWorkspaceStore.getState().setPaneServers(paneId, remaining)
+                  }}
+                  className="text-[--git-orange]/60 hover:text-[--git-orange] transition-colors"
+                  title={`Stop ${s.command} (pid ${s.pid})`}
+                >
+                  Stop
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Last Start attempt failed — say why (click to dismiss) */}
+        {serverError && servers.length === 0 && (
           <button
-            onClick={killServers}
-            title={`Kill server${servers.length > 1 ? 's' : ''}: ${servers
-              .map((s) => `${s.command} :${s.port}`)
-              .join(', ')}`}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] leading-none text-[--git-orange] hover:bg-[--git-orange]/15 transition-colors"
+            onClick={() => showServerError(null)}
+            className="max-w-[180px] truncate rounded bg-red-500/10 text-red-400 px-1.5 py-1 font-mono text-[10px] leading-none"
+            title={`${serverError} — click to dismiss`}
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 5px var(--git-orange)' }}
-            />
-            <span>
-              {servers.length <= 2
-                ? servers.map((s) => `:${s.port}`).join(' ')
-                : `:${servers[0].port} +${servers.length - 1}`}
-            </span>
-            <svg width="9" height="9" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 3l8 8M11 3l-8 8" strokeLinecap="round" />
-            </svg>
+            {serverError}
+          </button>
+        )}
+
+        {/* No server detected: offer to start one. At a shell the command is
+            typed into the terminal; while Claude runs it's spawned by the
+            main process so it doesn't land in the Claude prompt. */}
+        {servers.length === 0 && (
+          <button
+            onClick={startServer}
+            disabled={starting}
+            className={`flex items-center gap-0.5 rounded px-1.5 py-1 font-mono text-[10px] leading-none transition-colors ${
+              starting
+                ? 'bg-[--git-orange]/10 text-[--git-orange] cursor-default'
+                : 'bg-white/[0.04] hover:bg-[--git-orange]/10 text-[--ui-text-muted] hover:text-[--git-orange]'
+            }`}
+            title={starting ? 'Starting dev server…' : 'Start dev server (npm run dev)'}
+          >
+            {starting ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--git-orange)' }} />
+                Starting…
+              </>
+            ) : (
+              <>
+                <span className="text-[8px]">▶</span>
+                Start
+              </>
+            )}
           </button>
         )}
 
@@ -175,30 +274,27 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           </div>
         )}
         <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
+        <OpenInPaneButton paneId={paneId} />
         <button
           onClick={startClaude}
           disabled={claudeRunning}
           className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
             claudeRunning
               ? 'opacity-40 cursor-default text-[--ui-text-dimmed]'
-              : skipPermissions
-                ? 'text-[--git-orange] hover:brightness-125'
-                : 'text-[--ui-text-dimmed] hover:text-[--ui-text-primary]'
+              : 'text-[--ui-text-dimmed] hover:text-[--ui-text-primary]'
           }`}
-          title={
-            claudeRunning
-              ? 'Claude is already running in this pane'
-              : skipPermissions
-                ? 'Start Claude with --dangerously-skip-permissions (bypasses all permission prompts) in this directory'
-                : 'Start Claude in this directory'
-          }
+          title={claudeRunning ? 'Claude is already running in this pane' : `Start Claude${skipPermissions ? ' (skip permissions)' : ''}`}
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M4 4l4 4-4 4M9 12h3" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <span className="text-[10px] leading-none">
-            {claudeRunning ? 'Running' : skipPermissions ? 'Claude ⚡' : 'Claude'}
-          </span>
+          {skipPermissions ? (
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-orange]">
+              <path d="M9 1L3 9h4l-2 6 7-9H8l1-5z" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M4 4l4 4-4 4M9 12h3" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          )}
+          <span className="text-[10px] leading-none">{claudeRunning ? 'Running' : 'Claude'}</span>
         </button>
         <button
           onClick={() => clearTerminal(paneId)}

@@ -38,8 +38,8 @@ const layoutIcons: Record<LayoutMode, React.ReactNode> = {
 
 const layoutLabels: Record<LayoutMode, string> = {
   grid: 'Grid',
-  focus: 'Focus',
-  'focus-right': 'Focus',
+  focus: 'Left Focus',
+  'focus-right': 'Right Focus',
 }
 
 const layoutTitles: Record<LayoutMode, string> = {

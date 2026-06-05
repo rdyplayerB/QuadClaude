@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, ServerStartResult } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -92,13 +92,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.PTY_DETECT_SERVERS) as Promise<Record<number, ServerInfo[]>>,
   killServer: (paneId: number, pid: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_KILL_SERVER, paneId, pid) as Promise<boolean>,
+  startServer: (paneId: number, cwd: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_START_SERVER, paneId, cwd) as Promise<ServerStartResult>,
+
+  // Drop an image -> clipboard + Ctrl+V so Claude Code attaches it as [Image #N]
+  pasteImage: (paneId: number, filePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_PASTE_IMAGE, paneId, filePath) as Promise<boolean>,
 
   // File dialogs
   openImageDialog: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_IMAGE) as Promise<string | null>,
 
+  // Open a URL in the system default browser
+  openExternal: (url: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_EXTERNAL, url) as Promise<boolean>,
+
   // File utilities
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  // Performance monitoring
+  reportPerf: (data: unknown) => ipcRenderer.send('perf:report', data),
+  markPerf: (label: string) => ipcRenderer.send('perf:marker', label),
+  getPerfStatus: () => ipcRenderer.invoke('perf:status'),
+  onPerfFlush: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('perf:flush', handler)
+    return () => ipcRenderer.removeListener('perf:flush', handler)
+  },
 })
 
 // Type declaration for the renderer
@@ -125,8 +145,15 @@ declare global {
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
       detectServers: () => Promise<Record<number, ServerInfo[]>>
       killServer: (paneId: number, pid: number) => Promise<boolean>
+      startServer: (paneId: number, cwd: string) => Promise<ServerStartResult>
+      pasteImage: (paneId: number, filePath: string) => Promise<boolean>
       openImageDialog: () => Promise<string | null>
+      openExternal: (url: string) => Promise<boolean>
       getPathForFile: (file: File) => string
+      reportPerf: (data: unknown) => void
+      markPerf: (label: string) => void
+      getPerfStatus: () => Promise<{ running: boolean; logFile: string | null; logDir: string }>
+      onPerfFlush: (callback: () => void) => () => void
     }
   }
 }

@@ -7,6 +7,14 @@ import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { logger } from './logger'
 import { IPC_CHANNELS, MenuAction } from '../shared/types'
+import {
+  startPerfMonitor,
+  stopPerfMonitor,
+  setupPerfHandlers,
+  addMarker,
+  revealPerfLogs,
+  requestRendererFlush,
+} from './perfMonitor'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 try {
@@ -861,6 +869,31 @@ function createApplicationMenu() {
       ]
     },
     {
+      label: 'Performance',
+      submenu: [
+        {
+          label: 'Mark Slowdown Now',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click: () => {
+            requestRendererFlush()
+            addMarker('user-reported-slowdown')
+          }
+        },
+        {
+          label: 'Add Marker',
+          click: () => {
+            requestRendererFlush()
+            addMarker('manual-marker')
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Reveal Performance Logs',
+          click: () => revealPerfLogs()
+        }
+      ]
+    },
+    {
       label: 'Help',
       submenu: [
         {
@@ -998,6 +1031,12 @@ function setupIPC() {
     return (await ptyManager?.killServer(paneId, pid)) ?? false
   })
 
+  // Start a dev server for a pane without typing into its terminal (used
+  // while Claude occupies the pane's prompt)
+  ipcMain.handle(IPC_CHANNELS.PTY_START_SERVER, async (_, paneId: number, cwd: string) => {
+    return (await ptyManager?.startServer(paneId, cwd)) ?? { ok: false, error: 'App not ready' }
+  })
+
   // Paste an image into a pane the way Claude Code expects: put the image
   // bytes on the system clipboard, then send Ctrl+V so Claude Code reads it
   // and shows an [Image #N] attachment instead of a literal file path.
@@ -1009,6 +1048,19 @@ function setupIPC() {
       ptyManager?.write(paneId, '\x16') // Ctrl+V
       return true
     } catch {
+      return false
+    }
+  })
+
+  // Open a URL (e.g. http://localhost:PORT) in the system default browser
+  ipcMain.handle(IPC_CHANNELS.APP_OPEN_EXTERNAL, async (_, url: string) => {
+    // Only http(s) — refuse file://, javascript:, etc. to avoid shell-handler abuse
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
+    try {
+      await shell.openExternal(url)
+      return true
+    } catch (error) {
+      logger.error('app', 'Failed to open external URL', error instanceof Error ? error.message : String(error))
       return false
     }
   })
@@ -1064,6 +1116,14 @@ app.whenReady().then(() => {
   setupIPC()
   logger.info('ipc', 'IPC handlers registered')
 
+  // Performance recording: starts automatically and writes JSONL to
+  // <userData>/perf-logs. Analyze later with scripts/analyze-perf.mjs.
+  setupPerfHandlers()
+  startPerfMonitor(
+    () => ptyManager?.getStats() ?? { sessions: 0, totalBytesOut: 0, perPaneBytesOut: {} },
+    () => ptyManager?.getPaneDescendants() ?? Promise.resolve([])
+  )
+
   createWindow()
 
   // Start usage polling
@@ -1109,6 +1169,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   logger.info('app', 'App is quitting')
+  stopPerfMonitor()
   // Save CWDs before killing PTYs (important when Cmd+Q is used)
   if (ptyManager && workspaceManager) {
     const cwds = ptyManager.getAllCwds()

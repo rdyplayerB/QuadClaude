@@ -4,6 +4,7 @@ import path from 'path'
 import https from 'https'
 import { app, BrowserWindow } from 'electron'
 import { logger } from './logger'
+import { timeOp } from './perfMonitor'
 import { IPC_CHANNELS, UsageData } from '../shared/types'
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials'
@@ -182,14 +183,16 @@ export class UsagePoller {
   }
 
   private async poll() {
-    const token = await getOAuthToken()
+    // Keychain read spawns /usr/bin/security and parses its output — a prime
+    // suspect for periodic main-thread cost.
+    const token = await timeOp('usage:keychain-token', () => getOAuthToken())
     if (!token) {
       this.currentInterval = BASE_POLL_INTERVAL
       this.scheduleNext()
       return
     }
 
-    const result = await fetchUsage(token)
+    const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
 
     if (result.rateLimited) {
       // Exponential backoff: double interval on each 429, up to max

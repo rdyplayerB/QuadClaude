@@ -28,6 +28,14 @@ export interface ServerInfo {
   command: string
 }
 
+// Result of asking the main process to start a dev server for a pane.
+// `error` is a short human-readable reason shown in the pane header — the
+// spawn is detached from any terminal, so this is the only feedback channel.
+export interface ServerStartResult {
+  ok: boolean
+  error?: string
+}
+
 // Individual pane configuration
 export interface PaneConfig {
   id: number
@@ -86,7 +94,7 @@ export interface BackgroundConfig {
 }
 
 export const DEFAULT_BACKGROUND: BackgroundConfig = {
-  enabled: false,
+  enabled: true,
   mode: 'unified',
   image: 'backgrounds/bg.png',
   opacity: 0.85,
@@ -144,12 +152,17 @@ export const IPC_CHANNELS = {
   // Dialog
   DIALOG_OPEN_IMAGE: 'dialog:open-image',
 
+  // Shell — open a URL in the system default browser
+  APP_OPEN_EXTERNAL: 'app:open-external',
+
   // Usage tracking
   USAGE_UPDATE: 'usage:update',
   USAGE_FETCH: 'usage:fetch',
   PTY_CONTEXT_USAGE: 'pty:context-usage',
   PTY_DETECT_SERVERS: 'pty:detect-servers',
   PTY_KILL_SERVER: 'pty:kill-server',
+  PTY_START_SERVER: 'pty:start-server',
+  PTY_PASTE_IMAGE: 'pty:paste-image',
 } as const
 
 // Rate limit usage data from Anthropic API

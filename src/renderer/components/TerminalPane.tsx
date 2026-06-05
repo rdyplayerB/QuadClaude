@@ -257,6 +257,21 @@ export function scrollAllTerminalsToBottom() {
   })
 }
 
+// Snapshot of each live terminal's buffer size for the performance reporter.
+// buffer.active.length grows with scrollback, so this surfaces the per-pane
+// memory/GPU cost that accumulates over a long session.
+export function getTerminalStats() {
+  const list: Array<{ paneId: number; bufferLines: number; cols: number; rows: number }> = []
+  let terminalTotalLines = 0
+  terminals.forEach((entry, paneId) => {
+    const t = entry.terminal
+    const bufferLines = t.buffer.active.length
+    terminalTotalLines += bufferLines
+    list.push({ paneId, bufferLines, cols: t.cols, rows: t.rows })
+  })
+  return { terminals: list, terminalTotalLines }
+}
+
 // Dispose and cleanup a terminal when pane is deleted or app closes
 function disposeTerminal(paneId: number) {
   const entry = terminals.get(paneId)

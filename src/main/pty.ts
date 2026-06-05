@@ -2,14 +2,15 @@ import * as pty from 'node-pty'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { logger } from './logger'
+import { markActivity, logPerfEvent } from './perfMonitor'
 
 // Async, non-blocking command runner. Critically, this does NOT block the
 // Electron main thread the way the old execSync calls did.
 const pExecFile = promisify(execFile)
-import { GitStatus, ContextUsage, ServerInfo } from '../shared/types'
+import { GitStatus, ContextUsage, ServerInfo, ServerStartResult } from '../shared/types'
 
 type OutputCallback = (paneId: number, data: string) => void
 type ExitCallback = (paneId: number, exitCode: number) => void
@@ -97,6 +98,9 @@ async function psSnapshot(): Promise<{ ppid: Map<number, number>; pgid: Map<numb
       timeout: 3000,
       maxBuffer: 4 * 1024 * 1024,
     })
+    // Synchronous parse of a system-wide process list — this loop runs on the
+    // main thread and scales with total process count.
+    markActivity('pty:ps-snapshot-parse')
     for (const line of stdout.split('\n')) {
       const parts = line.trim().split(/\s+/)
       if (parts.length >= 3) {
@@ -132,6 +136,16 @@ export class PtyManager {
   private onOutput: OutputCallback
   private onExit: ExitCallback
 
+  // Throughput accounting for the performance monitor. Cumulative bytes
+  // emitted by PTYs since app start, total and per pane.
+  private totalBytesOut = 0
+  private perPaneBytesOut: Map<number, number> = new Map()
+
+  // Dev servers started by the main process (Start button while Claude is
+  // running in the pane, so the command can't be typed into the shell).
+  // paneId -> root pids of detached `npm run dev` process groups.
+  private spawnedServers: Map<number, Set<number>> = new Map()
+
   constructor(onOutput: OutputCallback, onExit: ExitCallback) {
     this.onOutput = onOutput
     this.onExit = onExit
@@ -157,6 +171,11 @@ export class PtyManager {
       })
 
       ptyProcess.onData((data) => {
+        // Track throughput for the performance monitor (byte length, not chars).
+        const len = Buffer.byteLength(data, 'utf8')
+        this.totalBytesOut += len
+        this.perPaneBytesOut.set(paneId, (this.perPaneBytesOut.get(paneId) || 0) + len)
+
         this.onOutput(paneId, data)
       })
 
@@ -418,8 +437,9 @@ export class PtyManager {
       return result
     }
 
-    // shell pid -> paneId
+    // shell pid -> paneId (+ pgid-based lookup for backgrounded processes)
     const shellPids = new Map<number, number>()
+    const shellPgids = new Map<number, number>()
     for (const [paneId, inst] of this.ptys) shellPids.set(inst.pty.pid, paneId)
 
     try {
@@ -432,6 +452,20 @@ export class PtyManager {
         psSnapshot(),
       ])
 
+      // Build pgid -> paneId map: the shell's pgid typically matches itself
+      for (const [shellPid, paneId] of shellPids) {
+        const pg = snap.pgid.get(shellPid)
+        if (pg !== undefined) shellPgids.set(pg, paneId)
+      }
+      // Main-process-spawned servers (Start button) are detached with their
+      // own pgid == root pid; their listeners share it, so the pgid fallback
+      // below attributes them to the right pane.
+      for (const [paneId, roots] of this.spawnedServers) {
+        for (const rootPid of roots) shellPgids.set(rootPid, paneId)
+      }
+
+      // Synchronous parse of system-wide lsof output (all listening sockets).
+      markActivity('pty:lsof-servers-parse')
       let curPid = 0
       let curCmd = ''
       const seen = new Set<string>() // dedupe paneId:port
@@ -462,6 +496,12 @@ export class PtyManager {
             if (next === undefined || next === cur) break
             cur = next
           }
+          // Fallback: backgrounded processes get reparented (ppid=1) but
+          // keep the shell's process group ID
+          if (owner === undefined) {
+            const pg = snap.pgid.get(curPid)
+            if (pg !== undefined) owner = shellPgids.get(pg)
+          }
           if (owner === undefined) continue
           const key = `${owner}:${port}`
           if (seen.has(key)) continue
@@ -479,6 +519,103 @@ export class PtyManager {
     return result
   }
 
+  // Start `npm run dev` for a pane without going through its terminal — used
+  // when Claude is running in the pane, so typing the command into the pty
+  // would land in the Claude prompt. Spawned detached (own process group) via
+  // an interactive login shell so nvm/homebrew PATH setup applies. The root
+  // pid is tracked so detectServers() attributes the listener to this pane
+  // and killServer() is allowed to stop it.
+  //
+  // The spawn is attached to no terminal, so failures are invisible unless we
+  // return them: pre-check that the cwd actually has a `dev` script, and hold
+  // the result briefly to catch instant-death exits (missing script, node too
+  // old) — both bite as "pressed Start, nothing happened" otherwise.
+  async startServer(paneId: number, cwd: string): Promise<ServerStartResult> {
+    if (os.platform() === 'win32') return { ok: false, error: 'Not supported on Windows' }
+
+    // One spawned server per pane. Without this, repeat Start presses (the
+    // detect poll lags the spawn by seconds) stack up duplicate dev servers
+    // on auto-incrementing ports.
+    const live = this.spawnedServers.get(paneId)
+    if (live && live.size > 0) {
+      return { ok: false, error: 'Server already starting in this pane' }
+    }
+
+    // Pre-flight: `npm run dev` can only work if cwd has a package.json with
+    // a "dev" script. Fail fast with a reason instead of a silent exit-1.
+    const folder = path.basename(cwd)
+    try {
+      const raw = await fs.promises.readFile(path.join(cwd, 'package.json'), 'utf-8')
+      const pkg = JSON.parse(raw)
+      if (!pkg?.scripts?.dev) {
+        return { ok: false, error: `No "dev" script in ${folder}/package.json` }
+      }
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
+        return { ok: false, error: `No package.json in ${folder} — nothing to start` }
+      }
+      return { ok: false, error: `Unreadable package.json in ${folder}` }
+    }
+
+    try {
+      // Resolve a usable node: respect .nvmrc via nvm when present, otherwise
+      // prepend the highest nvm-installed node to PATH. A login shell's
+      // default node can be an old homebrew install (e.g. node@18) that
+      // modern dev servers refuse to run on.
+      const script = [
+        'NVM_DIR="${NVM_DIR:-$HOME/.nvm}"',
+        'if [ -f .nvmrc ] && [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh" --no-use; nvm use >/dev/null 2>&1',
+        'else NODE_BIN="$(ls -d "$NVM_DIR/versions/node"/*/bin 2>/dev/null | sort -V | tail -n 1)"; [ -n "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"; fi',
+        'exec npm run dev',
+      ].join('\n')
+      const child = spawn('/bin/zsh', ['-lc', script], {
+        cwd,
+        detached: true, // own pgid = child.pid, so kill(-pgid) takes the whole tree
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      if (!child.pid) return { ok: false, error: 'Failed to spawn npm' }
+      const rootPid = child.pid
+      const set = this.spawnedServers.get(paneId) ?? new Set()
+      set.add(rootPid)
+      this.spawnedServers.set(paneId, set)
+      // Keep a small rolling tail of output so a failed start is diagnosable
+      // from the log (the server isn't attached to any terminal).
+      let tail = ''
+      const capture = (d: Buffer) => { tail = (tail + d.toString()).slice(-2048) }
+      child.stdout?.on('data', capture)
+      child.stderr?.on('data', capture)
+      // Resolves with the failure tail if the server dies within the grace
+      // window below; a healthy server outlives it and we report ok.
+      let reportEarlyExit: ((msg: string) => void) | null = null
+      const earlyExit = new Promise<string>((resolve) => { reportEarlyExit = resolve })
+      child.on('exit', (code, signal) => {
+        set.delete(rootPid)
+        serverCache = null
+        if (code !== 0 && code !== null) {
+          const reason = tail.trim().slice(-500)
+          logger.warn('pty', `Spawned server ${rootPid} (pane ${paneId}) exited code=${code}: ${reason}`)
+          reportEarlyExit?.(reason || `exited with code ${code}`)
+        } else {
+          logger.info('pty', `Spawned server ${rootPid} (pane ${paneId}) exited code=${code} signal=${signal}`)
+        }
+      })
+      serverCache = null // surface the new listener on the next poll
+      logger.info('pty', `Started dev server pid ${rootPid} for pane ${paneId} in ${cwd}`)
+      // Grace window: instant failures (missing script, unsupported node)
+      // exit well under a second; report them to the caller instead of
+      // pretending the server started.
+      const result = await Promise.race([
+        earlyExit.then((reason): ServerStartResult => ({ ok: false, error: reason })),
+        new Promise<ServerStartResult>((resolve) => setTimeout(() => resolve({ ok: true }), 1500)),
+      ])
+      reportEarlyExit = null // later exits go to the log only
+      return result
+    } catch (e) {
+      logger.warn('pty', `Failed to start dev server for pane ${paneId}`, e instanceof Error ? e.message : String(e))
+      return { ok: false, error: e instanceof Error ? e.message : 'Failed to start' }
+    }
+  }
+
   // Kill a server running in a pane. SIGTERM the server's process group
   // (taking down its workers), escalate to SIGKILL after 3s. Hard guards:
   // the pid must be inside this pane's process tree and never the shell.
@@ -489,7 +626,14 @@ export class PtyManager {
     if (pid === shellPid) return false
 
     const snap = await psSnapshot()
-    if (!isDescendantOf(pid, shellPid, snap.ppid)) {
+    // The pid is fair game if it's in the pane shell's tree OR in the tree of
+    // a dev server the main process spawned for this pane (those are detached,
+    // so they're not shell descendants).
+    const spawnedRoots = this.spawnedServers.get(paneId) ?? new Set()
+    const inSpawnedTree = [...spawnedRoots].some(
+      (root) => pid === root || isDescendantOf(pid, root, snap.ppid)
+    )
+    if (!inSpawnedTree && !isDescendantOf(pid, shellPid, snap.ppid)) {
       logger.warn('pty', `Refusing to kill ${pid}: not in pane ${paneId}'s tree`)
       return false
     }
@@ -522,14 +666,159 @@ export class PtyManager {
   killPty(paneId: number): void {
     const instance = this.ptys.get(paneId)
     if (instance) {
+      const shellPid = instance.pty.pid
+      // Snapshot this pane's descendant tree BEFORE killing, then re-check a
+      // few seconds AFTER, so any process that survived the pane close (and
+      // reparented away from the shell — i.e. detached/orphaned) gets logged
+      // with its command line. This is the data that proves whether closing a
+      // QuadClaude pane leaves processes behind. Fire-and-forget; never blocks
+      // or throws into the kill path.
+      this.detectOrphansAfterKill(paneId, shellPid).catch(() => {})
       instance.pty.kill()
       this.ptys.delete(paneId)
+    }
+    // Take down any dev servers the main process spawned for this pane —
+    // they're detached from the shell, so killing the pty doesn't reach them.
+    const roots = this.spawnedServers.get(paneId)
+    if (roots) {
+      for (const rootPid of roots) {
+        try { process.kill(-rootPid, 'SIGTERM') } catch { /* already gone */ }
+      }
+      this.spawnedServers.delete(paneId)
     }
   }
 
   killAll(): void {
     for (const [paneId] of this.ptys) {
       this.killPty(paneId)
+    }
+  }
+
+  // Compute the full descendant PID set of a root pid from a ps snapshot.
+  private descendantsOf(rootPid: number, ppid: Map<number, number>): Set<number> {
+    // Build child adjacency once, then BFS from rootPid.
+    const children = new Map<number, number[]>()
+    for (const [pid, parent] of ppid) {
+      const arr = children.get(parent) ?? []
+      arr.push(pid)
+      children.set(parent, arr)
+    }
+    const out = new Set<number>()
+    const queue = [rootPid]
+    while (queue.length) {
+      const cur = queue.shift()!
+      for (const c of children.get(cur) ?? []) {
+        if (!out.has(c)) {
+          out.add(c)
+          queue.push(c)
+        }
+      }
+    }
+    return out
+  }
+
+  // Snapshot pane descendants BEFORE kill; ~3s after, report any that are
+  // still alive AND no longer descend from the (now-dead) shell — i.e. they
+  // detached/reparented (typically to launchd, ppid 1). Logged via perfMonitor.
+  private async detectOrphansAfterKill(paneId: number, shellPid: number): Promise<void> {
+    const before = await psSnapshot()
+    const beforeDesc = this.descendantsOf(shellPid, before.ppid)
+    if (beforeDesc.size === 0) return // nothing was running under this pane
+
+    // Capture command lines now, while the processes still exist.
+    const cmds = await this.commandLines([...beforeDesc])
+
+    await new Promise((r) => setTimeout(r, 3000))
+
+    const after = await psSnapshot()
+    const survivors: Array<{ pid: number; ppid: number; cmd: string }> = []
+    for (const pid of beforeDesc) {
+      const nowParent = after.ppid.get(pid)
+      if (nowParent === undefined) continue // exited cleanly — good
+      // Still alive. Did it detach from the shell's tree?
+      const stillUnderShell = this.descendantsOf(shellPid, after.ppid).has(pid)
+      if (!stillUnderShell) {
+        survivors.push({ pid, ppid: nowParent, cmd: cmds.get(pid) ?? '(unknown)' })
+      }
+    }
+
+    if (survivors.length > 0) {
+      logPerfEvent({
+        type: 'orphan',
+        paneId,
+        shellPid,
+        count: survivors.length,
+        survivors: survivors.map((s) => ({ pid: s.pid, reparentedTo: s.ppid, cmd: s.cmd.slice(0, 120) })),
+      })
+    }
+  }
+
+  // Best-effort command lines for a set of pids (one ps call).
+  private async commandLines(pids: number[]): Promise<Map<number, string>> {
+    const out = new Map<number, string>()
+    if (pids.length === 0) return out
+    try {
+      const { stdout } = await pExecFile('ps', ['-axo', 'pid=,command='], {
+        encoding: 'utf-8',
+        timeout: 3000,
+        maxBuffer: 8 * 1024 * 1024,
+      })
+      const want = new Set(pids)
+      for (const line of stdout.split('\n')) {
+        const m = line.match(/^\s*(\d+)\s+(.*)$/)
+        if (m) {
+          const pid = parseInt(m[1], 10)
+          if (want.has(pid)) out.set(pid, m[2])
+        }
+      }
+    } catch {
+      // ps failed; return whatever we have
+    }
+    return out
+  }
+
+  // Per-pane descendant process trees, for the perfMonitor lineage log. One ps
+  // snapshot shared across panes; returns each pane's shell + descendants with
+  // command lines so a later detach can be traced back to the pane that spawned
+  // it.
+  async getPaneDescendants(): Promise<
+    Array<{ paneId: number; shellPid: number; procs: Array<{ pid: number; ppid: number; cmd: string }> }>
+  > {
+    if (this.ptys.size === 0) return []
+    const snap = await psSnapshot()
+    const result: Array<{ paneId: number; shellPid: number; procs: Array<{ pid: number; ppid: number; cmd: string }> }> = []
+    // Gather every descendant pid across all panes in one go for a single
+    // command-line lookup.
+    const perPane = new Map<number, { shellPid: number; pids: Set<number> }>()
+    const allPids = new Set<number>()
+    for (const [paneId, inst] of this.ptys) {
+      const shellPid = inst.pty.pid
+      const desc = this.descendantsOf(shellPid, snap.ppid)
+      desc.add(shellPid)
+      perPane.set(paneId, { shellPid, pids: desc })
+      for (const p of desc) allPids.add(p)
+    }
+    const cmds = await this.commandLines([...allPids])
+    for (const [paneId, { shellPid, pids }] of perPane) {
+      const procs: Array<{ pid: number; ppid: number; cmd: string }> = []
+      for (const pid of pids) {
+        procs.push({ pid, ppid: snap.ppid.get(pid) ?? 0, cmd: cmds.get(pid) ?? '' })
+      }
+      result.push({ paneId, shellPid, procs })
+    }
+    return result
+  }
+
+  // Snapshot of PTY throughput + session count for the performance monitor.
+  getStats(): { sessions: number; totalBytesOut: number; perPaneBytesOut: Record<string, number> } {
+    const perPane: Record<string, number> = {}
+    for (const [paneId, bytes] of this.perPaneBytesOut) {
+      perPane[String(paneId)] = bytes
+    }
+    return {
+      sessions: this.ptys.size,
+      totalBytesOut: this.totalBytesOut,
+      perPaneBytesOut: perPane,
     }
   }
 
