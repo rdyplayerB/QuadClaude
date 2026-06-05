@@ -97,9 +97,17 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           return
         }
       } else {
-        // \r (carriage return = Enter key) actually submits in a PTY; \n
-        // alone gets typed but not executed by zsh's line editor.
-        sendToTerminal(paneId, 'npm run dev\r')
+        // Plain shell: ask main what this directory can start (dev/start
+        // script via the right package manager, or a static server for an
+        // html folder), then type it. \r (carriage return = Enter key)
+        // actually submits in a PTY; \n alone gets typed but not executed
+        // by zsh's line editor.
+        const resolved = await window.electronAPI.resolveStartCommand(pane.workingDirectory)
+        if (!resolved.command) {
+          showServerError(resolved.error ?? 'Nothing to start here')
+          return
+        }
+        sendToTerminal(paneId, `${resolved.command}\r`)
       }
       // Hold "Starting…" until the listener appears; give up after ~12s
       // (slow installs/compiles) and fall back to the regular poll.
@@ -237,7 +245,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
                 ? 'bg-[--git-orange]/10 text-[--git-orange] cursor-default'
                 : 'bg-white/[0.04] hover:bg-[--git-orange]/10 text-[--ui-text-muted] hover:text-[--git-orange]'
             }`}
-            title={starting ? 'Starting dev server…' : 'Start dev server (npm run dev)'}
+            title={starting ? 'Starting dev server…' : 'Start dev server (dev/start script, or static server for an html folder)'}
           >
             {starting ? (
               <>

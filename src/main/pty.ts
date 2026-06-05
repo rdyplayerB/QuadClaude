@@ -10,7 +10,7 @@ import { markActivity, logPerfEvent } from './perfMonitor'
 // Async, non-blocking command runner. Critically, this does NOT block the
 // Electron main thread the way the old execSync calls did.
 const pExecFile = promisify(execFile)
-import { GitStatus, ContextUsage, ServerInfo, ServerStartResult } from '../shared/types'
+import { GitStatus, ContextUsage, ServerInfo, ServerStartResult, StartCommand } from '../shared/types'
 
 type OutputCallback = (paneId: number, data: string) => void
 type ExitCallback = (paneId: number, exitCode: number) => void
@@ -117,6 +117,58 @@ async function psSnapshot(): Promise<{ ppid: Map<number, number>; pgid: Map<numb
     // ps failed - callers handle empty maps
   }
   return { ppid, pgid }
+}
+
+// Lockfile -> package manager, so "Start" runs the same tool the project uses.
+async function detectPackageManager(cwd: string): Promise<string> {
+  const checks: Array<[string, string]> = [
+    ['pnpm-lock.yaml', 'pnpm'],
+    ['yarn.lock', 'yarn'],
+    ['bun.lockb', 'bun'],
+    ['bun.lock', 'bun'],
+  ]
+  for (const [file, pm] of checks) {
+    try {
+      await fs.promises.access(path.join(cwd, file))
+      return pm
+    } catch {
+      // try next lockfile
+    }
+  }
+  return 'npm'
+}
+
+// Decide what command starts a server in this directory, instead of blindly
+// assuming `npm run dev`:
+//   1. package.json with a dev/start/serve/develop script -> run it with the
+//      project's package manager
+//   2. no package.json but an index.html -> static file server
+//   3. neither -> a human-readable error for the pane header
+export async function resolveStartCommand(cwd: string): Promise<StartCommand> {
+  const folder = path.basename(cwd)
+  try {
+    const raw = await fs.promises.readFile(path.join(cwd, 'package.json'), 'utf-8')
+    const scripts = JSON.parse(raw)?.scripts ?? {}
+    const pick = ['dev', 'start', 'serve', 'develop'].find((s) => typeof scripts[s] === 'string')
+    if (pick) {
+      const pm = await detectPackageManager(cwd)
+      // `npm start` is the idiomatic form; everything else is `<pm> run <script>`
+      const command = pm === 'npm' && pick === 'start' ? 'npm start' : `${pm} run ${pick}`
+      return { command }
+    }
+    return { error: `No dev/start/serve script in ${folder}/package.json` }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      return { error: `Unreadable package.json in ${folder}` }
+    }
+  }
+  // No package.json — plain html folder gets a static server.
+  try {
+    await fs.promises.access(path.join(cwd, 'index.html'))
+    return { command: 'npx -y serve .' }
+  } catch {
+    return { error: `Nothing to start in ${folder} (no package.json or index.html)` }
+  }
 }
 
 // Walk pid's ancestry up to `ancestor` (or give up after 40 hops / pid 1).
@@ -541,20 +593,11 @@ export class PtyManager {
       return { ok: false, error: 'Server already starting in this pane' }
     }
 
-    // Pre-flight: `npm run dev` can only work if cwd has a package.json with
-    // a "dev" script. Fail fast with a reason instead of a silent exit-1.
-    const folder = path.basename(cwd)
-    try {
-      const raw = await fs.promises.readFile(path.join(cwd, 'package.json'), 'utf-8')
-      const pkg = JSON.parse(raw)
-      if (!pkg?.scripts?.dev) {
-        return { ok: false, error: `No "dev" script in ${folder}/package.json` }
-      }
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException)?.code === 'ENOENT') {
-        return { ok: false, error: `No package.json in ${folder} — nothing to start` }
-      }
-      return { ok: false, error: `Unreadable package.json in ${folder}` }
+    // Pre-flight: figure out what (if anything) can be started here. Fail
+    // fast with a reason instead of a silent exit-1.
+    const resolved = await resolveStartCommand(cwd)
+    if (!resolved.command) {
+      return { ok: false, error: resolved.error ?? 'Nothing to start here' }
     }
 
     try {
@@ -566,7 +609,7 @@ export class PtyManager {
         'NVM_DIR="${NVM_DIR:-$HOME/.nvm}"',
         'if [ -f .nvmrc ] && [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh" --no-use; nvm use >/dev/null 2>&1',
         'else NODE_BIN="$(ls -d "$NVM_DIR/versions/node"/*/bin 2>/dev/null | sort -V | tail -n 1)"; [ -n "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"; fi',
-        'exec npm run dev',
+        `exec ${resolved.command}`,
       ].join('\n')
       const child = spawn('/bin/zsh', ['-lc', script], {
         cwd,
@@ -600,13 +643,15 @@ export class PtyManager {
         }
       })
       serverCache = null // surface the new listener on the next poll
-      logger.info('pty', `Started dev server pid ${rootPid} for pane ${paneId} in ${cwd}`)
+      logger.info('pty', `Started server pid ${rootPid} for pane ${paneId} in ${cwd}`, resolved.command)
       // Grace window: instant failures (missing script, unsupported node)
       // exit well under a second; report them to the caller instead of
       // pretending the server started.
       const result = await Promise.race([
         earlyExit.then((reason): ServerStartResult => ({ ok: false, error: reason })),
-        new Promise<ServerStartResult>((resolve) => setTimeout(() => resolve({ ok: true }), 1500)),
+        new Promise<ServerStartResult>((resolve) =>
+          setTimeout(() => resolve({ ok: true, command: resolved.command }), 1500)
+        ),
       ])
       reportEarlyExit = null // later exits go to the log only
       return result

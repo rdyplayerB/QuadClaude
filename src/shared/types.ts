@@ -34,6 +34,13 @@ export interface ServerInfo {
 export interface ServerStartResult {
   ok: boolean
   error?: string
+  command?: string // what was actually run (e.g. "npm run dev", "npx -y serve .")
+}
+
+// What "Start" would run in a given directory: exactly one of command/error.
+export interface StartCommand {
+  command?: string
+  error?: string
 }
 
 // Individual pane configuration
@@ -162,6 +169,7 @@ export const IPC_CHANNELS = {
   PTY_DETECT_SERVERS: 'pty:detect-servers',
   PTY_KILL_SERVER: 'pty:kill-server',
   PTY_START_SERVER: 'pty:start-server',
+  PTY_RESOLVE_START: 'pty:resolve-start',
   PTY_PASTE_IMAGE: 'pty:paste-image',
 } as const
 
