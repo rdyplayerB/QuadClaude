@@ -709,7 +709,7 @@ function createApplicationMenu() {
               applicationVersion: app.getVersion(),
               version: 'Build ' + new Date().toISOString().split('T')[0],
               copyright: '© 2024-2026 rdyplayerB',
-              credits: 'Crafted by ビルド studio\nhttps://birudo.studio',
+              credits: 'The ADHD workspace for Claude Code\n\nCrafted by ビルド studio · https://birudo.studio',
             })
             app.showAboutPanel()
           }

@@ -1,11 +1,11 @@
 # QuadClaude
 
-A multi-terminal workspace for Claude Code - run 4 Claude sessions side by side with flexible layouts and a glass-effect UI.
+The ADHD workspace for Claude Code — run up to 6 Claude sessions side by side with flexible layouts and a glass-effect UI. Six sessions, zero impulse control.
 
 ## Features
 
-- **4 Independent Terminals**: Run separate Claude sessions in each pane
-- **3 Layout Modes**: Grid (2x2), Focus (1 large + 3 small), Focus-Right (3 small + 1 large)
+- **4–6 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 6)
+- **3 Layout Modes**: Grid (auto-balanced), Focus (1 large + rest small), Focus-Right (rest small + 1 large)
 - **Glass UI**: macOS Liquid Glass visual effects with dark-mode-only design
 - **Prompt Library**: Save and recall frequently used prompts via a floating toolbar
 - **Usage Tracking**: Real-time Claude API usage indicator in the title bar
@@ -142,7 +142,10 @@ src/
 
 ## Acknowledgments
 
-- [Claude-Usage-Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) by [@hamed-elfayome](https://github.com/hamed-elfayome) - Used for Claude Code statusline integration and usage tracking
+- [Claude-Usage-Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) by [@hamed-elfayome](https://github.com/hamed-elfayome) - the statusline script is adapted from this project; powers Claude Code statusline integration and usage tracking
+- [electron-liquid-glass](https://github.com/Meridius-Labs/electron-liquid-glass) by [Meridius Labs](https://github.com/Meridius-Labs) - macOS Liquid Glass window effects behind QuadClaude's glass UI
+
+Built on [xterm.js](https://github.com/xtermjs/xterm.js), [node-pty](https://github.com/microsoft/node-pty), [Electron](https://www.electronjs.org/), [React](https://react.dev/), and [Zustand](https://github.com/pmndrs/zustand).
 
 ## License
 
