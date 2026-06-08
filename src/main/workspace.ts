@@ -1,7 +1,7 @@
 import Store from 'electron-store'
 import os from 'os'
 import fs from 'fs'
-import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode, MIN_PANES, MAX_PANES } from '../shared/types'
+import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode, MIN_PANES, MAX_PANES, FOCUS_SMALL_RATIO_DEFAULT } from '../shared/types'
 import { logger } from './logger'
 
 const DEFAULT_PREFERENCES = {
@@ -25,6 +25,7 @@ function createDefaultWorkspace(): WorkspaceState {
     layout: 'grid',
     focusPaneId: 0,
     activePaneId: 0,
+    focusSmallRatio: FOCUS_SMALL_RATIO_DEFAULT,
     panes: [
       createDefaultPaneConfig(0),
       createDefaultPaneConfig(1),

@@ -27,6 +27,13 @@ export type PaneState = 'shell' | 'claude-active' | 'claude-waiting'
 export const MIN_PANES = 4
 export const MAX_PANES = 6
 
+// Focus-layout splitter: fraction of the width given to the column of small
+// panes. The default IS the minimum (small panes at their tightest); the user
+// can only drag to make them bigger (shrinking the large focus pane).
+export const FOCUS_SMALL_RATIO_DEFAULT = 0.25
+export const FOCUS_SMALL_RATIO_MIN = 0.25
+export const FOCUS_SMALL_RATIO_MAX = 0.45
+
 // A local server (listening TCP port) running in a pane's process tree
 export interface ServerInfo {
   pid: number
@@ -71,6 +78,9 @@ export interface WorkspaceState {
   panes: PaneConfig[]
   preferences: WorkspacePreferences
   windowBounds?: WindowBounds
+  // Splitter position for focus / focus-right layouts (width fraction of the
+  // small-panes column). Persisted so it survives layout switches.
+  focusSmallRatio?: number
 }
 
 export interface HotkeyBindings {

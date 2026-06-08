@@ -1,4 +1,15 @@
-import { LayoutMode } from '../../shared/types'
+import {
+  LayoutMode,
+  FOCUS_SMALL_RATIO_DEFAULT,
+  FOCUS_SMALL_RATIO_MIN,
+  FOCUS_SMALL_RATIO_MAX,
+} from '../../shared/types'
+
+// Clamp the focus splitter to its allowed range (default == min).
+export function clampFocusRatio(r: number): number {
+  if (!Number.isFinite(r)) return FOCUS_SMALL_RATIO_DEFAULT
+  return Math.min(FOCUS_SMALL_RATIO_MAX, Math.max(FOCUS_SMALL_RATIO_MIN, r))
+}
 
 export interface LayoutConfig {
   name: string
@@ -28,16 +39,26 @@ export function gridBlanks(count: number): number {
   return cols * rows - count
 }
 
-export function getGridStyle(layout: LayoutMode, count: number): React.CSSProperties {
+export function getGridStyle(
+  layout: LayoutMode,
+  count: number,
+  focusSmallRatio: number = FOCUS_SMALL_RATIO_DEFAULT,
+): React.CSSProperties {
   const base: React.CSSProperties = { display: 'grid', gap: '2px', height: '100%' }
 
   // Focus layouts: one large pane spanning all rows, the rest stacked in a
-  // narrow column beside it. Rows = number of small panes (count - 1).
+  // narrow column beside it. Rows = number of small panes (count - 1). The
+  // big/small split is driven by the (draggable, persisted) ratio; fr units
+  // keep the 2px gap from causing overflow. position:relative anchors the
+  // splitter overlay rendered by TerminalGrid.
   if (layout === 'focus' || layout === 'focus-right') {
     const smallRows = Math.max(1, count - 1)
+    const r = clampFocusRatio(focusSmallRatio)
+    const big = 1 - r
     return {
       ...base,
-      gridTemplateColumns: layout === 'focus' ? '3fr 1fr' : '1fr 3fr',
+      position: 'relative',
+      gridTemplateColumns: layout === 'focus' ? `${big}fr ${r}fr` : `${r}fr ${big}fr`,
       gridTemplateRows: `repeat(${smallRows}, 1fr)`,
     }
   }

@@ -12,6 +12,9 @@ import {
   ServerInfo,
   MIN_PANES,
   MAX_PANES,
+  FOCUS_SMALL_RATIO_DEFAULT,
+  FOCUS_SMALL_RATIO_MIN,
+  FOCUS_SMALL_RATIO_MAX,
 } from '../../shared/types'
 
 interface WorkspaceStore extends WorkspaceState {
@@ -24,6 +27,7 @@ interface WorkspaceStore extends WorkspaceState {
   setFocusPaneId: (id: number) => void
   setActivePaneId: (id: number) => void
   swapPanes: (paneId1: number, paneId2: number) => void
+  setFocusSmallRatio: (ratio: number) => void
 
   // Pane add/remove (4..MAX_PANES). addPane returns the new pane's id (or null
   // if already at the cap) so callers can focus it; removePane returns the
@@ -66,6 +70,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   layout: 'grid',
   focusPaneId: 0,
   activePaneId: 0,
+  focusSmallRatio: FOCUS_SMALL_RATIO_DEFAULT,
   panes: [],
   preferences: {
     theme: 'dark',
@@ -106,10 +111,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         state: 'shell' as PaneState,
       })) ?? []
 
+      // Restore the focus splitter (clamped; default for older saves).
+      const focusSmallRatio = Math.min(
+        FOCUS_SMALL_RATIO_MAX,
+        Math.max(FOCUS_SMALL_RATIO_MIN, savedState.focusSmallRatio ?? FOCUS_SMALL_RATIO_DEFAULT),
+      )
+
       set({
         ...savedState,
         layout,
         panes,
+        focusSmallRatio,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
@@ -127,6 +139,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout: 'grid',
         focusPaneId: 0,
         activePaneId: 0,
+        focusSmallRatio: FOCUS_SMALL_RATIO_DEFAULT,
         panes: [0, 1, 2, 3].map((id) => ({
           id,
           label: `Terminal ${id + 1}`,
@@ -192,6 +205,16 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
       return { panes }
     })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  // Drag the focus-layout splitter. Clamped to [MIN, MAX] (default == min, so
+  // the small panes can only grow from their tightest). Called live during
+  // drag; the save is debounced so it persists shortly after release.
+  setFocusSmallRatio: (ratio) => {
+    const clamped = Math.min(FOCUS_SMALL_RATIO_MAX, Math.max(FOCUS_SMALL_RATIO_MIN, ratio))
+    if (get().focusSmallRatio === clamped) return
+    set({ focusSmallRatio: clamped })
     debouncedSave(() => get().saveWorkspace())
   },
 
@@ -346,13 +369,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, panes, preferences } = get()
+    const { layout, focusPaneId, activePaneId, focusSmallRatio, panes, preferences } = get()
     // Strip transient data (gitStatus, servers) from panes before persisting
     const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
       layout,
       focusPaneId,
       activePaneId,
+      focusSmallRatio,
       panes: cleanPanes,
       preferences,
     })
