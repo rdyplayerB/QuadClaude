@@ -146,4 +146,4 @@ src/
 
 ## License
 
-MIT
+[GNU AGPL v3.0](LICENSE) — if you run a modified version of QuadClaude over a network, you must make your source available to its users.

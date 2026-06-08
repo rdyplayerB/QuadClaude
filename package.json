@@ -4,7 +4,7 @@
   "description": "Multi-terminal workspace for Claude - run 4 Claude sessions side by side with Zoom-like layouts",
   "main": "dist/main/index.js",
   "author": "rdyplayerB (https://x.com/rdyplayerB)",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/rdyplayerB/QuadClaude"
