@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, ServerStartResult, StartCommand } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -92,10 +92,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.PTY_DETECT_SERVERS) as Promise<Record<number, ServerInfo[]>>,
   killServer: (paneId: number, pid: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_KILL_SERVER, paneId, pid) as Promise<boolean>,
-  startServer: (paneId: number, cwd: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PTY_START_SERVER, paneId, cwd) as Promise<ServerStartResult>,
-  resolveStartCommand: (cwd: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PTY_RESOLVE_START, cwd) as Promise<StartCommand>,
 
   // Drop an image -> clipboard + Ctrl+V so Claude Code attaches it as [Image #N]
   pasteImage: (paneId: number, filePath: string) =>
@@ -147,8 +143,6 @@ declare global {
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
       detectServers: () => Promise<Record<number, ServerInfo[]>>
       killServer: (paneId: number, pid: number) => Promise<boolean>
-      startServer: (paneId: number, cwd: string) => Promise<ServerStartResult>
-      resolveStartCommand: (cwd: string) => Promise<StartCommand>
       pasteImage: (paneId: number, filePath: string) => Promise<boolean>
       openImageDialog: () => Promise<string | null>
       openExternal: (url: string) => Promise<boolean>

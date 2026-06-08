@@ -41,25 +41,6 @@ export interface ServerInfo {
   command: string
 }
 
-// Result of asking the main process to start a dev server for a pane.
-// `error` is a short human-readable reason shown in the pane header — the
-// spawn is detached from any terminal, so this is the only feedback channel.
-export interface ServerStartResult {
-  ok: boolean
-  error?: string
-  command?: string // what was actually run (e.g. "npm run dev", "npx -y serve .")
-}
-
-// What "Start" would run in a given directory: exactly one of command/error.
-// When the app lives in a subfolder of the requested directory, `cwd` is the
-// absolute dir to run in and `subdir` its name relative to the request.
-export interface StartCommand {
-  command?: string
-  cwd?: string
-  subdir?: string
-  error?: string
-}
-
 // Individual pane configuration
 export interface PaneConfig {
   id: number
@@ -188,8 +169,6 @@ export const IPC_CHANNELS = {
   PTY_CONTEXT_USAGE: 'pty:context-usage',
   PTY_DETECT_SERVERS: 'pty:detect-servers',
   PTY_KILL_SERVER: 'pty:kill-server',
-  PTY_START_SERVER: 'pty:start-server',
-  PTY_RESOLVE_START: 'pty:resolve-start',
   PTY_PASTE_IMAGE: 'pty:paste-image',
 } as const
 

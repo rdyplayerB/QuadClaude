@@ -196,7 +196,7 @@ function App() {
             quadclaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.13.0</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.14.0</span>
         </div>
 
         {/* Center - layout selector + add pane */}

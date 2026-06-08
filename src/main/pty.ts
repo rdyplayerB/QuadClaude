@@ -2,7 +2,7 @@ import * as pty from 'node-pty'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { execFile, spawn } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { logger } from './logger'
 import { markActivity, logPerfEvent } from './perfMonitor'
@@ -10,7 +10,7 @@ import { markActivity, logPerfEvent } from './perfMonitor'
 // Async, non-blocking command runner. Critically, this does NOT block the
 // Electron main thread the way the old execSync calls did.
 const pExecFile = promisify(execFile)
-import { GitStatus, ContextUsage, ServerInfo, ServerStartResult, StartCommand } from '../shared/types'
+import { GitStatus, ContextUsage, ServerInfo } from '../shared/types'
 
 type OutputCallback = (paneId: number, data: string) => void
 type ExitCallback = (paneId: number, exitCode: number) => void
@@ -119,94 +119,6 @@ async function psSnapshot(): Promise<{ ppid: Map<number, number>; pgid: Map<numb
   return { ppid, pgid }
 }
 
-// Lockfile -> package manager, so "Start" runs the same tool the project uses.
-async function detectPackageManager(cwd: string): Promise<string> {
-  const checks: Array<[string, string]> = [
-    ['pnpm-lock.yaml', 'pnpm'],
-    ['yarn.lock', 'yarn'],
-    ['bun.lockb', 'bun'],
-    ['bun.lock', 'bun'],
-  ]
-  for (const [file, pm] of checks) {
-    try {
-      await fs.promises.access(path.join(cwd, file))
-      return pm
-    } catch {
-      // try next lockfile
-    }
-  }
-  return 'npm'
-}
-
-// package.json in `dir` with a runnable script -> "<pm> run <script>", else null.
-async function npmStartCommand(dir: string): Promise<string | null> {
-  const raw = await fs.promises.readFile(path.join(dir, 'package.json'), 'utf-8')
-  const scripts = JSON.parse(raw)?.scripts ?? {}
-  const pick = ['dev', 'start', 'serve', 'develop'].find((s) => typeof scripts[s] === 'string')
-  if (!pick) return null
-  const pm = await detectPackageManager(dir)
-  // `npm start` is the idiomatic form; everything else is `<pm> run <script>`
-  return pm === 'npm' && pick === 'start' ? 'npm start' : `${pm} run ${pick}`
-}
-
-// Decide what command starts a server in this directory, instead of blindly
-// assuming `npm run dev`:
-//   1. package.json with a dev/start/serve/develop script -> run it with the
-//      project's package manager
-//   2. no package.json but an index.html -> static file server
-//   3. neither, but exactly ONE immediate subdirectory is a runnable app ->
-//      run it there (repos often keep the app in a subfolder, content at the
-//      root); several candidates -> name them instead of guessing
-//   4. nothing anywhere -> a human-readable error for the pane header
-export async function resolveStartCommand(cwd: string): Promise<StartCommand> {
-  const folder = path.basename(cwd)
-  try {
-    const command = await npmStartCommand(cwd)
-    if (command) return { command }
-    return { error: `No dev/start/serve script in ${folder}/package.json` }
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-      return { error: `Unreadable package.json in ${folder}` }
-    }
-  }
-  // No package.json — plain html folder gets a static server.
-  try {
-    await fs.promises.access(path.join(cwd, 'index.html'))
-    return { command: 'npx -y serve .' }
-  } catch {
-    // fall through to the subdirectory scan
-  }
-  // Look one level down for a runnable app.
-  try {
-    const entries = await fs.promises.readdir(cwd, { withFileTypes: true })
-    const candidates: Array<{ name: string; command: string }> = []
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue
-      try {
-        const command = await npmStartCommand(path.join(cwd, e.name))
-        if (command) candidates.push({ name: e.name, command })
-      } catch {
-        // not an npm project - skip
-      }
-    }
-    if (candidates.length === 1) {
-      return {
-        command: candidates[0].command,
-        cwd: path.join(cwd, candidates[0].name),
-        subdir: candidates[0].name,
-      }
-    }
-    if (candidates.length > 1) {
-      return {
-        error: `Multiple apps in ${folder}: ${candidates.map((c) => c.name).join(', ')} — cd into one`,
-      }
-    }
-  } catch {
-    // unreadable directory - fall through to the generic error
-  }
-  return { error: `Nothing to start in ${folder} (no package.json or index.html)` }
-}
-
 // Walk pid's ancestry up to `ancestor` (or give up after 40 hops / pid 1).
 function isDescendantOf(pid: number, ancestor: number, ppid: Map<number, number>): boolean {
   let cur = pid
@@ -228,11 +140,6 @@ export class PtyManager {
   // emitted by PTYs since app start, total and per pane.
   private totalBytesOut = 0
   private perPaneBytesOut: Map<number, number> = new Map()
-
-  // Dev servers started by the main process (Start button while Claude is
-  // running in the pane, so the command can't be typed into the shell).
-  // paneId -> root pids of detached `npm run dev` process groups.
-  private spawnedServers: Map<number, Set<number>> = new Map()
 
   constructor(onOutput: OutputCallback, onExit: ExitCallback) {
     this.onOutput = onOutput
@@ -545,12 +452,6 @@ export class PtyManager {
         const pg = snap.pgid.get(shellPid)
         if (pg !== undefined) shellPgids.set(pg, paneId)
       }
-      // Main-process-spawned servers (Start button) are detached with their
-      // own pgid == root pid; their listeners share it, so the pgid fallback
-      // below attributes them to the right pane.
-      for (const [paneId, roots] of this.spawnedServers) {
-        for (const rootPid of roots) shellPgids.set(rootPid, paneId)
-      }
 
       // Synchronous parse of system-wide lsof output (all listening sockets).
       markActivity('pty:lsof-servers-parse')
@@ -607,99 +508,6 @@ export class PtyManager {
     return result
   }
 
-  // Start `npm run dev` for a pane without going through its terminal — used
-  // when Claude is running in the pane, so typing the command into the pty
-  // would land in the Claude prompt. Spawned detached (own process group) via
-  // an interactive login shell so nvm/homebrew PATH setup applies. The root
-  // pid is tracked so detectServers() attributes the listener to this pane
-  // and killServer() is allowed to stop it.
-  //
-  // The spawn is attached to no terminal, so failures are invisible unless we
-  // return them: pre-check that the cwd actually has a `dev` script, and hold
-  // the result briefly to catch instant-death exits (missing script, node too
-  // old) — both bite as "pressed Start, nothing happened" otherwise.
-  async startServer(paneId: number, cwd: string): Promise<ServerStartResult> {
-    if (os.platform() === 'win32') return { ok: false, error: 'Not supported on Windows' }
-
-    // One spawned server per pane. Without this, repeat Start presses (the
-    // detect poll lags the spawn by seconds) stack up duplicate dev servers
-    // on auto-incrementing ports.
-    const live = this.spawnedServers.get(paneId)
-    if (live && live.size > 0) {
-      return { ok: false, error: 'Server already starting in this pane' }
-    }
-
-    // Pre-flight: figure out what (if anything) can be started here. Fail
-    // fast with a reason instead of a silent exit-1.
-    const resolved = await resolveStartCommand(cwd)
-    if (!resolved.command) {
-      return { ok: false, error: resolved.error ?? 'Nothing to start here' }
-    }
-    // App may live in a subfolder of the pane's cwd (e.g. repo/app) — run it
-    // there so npm and any .nvmrc resolve against the right directory.
-    const runCwd = resolved.cwd ?? cwd
-
-    try {
-      // Resolve a usable node: respect .nvmrc via nvm when present, otherwise
-      // prepend the highest nvm-installed node to PATH. A login shell's
-      // default node can be an old homebrew install (e.g. node@18) that
-      // modern dev servers refuse to run on.
-      const script = [
-        'NVM_DIR="${NVM_DIR:-$HOME/.nvm}"',
-        'if [ -f .nvmrc ] && [ -s "$NVM_DIR/nvm.sh" ]; then . "$NVM_DIR/nvm.sh" --no-use; nvm use >/dev/null 2>&1',
-        'else NODE_BIN="$(ls -d "$NVM_DIR/versions/node"/*/bin 2>/dev/null | sort -V | tail -n 1)"; [ -n "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"; fi',
-        `exec ${resolved.command}`,
-      ].join('\n')
-      const child = spawn('/bin/zsh', ['-lc', script], {
-        cwd: runCwd,
-        detached: true, // own pgid = child.pid, so kill(-pgid) takes the whole tree
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      if (!child.pid) return { ok: false, error: 'Failed to spawn npm' }
-      const rootPid = child.pid
-      const set = this.spawnedServers.get(paneId) ?? new Set()
-      set.add(rootPid)
-      this.spawnedServers.set(paneId, set)
-      // Keep a small rolling tail of output so a failed start is diagnosable
-      // from the log (the server isn't attached to any terminal).
-      let tail = ''
-      const capture = (d: Buffer) => { tail = (tail + d.toString()).slice(-2048) }
-      child.stdout?.on('data', capture)
-      child.stderr?.on('data', capture)
-      // Resolves with the failure tail if the server dies within the grace
-      // window below; a healthy server outlives it and we report ok.
-      let reportEarlyExit: ((msg: string) => void) | null = null
-      const earlyExit = new Promise<string>((resolve) => { reportEarlyExit = resolve })
-      child.on('exit', (code, signal) => {
-        set.delete(rootPid)
-        serverCache = null
-        if (code !== 0 && code !== null) {
-          const reason = tail.trim().slice(-500)
-          logger.warn('pty', `Spawned server ${rootPid} (pane ${paneId}) exited code=${code}: ${reason}`)
-          reportEarlyExit?.(reason || `exited with code ${code}`)
-        } else {
-          logger.info('pty', `Spawned server ${rootPid} (pane ${paneId}) exited code=${code} signal=${signal}`)
-        }
-      })
-      serverCache = null // surface the new listener on the next poll
-      logger.info('pty', `Started server pid ${rootPid} for pane ${paneId} in ${runCwd}`, resolved.command)
-      // Grace window: instant failures (missing script, unsupported node)
-      // exit well under a second; report them to the caller instead of
-      // pretending the server started.
-      const result = await Promise.race([
-        earlyExit.then((reason): ServerStartResult => ({ ok: false, error: reason })),
-        new Promise<ServerStartResult>((resolve) =>
-          setTimeout(() => resolve({ ok: true, command: resolved.command }), 1500)
-        ),
-      ])
-      reportEarlyExit = null // later exits go to the log only
-      return result
-    } catch (e) {
-      logger.warn('pty', `Failed to start dev server for pane ${paneId}`, e instanceof Error ? e.message : String(e))
-      return { ok: false, error: e instanceof Error ? e.message : 'Failed to start' }
-    }
-  }
-
   // Kill a server running in a pane. SIGTERM the server's process group
   // (taking down its workers), escalate to SIGKILL after 3s. Hard guards:
   // the pid must be inside this pane's process tree and never the shell.
@@ -710,14 +518,8 @@ export class PtyManager {
     if (pid === shellPid) return false
 
     const snap = await psSnapshot()
-    // The pid is fair game if it's in the pane shell's tree OR in the tree of
-    // a dev server the main process spawned for this pane (those are detached,
-    // so they're not shell descendants).
-    const spawnedRoots = this.spawnedServers.get(paneId) ?? new Set()
-    const inSpawnedTree = [...spawnedRoots].some(
-      (root) => pid === root || isDescendantOf(pid, root, snap.ppid)
-    )
-    if (!inSpawnedTree && !isDescendantOf(pid, shellPid, snap.ppid)) {
+    // The pid is only fair game if it's inside the pane shell's process tree.
+    if (!isDescendantOf(pid, shellPid, snap.ppid)) {
       logger.warn('pty', `Refusing to kill ${pid}: not in pane ${paneId}'s tree`)
       return false
     }
@@ -760,15 +562,6 @@ export class PtyManager {
       this.detectOrphansAfterKill(paneId, shellPid).catch(() => {})
       instance.pty.kill()
       this.ptys.delete(paneId)
-    }
-    // Take down any dev servers the main process spawned for this pane —
-    // they're detached from the shell, so killing the pty doesn't reach them.
-    const roots = this.spawnedServers.get(paneId)
-    if (roots) {
-      for (const rootPid of roots) {
-        try { process.kill(-rootPid, 'SIGTERM') } catch { /* already gone */ }
-      }
-      this.spawnedServers.delete(paneId)
     }
   }
 

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog, clipboa
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
-import { PtyManager, resolveStartCommand } from './pty'
+import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { logger } from './logger'
@@ -1029,19 +1029,6 @@ function setupIPC() {
   // Kill a detected server in a pane
   ipcMain.handle(IPC_CHANNELS.PTY_KILL_SERVER, async (_, paneId: number, pid: number) => {
     return (await ptyManager?.killServer(paneId, pid)) ?? false
-  })
-
-  // Start a dev server for a pane without typing into its terminal (used
-  // while Claude occupies the pane's prompt)
-  ipcMain.handle(IPC_CHANNELS.PTY_START_SERVER, async (_, paneId: number, cwd: string) => {
-    return (await ptyManager?.startServer(paneId, cwd)) ?? { ok: false, error: 'App not ready' }
-  })
-
-  // What would "Start" run in this directory? Used by the renderer to type
-  // the right command into a shell pane (and to fail with a reason when
-  // there's nothing to start).
-  ipcMain.handle(IPC_CHANNELS.PTY_RESOLVE_START, async (_, cwd: string) => {
-    return resolveStartCommand(cwd)
   })
 
   // Paste an image into a pane the way Claude Code expects: put the image

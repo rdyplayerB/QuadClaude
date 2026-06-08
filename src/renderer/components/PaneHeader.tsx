@@ -1,5 +1,5 @@
-import { DragEvent, memo, useEffect, useRef, useState } from 'react'
-import { ServerInfo, MIN_PANES } from '../../shared/types'
+import { DragEvent, memo } from 'react'
+import { MIN_PANES } from '../../shared/types'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal, sendToTerminal, disposeTerminalForPane } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
@@ -46,24 +46,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   // can be closed, and the store floor keeps the count from dropping below 4.
   const canClose = paneIndex >= MIN_PANES
 
-  // Server-start status narration. The spawn may have no terminal attached,
-  // so this chip is the user's only feedback: what's being run (info), that
-  // it came up (success), or why it didn't (error).
-  type Notice = { text: string; kind: 'info' | 'success' | 'error' }
-  const [notice, setNotice] = useState<Notice | null>(null)
-  // True from Start press until the listener shows up (or we give up).
-  // Without it the button looks inert for seconds and gets mashed, stacking
-  // duplicate servers on auto-incrementing ports.
-  const [starting, setStarting] = useState(false)
-  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // ttlMs 0 = sticky (stays until replaced or dismissed)
-  const showNotice = (n: Notice | null, ttlMs = 0) => {
-    if (noticeTimer.current) clearTimeout(noticeTimer.current)
-    setNotice(n)
-    if (n && ttlMs > 0) noticeTimer.current = setTimeout(() => setNotice(null), ttlMs)
-  }
-  useEffect(() => () => { if (noticeTimer.current) clearTimeout(noticeTimer.current) }, [])
-
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
@@ -87,75 +69,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     if (removed === null) return
     window.electronAPI.killPty(removed)
     disposeTerminalForPane(removed)
-  }
-  // Start a plain `npm run dev` for this pane. Owning the process as a
-  // one-shot (no restart wrapper) is what makes the Stop button below an
-  // actual stop — nothing is left babysitting it to bring it back.
-  // Re-detect this pane's servers now (instead of waiting for the 10s poll)
-  // so the port chip replaces "Starting…" as soon as the listener is up.
-  const refreshServers = async (): Promise<ServerInfo[]> => {
-    const byPane = await window.electronAPI.detectServers()
-    const list = byPane[paneId] ?? []
-    useWorkspaceStore.getState().setPaneServers(paneId, list)
-    return list
-  }
-
-  const startServer = async () => {
-    if (starting) return
-    setStarting(true)
-    try {
-      // Resolve what this directory can start (dev/start script via the
-      // right package manager, or a static server for an html folder) and
-      // tell the user what's about to run — especially the static-server
-      // fallback, which is otherwise surprising.
-      const resolved = await window.electronAPI.resolveStartCommand(pane.workingDirectory)
-      if (!resolved.command) {
-        showNotice({ text: resolved.error ?? 'Nothing to start here', kind: 'error' }, 10000)
-        return
-      }
-      const isStatic = resolved.command.startsWith('npx -y serve')
-      showNotice({
-        text: isStatic
-          ? 'No dev script — serving folder as static site'
-          : `Running ${resolved.command}${resolved.subdir ? ` in ${resolved.subdir}/` : ''}…`,
-        kind: 'info',
-      })
-
-      if (claudeRunning) {
-        // Claude owns the prompt: spawn via the main process in the pane's
-        // cwd instead of typing into the terminal. The process has no
-        // terminal, so surface a failure here — otherwise the button
-        // silently does nothing.
-        const result = await window.electronAPI.startServer(paneId, pane.workingDirectory)
-        if (!result.ok) {
-          showNotice({ text: result.error ?? 'Failed to start', kind: 'error' }, 12000)
-          return
-        }
-      } else {
-        // Plain shell: type the resolved command — in a subshell when the
-        // app lives in a subfolder, so the pane's cwd is back where it was
-        // once the server stops. \r (carriage return = Enter key) actually
-        // submits in a PTY; \n alone gets typed but not executed by zsh's
-        // line editor.
-        const cmd = resolved.subdir
-          ? `(cd "${resolved.subdir}" && ${resolved.command})`
-          : resolved.command
-        sendToTerminal(paneId, `${cmd}\r`)
-      }
-      // Hold "Starting…" until the listener appears; give up after ~12s
-      // (slow installs/compiles) and fall back to the regular poll.
-      for (let i = 0; i < 12; i++) {
-        await new Promise((r) => setTimeout(r, 1000))
-        const list = await refreshServers()
-        if (list.length > 0) {
-          showNotice({ text: `Up on port ${list[0].port}`, kind: 'success' }, 4000)
-          return
-        }
-      }
-      showNotice({ text: 'No port detected yet — may still be starting', kind: 'info' }, 8000)
-    } finally {
-      setStarting(false)
-    }
   }
 
   // Display name is the folder/repo name from working directory
@@ -258,52 +171,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
               </div>
             ))}
           </div>
-        )}
-
-        {/* Server-start status: what's running, that it's up, or why it
-            isn't (click to dismiss) */}
-        {notice && (
-          <button
-            onClick={() => showNotice(null)}
-            className={`max-w-[200px] truncate rounded px-1.5 py-1 font-mono text-[10px] leading-none ${
-              notice.kind === 'error'
-                ? 'bg-red-500/10 text-red-400'
-                : notice.kind === 'success'
-                  ? 'bg-[--git-green]/10 text-[--git-green]'
-                  : 'bg-[--git-orange]/10 text-[--git-orange]'
-            }`}
-            title={`${notice.text} — click to dismiss`}
-          >
-            {notice.kind === 'success' ? '✓ ' : ''}{notice.text}
-          </button>
-        )}
-
-        {/* No server detected: offer to start one. At a shell the command is
-            typed into the terminal; while Claude runs it's spawned by the
-            main process so it doesn't land in the Claude prompt. */}
-        {servers.length === 0 && (
-          <button
-            onClick={startServer}
-            disabled={starting}
-            className={`flex items-center gap-0.5 rounded px-1.5 py-1 font-mono text-[10px] leading-none transition-colors ${
-              starting
-                ? 'bg-[--git-orange]/10 text-[--git-orange] cursor-default'
-                : 'bg-white/[0.04] hover:bg-[--git-orange]/10 text-[--ui-text-muted] hover:text-[--git-orange]'
-            }`}
-            title={starting ? 'Starting dev server…' : 'Start dev server (dev/start script, or static server for an html folder)'}
-          >
-            {starting ? (
-              <>
-                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: 'var(--git-orange)' }} />
-                Starting…
-              </>
-            ) : (
-              <>
-                <span className="text-[8px]">▶</span>
-                Start
-              </>
-            )}
-          </button>
         )}
 
         {/* Git status - compact inline */}
