@@ -22,6 +22,9 @@ export function useHotkeys(enabled: boolean = true) {
     const store = useWorkspaceStore.getState()
     const activePaneId = store.activePaneId
 
+    // Ctrl+5/6 only do something when that extra pane exists.
+    if (!store.panes.some((p) => p.id === targetPaneId)) return
+
     // Don't do anything if selecting the already active pane
     if (targetPaneId === activePaneId) {
       focusTerminal(targetPaneId)
@@ -56,12 +59,15 @@ export function useHotkeys(enabled: boolean = true) {
       return { key, modifiers }
     }
 
-    // Build parsed hotkey configs for terminal swap
+    // Build parsed hotkey configs for terminal swap. Ctrl+5/6 for the extra
+    // panes are fixed (not user-rebindable) and no-op when the pane is absent.
     const terminalHotkeyConfigs = [
       { ...parseHotkey(hotkeys.focusTerminal1), index: 0 },
       { ...parseHotkey(hotkeys.focusTerminal2), index: 1 },
       { ...parseHotkey(hotkeys.focusTerminal3), index: 2 },
       { ...parseHotkey(hotkeys.focusTerminal4), index: 3 },
+      { ...parseHotkey('Ctrl+5'), index: 4 },
+      { ...parseHotkey('Ctrl+6'), index: 5 },
     ]
 
     // Build parsed hotkey configs for layout switching

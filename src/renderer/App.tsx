@@ -7,7 +7,28 @@ import { UsageIndicator } from './components/UsageIndicator'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
-import { MenuAction, SavedPrompt } from '../shared/types'
+import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
+
+// Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
+// only appears when the grid has a blank cell). Hidden at the pane cap.
+function AddPaneButton() {
+  const count = useWorkspaceStore((s) => s.panes.length)
+  const addPane = useWorkspaceStore((s) => s.addPane)
+  if (count >= MAX_PANES) return null
+  return (
+    <button
+      onClick={() => addPane()}
+      className="flex items-center gap-1 px-2 py-1 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
+      title={`Add terminal (${count}/${MAX_PANES})`}
+      aria-label="Add terminal"
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
+        <path d="M8 3v10M3 8h10" strokeLinecap="round" />
+      </svg>
+      <span className="text-[11px] leading-none">Add</span>
+    </button>
+  )
+}
 
 function App() {
   // Atomic selectors: App is the root, so a whole-store subscription here
@@ -170,11 +191,14 @@ function App() {
         <div className="flex items-center gap-2 pl-[72px]">
           <span className="text-[11px] tracking-widest uppercase text-[--ui-text-dimmed]">quadclaude</span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.6.0</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.12.0</span>
         </div>
 
-        {/* Center - layout selector */}
-        <LayoutSelector />
+        {/* Center - layout selector + add pane */}
+        <div className="flex items-center gap-1">
+          <LayoutSelector />
+          <AddPaneButton />
+        </div>
 
         {/* Right side - usage + utility buttons */}
         <div className="flex items-center gap-0.5">

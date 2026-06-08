@@ -3,106 +3,73 @@ import { LayoutMode } from '../../shared/types'
 export interface LayoutConfig {
   name: string
   icon: string
-  gridTemplate: string
-  areas: string[][]
-  visiblePanes: number[]
 }
 
 export const LAYOUTS: Record<LayoutMode, LayoutConfig> = {
-  grid: {
-    name: 'Grid',
-    icon: '⊞',
-    gridTemplate: '1fr 1fr / 1fr 1fr',
-    areas: [
-      ['pane0', 'pane1'],
-      ['pane2', 'pane3'],
-    ],
-    visiblePanes: [0, 1, 2, 3],
-  },
-  focus: {
-    name: 'Focus',
-    icon: '◱',
-    gridTemplate: '1fr 1fr 1fr / 3fr 1fr',
-    areas: [
-      ['pane0', 'pane1'],
-      ['pane0', 'pane2'],
-      ['pane0', 'pane3'],
-    ],
-    visiblePanes: [0, 1, 2, 3],
-  },
-  'focus-right': {
-    name: 'Focus Right',
-    icon: '◰',
-    gridTemplate: '1fr 1fr 1fr / 1fr 3fr',
-    areas: [
-      ['pane1', 'pane0'],
-      ['pane2', 'pane0'],
-      ['pane3', 'pane0'],
-    ],
-    visiblePanes: [0, 1, 2, 3],
-  },
+  grid: { name: 'Grid', icon: '⊞' },
+  focus: { name: 'Focus', icon: '◱' },
+  'focus-right': { name: 'Focus Right', icon: '◰' },
 }
 
-export function getGridStyle(
-  layout: LayoutMode,
-): React.CSSProperties {
-  const config = LAYOUTS[layout] || LAYOUTS.grid
+// Auto-balanced grid dimensions for N panes: the most square-ish layout that
+// fits, biased to a fixed 2 rows in the app's 4-6 pane range (4→2x2, 5-6→3x2).
+export function gridDimensions(count: number): { cols: number; rows: number } {
+  const n = Math.max(1, count)
+  const cols = Math.ceil(Math.sqrt(n))
+  const rows = Math.ceil(n / cols)
+  return { cols, rows }
+}
 
-  // For focus layout, position 0 is always the large focus area (on left)
-  if (layout === 'focus') {
+// Number of empty trailing cells in the grid (where the "+" ghost tile goes).
+// Only the grid layout has these; focus layouts stack exactly count-1 panes.
+export function gridBlanks(count: number): number {
+  if (count <= 0) return 0
+  const { cols, rows } = gridDimensions(count)
+  return cols * rows - count
+}
+
+export function getGridStyle(layout: LayoutMode, count: number): React.CSSProperties {
+  const base: React.CSSProperties = { display: 'grid', gap: '2px', height: '100%' }
+
+  // Focus layouts: one large pane spanning all rows, the rest stacked in a
+  // narrow column beside it. Rows = number of small panes (count - 1).
+  if (layout === 'focus' || layout === 'focus-right') {
+    const smallRows = Math.max(1, count - 1)
     return {
-      display: 'grid',
-      gridTemplate: config.gridTemplate,
-      gridTemplateAreas: `
-        "pane0 pane1"
-        "pane0 pane2"
-        "pane0 pane3"
-      `,
-      gap: '2px',
-      height: '100%',
+      ...base,
+      gridTemplateColumns: layout === 'focus' ? '3fr 1fr' : '1fr 3fr',
+      gridTemplateRows: `repeat(${smallRows}, 1fr)`,
     }
   }
 
-  // For focus-right layout, position 0 is the large focus area (on right)
-  if (layout === 'focus-right') {
-    return {
-      display: 'grid',
-      gridTemplate: config.gridTemplate,
-      gridTemplateAreas: `
-        "pane1 pane0"
-        "pane2 pane0"
-        "pane3 pane0"
-      `,
-      gap: '2px',
-      height: '100%',
-    }
-  }
-
-  const areasString = config.areas.map((row) => `"${row.join(' ')}"`).join(' ')
-
+  // Grid: auto-balanced columns/rows, panes auto-placed in DOM (array) order.
+  const { cols, rows } = gridDimensions(count)
   return {
-    display: 'grid',
-    gridTemplate: config.gridTemplate,
-    gridTemplateAreas: areasString,
-    gap: '2px',
-    height: '100%',
+    ...base,
+    gridTemplateColumns: `repeat(${cols}, 1fr)`,
+    gridTemplateRows: `repeat(${rows}, 1fr)`,
   }
 }
 
 export function getPaneStyle(
   position: number,
   layout: LayoutMode,
+  count: number,
 ): React.CSSProperties {
-  const config = LAYOUTS[layout] || LAYOUTS.grid
+  const base: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: 'hidden' }
 
-  if (!config.visiblePanes.includes(position)) {
-    return { display: 'none' }
+  // Focus layouts place panes explicitly: position 0 is the big pane (spanning
+  // every row), positions 1..n-1 stack in the narrow column.
+  if (layout === 'focus' || layout === 'focus-right') {
+    const smallRows = Math.max(1, count - 1)
+    const bigCol = layout === 'focus' ? 1 : 2
+    const smallCol = layout === 'focus' ? 2 : 1
+    if (position === 0) {
+      return { ...base, gridColumn: bigCol, gridRow: `1 / span ${smallRows}` }
+    }
+    return { ...base, gridColumn: smallCol, gridRow: position }
   }
 
-  return {
-    gridArea: `pane${position}`,
-    minWidth: 0,
-    minHeight: 0,
-    overflow: 'hidden',
-  }
+  // Grid layout relies on auto-placement (row-major in array order).
+  return base
 }

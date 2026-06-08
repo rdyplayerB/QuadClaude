@@ -10,6 +10,8 @@ import {
   GitStatus,
   BackgroundConfig,
   ServerInfo,
+  MIN_PANES,
+  MAX_PANES,
 } from '../../shared/types'
 
 interface WorkspaceStore extends WorkspaceState {
@@ -22,6 +24,12 @@ interface WorkspaceStore extends WorkspaceState {
   setFocusPaneId: (id: number) => void
   setActivePaneId: (id: number) => void
   swapPanes: (paneId1: number, paneId2: number) => void
+
+  // Pane add/remove (4..MAX_PANES). addPane returns the new pane's id (or null
+  // if already at the cap) so callers can focus it; removePane returns the
+  // removed id (or null if at the floor) so callers can tear down its PTY.
+  addPane: () => number | null
+  removePane: (id: number) => number | null
 
   // Pane actions
   updatePane: (id: number, updates: Partial<PaneConfig>) => void
@@ -185,6 +193,41 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return { panes }
     })
     debouncedSave(() => get().saveWorkspace())
+  },
+
+  // Add a pane in the lowest free id slot (0..MAX_PANES-1), so ids stay dense
+  // and Ctrl+1..6 keep mapping to slots. New pane opens in the active pane's
+  // directory. No-op at the cap.
+  addPane: () => {
+    const { panes, activePaneId } = get()
+    if (panes.length >= MAX_PANES) return null
+    const used = new Set(panes.map((p) => p.id))
+    let newId = 0
+    while (used.has(newId)) newId++
+    const activePane = panes.find((p) => p.id === activePaneId)
+    const workingDirectory = activePane?.workingDirectory ?? panes[0]?.workingDirectory ?? ''
+    const newPane: PaneConfig = {
+      id: newId,
+      label: `Terminal ${newId + 1}`,
+      workingDirectory,
+      state: 'shell',
+    }
+    set({ panes: [...panes, newPane], activePaneId: newId })
+    debouncedSave(() => get().saveWorkspace())
+    return newId
+  },
+
+  // Remove a pane (PTY teardown is the caller's job). No-op at the floor.
+  removePane: (id) => {
+    const { panes, activePaneId, focusPaneId } = get()
+    if (panes.length <= MIN_PANES) return null
+    if (!panes.some((p) => p.id === id)) return null
+    const remaining = panes.filter((p) => p.id !== id)
+    const nextActive = activePaneId === id ? remaining[0].id : activePaneId
+    const nextFocus = focusPaneId === id ? remaining[0].id : focusPaneId
+    set({ panes: remaining, activePaneId: nextActive, focusPaneId: nextFocus })
+    debouncedSave(() => get().saveWorkspace())
+    return id
   },
 
   // Pane actions

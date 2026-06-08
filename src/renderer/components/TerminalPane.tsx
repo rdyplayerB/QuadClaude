@@ -316,6 +316,13 @@ export function disposeAllTerminals() {
   }
 }
 
+// Public teardown for a single pane (used when the user closes an extra
+// pane). Disposes the xterm instance and clears all per-pane bookkeeping so
+// the id can be reused. PTY kill is the caller's responsibility.
+export function disposeTerminalForPane(paneId: number) {
+  disposeTerminal(paneId)
+}
+
 // Helper to check if terminal is scrolled to bottom
 function isTerminalAtBottom(terminal: Terminal): boolean {
   const buffer = terminal.buffer.active

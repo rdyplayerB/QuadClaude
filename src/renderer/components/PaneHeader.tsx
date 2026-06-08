@@ -1,7 +1,7 @@
 import { DragEvent, memo, useEffect, useRef, useState } from 'react'
-import { ServerInfo } from '../../shared/types'
+import { ServerInfo, MIN_PANES } from '../../shared/types'
 import { useWorkspaceStore } from '../store/workspace'
-import { clearTerminal, sendToTerminal } from './TerminalPane'
+import { clearTerminal, sendToTerminal, disposeTerminalForPane } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
 import { OpenInPaneButton } from './OpenInPaneButton'
 
@@ -18,6 +18,8 @@ const PANE_COLORS = [
   '#4ade80', // Green (Terminal 2)
   '#fbbf24', // Amber (Terminal 3)
   '#a78bfa', // Purple (Terminal 4)
+  '#f472b6', // Pink (Terminal 5)
+  '#fb923c', // Orange (Terminal 6)
 ]
 
 // Extract folder/repo name from path
@@ -39,6 +41,10 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const paneIndex = useWorkspaceStore((s) => s.panes.findIndex((p) => p.id === paneId))
   const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
   const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
+  const removePane = useWorkspaceStore((s) => s.removePane)
+  // The original four panes (slots 0-3) are permanent; only extras (slot 4+)
+  // can be closed, and the store floor keeps the count from dropping below 4.
+  const canClose = paneIndex >= MIN_PANES
 
   // Server-start status narration. The spawn may have no terminal attached,
   // so this chip is the user's only feedback: what's being run (info), that
@@ -72,6 +78,15 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const servers = pane.servers ?? []
   const openPort = (port: number) => {
     window.electronAPI.openExternal(`http://localhost:${port}`)
+  }
+
+  // Close an extra pane: drop it from the layout, then tear down its PTY and
+  // xterm instance so the slot id can be reused by a future add.
+  const closePane = () => {
+    const removed = removePane(paneId)
+    if (removed === null) return
+    window.electronAPI.killPty(removed)
+    disposeTerminalForPane(removed)
   }
   // Start a plain `npm run dev` for this pane. Owning the process as a
   // one-shot (no restart wrapper) is what makes the Stop button below an
@@ -344,6 +359,20 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           </svg>
           <span className="text-[10px] leading-none">Clear</span>
         </button>
+        {/* Close button — only on extra panes (slot 5+); the original four
+            are permanent. */}
+        {canClose && (
+          <button
+            onClick={closePane}
+            className="flex items-center px-1 py-0.5 text-[--ui-text-dimmed] hover:text-red-400 transition-colors rounded"
+            title="Close terminal"
+            aria-label="Close terminal"
+          >
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round"/>
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   )

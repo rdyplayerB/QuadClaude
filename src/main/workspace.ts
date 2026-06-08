@@ -1,7 +1,7 @@
 import Store from 'electron-store'
 import os from 'os'
 import fs from 'fs'
-import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode } from '../shared/types'
+import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode, MIN_PANES, MAX_PANES } from '../shared/types'
 import { logger } from './logger'
 
 const DEFAULT_PREFERENCES = {
@@ -75,11 +75,12 @@ export class WorkspaceManager {
         logger.warn('workspace', `Reset ${directoriesReset} pane directories to home (paths no longer exist)`)
       }
 
-      // Ensure we have exactly 4 panes
-      while (workspace.panes.length < 4) {
+      // Keep the pane count within bounds: at least MIN_PANES (the app's
+      // permanent quad), at most MAX_PANES (extra user-added panes persist).
+      while (workspace.panes.length < MIN_PANES) {
         workspace.panes.push(createDefaultPaneConfig(workspace.panes.length))
       }
-      workspace.panes = workspace.panes.slice(0, 4)
+      workspace.panes = workspace.panes.slice(0, MAX_PANES)
 
       // Ensure hotkeys exist (backwards compatibility)
       if (!workspace.preferences.hotkeys) {

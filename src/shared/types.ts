@@ -21,6 +21,12 @@ export interface SavedPrompt {
 // Pane state
 export type PaneState = 'shell' | 'claude-active' | 'claude-waiting'
 
+// Pane count bounds. The app is "QuadClaude" so 4 is the floor; extra panes
+// can be added up to MAX_PANES, after which the grid cells get too small to
+// be useful at typical window sizes.
+export const MIN_PANES = 4
+export const MAX_PANES = 6
+
 // A local server (listening TCP port) running in a pane's process tree
 export interface ServerInfo {
   pid: number
