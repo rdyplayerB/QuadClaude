@@ -146,4 +146,10 @@ src/
 
 ## License
 
-[GNU AGPL v3.0](LICENSE) — if you run a modified version of QuadClaude over a network, you must make your source available to its users.
+QuadClaude — Copyright (C) 2026 rdyplayerB
+
+Licensed under the [GNU AGPL v3.0](LICENSE) or later — if you run a modified version of QuadClaude over a network, you must make your source available to its users.
+
+## Trademarks
+
+QuadClaude is an independent, community project. It is not affiliated with, endorsed by, or sponsored by Anthropic. "Claude" and "Anthropic" are trademarks of Anthropic PBC. QuadClaude uses the name only to describe its interoperability with Anthropic's Claude products.
