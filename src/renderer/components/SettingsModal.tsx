@@ -503,7 +503,10 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t glass-border">
+        <div className="px-5 py-4 border-t glass-border space-y-1.5">
+          <div className="text-xs text-[--ui-text-secondary] text-center">
+            The ADHD workspace for Claude Code
+          </div>
           <div className="text-xs text-[--ui-text-muted] text-center">
             crafted by{' '}
             <a
@@ -524,6 +527,9 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
               GitHub
             </a>
             {' '}· v{appVersion}
+          </div>
+          <div className="text-[10px] text-[--ui-text-faint] text-center leading-snug">
+            Not affiliated with Anthropic. Claude is a trademark of Anthropic PBC.
           </div>
         </div>
       </div>

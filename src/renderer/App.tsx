@@ -189,7 +189,12 @@ function App() {
       <div className="h-9 titlebar-drag-region border-b border-white/[0.06] flex items-center justify-between px-3 glass-header">
         {/* Left side - after traffic lights */}
         <div className="flex items-center gap-2 pl-[72px]">
-          <span className="text-[11px] tracking-widest uppercase text-[--ui-text-dimmed]">quadclaude</span>
+          <span
+            className="text-[11px] tracking-widest uppercase text-[--ui-text-dimmed]"
+            title="QuadClaude — the ADHD workspace for Claude Code"
+          >
+            quadclaude
+          </span>
           <span className="text-[--ui-text-faint]">│</span>
           <span className="text-[10px] text-[--ui-text-faint]">v1.12.0</span>
         </div>
