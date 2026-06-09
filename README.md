@@ -2,6 +2,10 @@
 
 The ADHD workspace for Claude Code — run up to 6 Claude sessions side by side with flexible layouts and a glass-effect UI. Six sessions, zero impulse control.
 
+![QuadClaude running four Claude Code sessions in a 2×2 grid](docs/screenshot.png)
+
+<sub>Illustrative mockup with placeholder projects. Source: [`docs/screenshot-mock.html`](docs/screenshot-mock.html).</sub>
+
 ## Features
 
 - **4–6 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 6)
