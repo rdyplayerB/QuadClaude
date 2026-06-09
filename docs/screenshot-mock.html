@@ -4,15 +4,7 @@
 <meta charset="UTF-8" />
 <style>
   :root{
-    --accent:#22d3ee;
-    --ui-text-primary:#ffffff; --ui-text-secondary:#aeb4bb; --ui-text-muted:#8b9097;
-    --ui-text-dimmed:#7e848b; --ui-text-faint:#6b7077;
-    --git-green:#4ade80; --git-cyan:#22d3ee; --git-yellow:#fbbf24; --git-orange:#fb923c;
-    --claude:#d97757;
-    --glass-header:rgba(18,18,20,0.66);
-    --glass-pane-header:rgba(18,18,20,0.55);
-    --glass-pane:rgba(20,20,22,0.34);
-    --term-fg:#d4d4d4;
+    --git-green:#5fd38b; --git-cyan:#56c8d8; --git-orange:#fb923c;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html,body{width:1360px;height:858px}
@@ -20,99 +12,81 @@
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     -webkit-font-smoothing:antialiased;
     display:flex;align-items:center;justify-content:center;
-    /* desktop backdrop so the glass has something to blur */
     background:
-      radial-gradient(1100px 700px at 18% 8%, rgba(34,211,238,0.16), transparent 60%),
-      radial-gradient(1000px 800px at 88% 92%, rgba(217,119,87,0.16), transparent 60%),
-      radial-gradient(900px 700px at 70% 12%, rgba(167,139,250,0.12), transparent 55%),
-      linear-gradient(135deg,#0b0d10,#121317 55%,#0a0b0e);
+      radial-gradient(900px 600px at 16% 6%, rgba(34,211,238,0.10), transparent 60%),
+      radial-gradient(900px 700px at 88% 94%, rgba(217,119,87,0.10), transparent 60%),
+      linear-gradient(135deg,#07080a,#0d0e11 55%,#070809);
   }
   .mono{font-family:'Menlo','Monaco','Consolas','Liberation Mono','Courier New',monospace}
 
-  /* ---- window ---- */
   .win{
-    width:1296px;height:794px;border-radius:12px;overflow:hidden;
-    border:1px solid rgba(255,255,255,0.08);
-    box-shadow:0 40px 120px -20px rgba(0,0,0,0.75), 0 0 0 1px rgba(0,0,0,0.4);
+    width:1300px;height:798px;border-radius:12px;overflow:hidden;
+    border:1px solid rgba(255,255,255,0.07);
+    box-shadow:0 40px 120px -20px rgba(0,0,0,0.8), 0 0 0 1px rgba(0,0,0,0.5);
     display:flex;flex-direction:column;
-    background:rgba(10,10,12,0.55);
-    backdrop-filter:blur(2px);
+    background:rgba(8,8,10,0.6);
   }
 
-  /* ---- title bar ---- */
-  .titlebar{
-    height:38px;flex:0 0 38px;display:flex;align-items:center;justify-content:space-between;
-    padding:0 12px;background:var(--glass-header);
-    backdrop-filter:blur(24px) saturate(140%);
-    border-bottom:1px solid rgba(255,255,255,0.06);
-  }
-  .lights{display:flex;gap:8px;align-items:center}
-  .lights i{width:12px;height:12px;border-radius:50%;display:inline-block}
+  /* title bar */
+  .titlebar{height:38px;flex:0 0 38px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 12px;background:rgba(16,16,18,0.72);border-bottom:1px solid rgba(255,255,255,0.05);position:relative}
+  .lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%}
   .l1{background:#ff5f57}.l2{background:#febc2e}.l3{background:#28c840}
-  .brand{display:flex;align-items:center;gap:8px;margin-left:14px}
-  .brand .name{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ui-text-dimmed)}
-  .brand .bar{color:var(--ui-text-faint)}
-  .brand .ver{font-size:10px;color:var(--ui-text-faint)}
+  .brand{display:flex;align-items:center;gap:9px;margin-left:14px}
+  .brand .name{font-size:12px;font-weight:500;color:#aeb4bb}
+  .brand .bar{color:#565b61}.brand .ver{font-size:10px;color:#565b61}
+  .layouts{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%)}
+  .seg{display:flex;align-items:center;gap:6px;padding:5px 9px;color:#7e848b;font-size:11px}
+  .seg.active{color:#fff}.layouts .sp{color:#565b61;font-size:11px;padding:0 2px}
+  .addb{display:flex;align-items:center;gap:5px;padding:5px 9px;color:#7e848b;font-size:11px;margin-left:8px}
+  .right{display:flex;align-items:center;gap:11px}
+  .usage{display:flex;align-items:center;gap:7px;font-size:10px;color:#8b9097}
+  .umeter{display:flex;gap:1.5px;align-items:flex-end;height:11px}
+  .umeter i{width:2.5px;background:#3a3f45;border-radius:1px}
+  .gear{color:#7e848b}
 
-  .layouts{display:flex;align-items:center;gap:0;position:absolute;left:50%;transform:translateX(-50%)}
-  .layouts .seg{display:flex;align-items:center;gap:6px;padding:5px 9px;color:var(--ui-text-dimmed);font-size:11px}
-  .layouts .seg.active{color:var(--ui-text-primary)}
-  .layouts .sep{color:var(--ui-text-faint);font-size:11px;padding:0 2px}
-  .layouts svg{display:block}
-  .addbtn{display:flex;align-items:center;gap:5px;padding:5px 9px;color:var(--ui-text-dimmed);font-size:11px;margin-left:6px}
-
-  .right{display:flex;align-items:center;gap:10px}
-  .usage{display:flex;align-items:center;gap:7px;font-size:10px;color:var(--ui-text-muted)}
-  .usage .ring{width:14px;height:14px;border-radius:50%;
-    background:conic-gradient(var(--git-green) 0 62%, rgba(255,255,255,0.14) 62% 100%);
-    -webkit-mask:radial-gradient(circle 4px at center, transparent 98%, #000 100%);
-            mask:radial-gradient(circle 4px at center, transparent 98%, #000 100%);}
-  .gear{color:var(--ui-text-dimmed)}
-
-  /* ---- prompt bar ---- */
+  /* prompt bar */
   .promptbar{height:30px;flex:0 0 30px;display:flex;align-items:center;gap:7px;padding:0 12px;
-    background:rgba(16,16,18,0.5);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.05)}
-  .chip{font-size:10.5px;color:var(--ui-text-muted);background:rgba(255,255,255,0.045);
-    border:1px solid rgba(255,255,255,0.06);border-radius:5px;padding:3px 8px;display:flex;align-items:center;gap:5px}
-  .chip .star{color:var(--accent);font-size:9px}
-  .promptbar .hint{margin-left:auto;font-size:10px;color:var(--ui-text-faint)}
+    background:rgba(13,13,15,0.6);border-bottom:1px solid rgba(255,255,255,0.045)}
+  .pchip{font-size:10.5px;color:#aeb4bb;background:rgba(255,255,255,0.05);
+    border:1px solid rgba(255,255,255,0.07);border-radius:5px;padding:3px 9px;display:flex;align-items:center;gap:6px}
+  .pchip .ic{width:8px;height:8px;border:1px solid #6b7077;border-radius:2px;display:inline-block}
+  .paddp{color:#7e848b;font-size:13px;padding:0 4px}
+  .pright{margin-left:auto;font-size:10px;color:#565b61}
 
-  /* ---- grid ---- */
-  .grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;padding:8px;min-height:0}
-  .pane{border-radius:9px;overflow:hidden;display:flex;flex-direction:column;min-height:0;min-width:0;
-    background:var(--glass-pane);backdrop-filter:blur(18px) saturate(130%);
-    border:1px solid rgba(255,255,255,0.06)}
-  .pane.waiting{border-color:rgba(251,146,60,0.7);box-shadow:0 0 0 1px rgba(251,146,60,0.55),0 0 22px 2px rgba(251,146,60,0.30)}
+  /* grid */
+  .grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:7px;padding:7px;min-height:0}
+  .pane{border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-height:0;min-width:0;
+    border:1px solid rgba(255,255,255,0.06);background:rgba(12,12,14,0.55)}
 
-  .phead{height:32px;flex:0 0 32px;display:flex;align-items:center;padding:0 6px 0 10px;
-    background:var(--glass-pane-header);border-bottom:1px solid rgba(255,255,255,0.06)}
+  .phead{height:31px;flex:0 0 31px;display:flex;align-items:center;padding:0 7px 0 10px;
+    background:rgba(17,17,19,0.7);border-bottom:1px solid rgba(255,255,255,0.06)}
   .phead .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;margin-right:8px}
-  .phead .dot.lg{width:8px;height:8px}
-  .phead .fname{font-size:12px;color:var(--ui-text-primary)}
-  .phead .fname.dim{color:var(--ui-text-muted)}
-  .phead .spacer{flex:1}
-  .phead .git{display:flex;align-items:center;gap:6px;font-size:10px;margin-right:8px}
-  .phead .git .br{display:flex;align-items:center;gap:4px;color:var(--git-green)}
-  .phead .git .ahead{color:var(--git-cyan)}
-  .phead .git .dirty{color:var(--git-orange)}
-  .phead .act{display:flex;align-items:center;gap:3px;color:var(--ui-text-dimmed);font-size:10px;padding:2px 5px}
-  .phead .act svg{display:block}
-  .port{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--git-orange);
-    background:rgba(251,146,60,0.10);border-radius:4px;padding:3px 7px;margin-right:8px}
+  .phead .nm{font-size:12px;color:#e7e9ec}
+  .phead .nm.dim{color:#9aa0a7}
+  .phead .sp{flex:1}
+  .hgrp{display:flex;align-items:center;gap:10px}
+  .git{display:flex;align-items:center;gap:5px;font-size:10.5px}
+  .git .br{color:var(--git-green);display:flex;align-items:center;gap:3px}
+  .git .ah{color:var(--git-cyan)}.git .dt{color:var(--git-orange)}
+  .hbtn{display:flex;align-items:center;gap:3px;color:#7e848b;font-size:10.5px}
+  .hbtn.run{color:#6a6f76}
+  .hbtn svg,.git svg{display:block}
+  .port{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--git-orange);margin-right:2px}
   .port .pd{width:6px;height:6px;border-radius:50%;background:var(--git-orange);box-shadow:0 0 5px var(--git-orange)}
-  .port a{color:var(--git-orange);text-decoration:underline;text-decoration-color:rgba(251,146,60,.4)}
-  .port .sep{color:rgba(251,146,60,.35)}
+  .port u{cursor:pointer}.port .sep{color:rgba(251,146,60,.4)}
 
-  .term{flex:1;min-height:0;overflow:hidden;padding:8px 10px;background:rgba(18,18,20,0.45)}
-  .term pre{font-family:'Menlo','Monaco','Consolas',monospace;font-size:11.5px;line-height:1.55;color:var(--term-fg);white-space:pre-wrap}
-  .g{color:#7c828a}      /* dim gray */
-  .w{color:#e7e9ec}      /* bright */
-  .grn{color:#4ade80}.cy{color:#22d3ee}.am{color:#fbbf24}.or{color:#fb923c}.pur{color:#a78bfa}.pk{color:#f472b6}
-  .claude{color:#d97757}
-  .bullet{color:#d97757}
-  .box{color:#6b7077}
-  .cursor{display:inline-block;width:7px;height:14px;background:#d4d4d4;vertical-align:-2px;opacity:.85}
-  .logo{color:#c9ccd1;letter-spacing:1px}
+  .term{flex:1;min-height:0;overflow:hidden;padding:9px 11px 7px;background:rgba(13,13,15,0.82);
+    display:flex;flex-direction:column;justify-content:flex-end}
+  pre{font-family:'Menlo','Monaco','Consolas',monospace;font-size:11px;line-height:1.45;white-space:pre-wrap;color:#c9cdd2}
+  .w{color:#f2f3f5;font-weight:600}.b{color:#6cb6ff}.cy{color:#56c8d8}.grn{color:#5fd38b}
+  .am{color:#e2c08d}.or{color:#fb923c}.pur{color:#b48ead}.g{color:#787e85}.rose{color:#ef8b7a}
+  .bul{color:#cdd1d6}
+  .rule{color:#33373d}
+  .cursor{display:inline-block;width:6px;height:12px;background:#c9cdd2;vertical-align:-2px;opacity:.85}
+  .center{display:block;text-align:center}
+  /* usage bar blocks */
+  .uon{color:#5fd38b}.uon2{color:#9ccf6a}.uoff{color:#3a3f45}.umark{color:#bfe9a0}
 </style>
 </head>
 <body>
@@ -121,153 +95,210 @@
     <div class="titlebar">
       <div style="display:flex;align-items:center">
         <div class="lights"><i class="l1"></i><i class="l2"></i><i class="l3"></i></div>
-        <div class="brand">
-          <span class="name">quadclaude</span>
-          <span class="bar">│</span>
-          <span class="ver">v1.14.0</span>
-        </div>
+        <div class="brand"><span class="name">QuadClaude</span><span class="bar">│</span><span class="ver">v1.14.0</span></div>
       </div>
       <div class="layouts">
-        <div class="seg active">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="0.5"/><rect x="9" y="1" width="6" height="6" rx="0.5"/><rect x="1" y="9" width="6" height="6" rx="0.5"/><rect x="9" y="9" width="6" height="6" rx="0.5"/></svg>
-          <span>Grid</span>
-        </div>
-        <span class="sep">│</span>
-        <div class="seg">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="9" height="14" rx="0.5" opacity="0.9"/><rect x="11.5" y="1" width="3.5" height="4" rx="0.5" opacity="0.5"/><rect x="11.5" y="6" width="3.5" height="4" rx="0.5" opacity="0.5"/><rect x="11.5" y="11" width="3.5" height="4" rx="0.5" opacity="0.5"/></svg>
-          <span>Left Focus</span>
-        </div>
-        <span class="sep">│</span>
-        <div class="seg">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3.5" height="4" rx="0.5" opacity="0.5"/><rect x="1" y="6" width="3.5" height="4" rx="0.5" opacity="0.5"/><rect x="1" y="11" width="3.5" height="4" rx="0.5" opacity="0.5"/><rect x="6" y="1" width="9" height="14" rx="0.5" opacity="0.9"/></svg>
-          <span>Right Focus</span>
-        </div>
-        <div class="addbtn">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10" stroke-linecap="round"/></svg>
-          <span>Add</span>
-        </div>
+        <div class="seg active"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx=".5"/><rect x="9" y="1" width="6" height="6" rx=".5"/><rect x="1" y="9" width="6" height="6" rx=".5"/><rect x="9" y="9" width="6" height="6" rx=".5"/></svg><span>Grid</span></div>
+        <span class="sp">│</span>
+        <div class="seg"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="9" height="14" rx=".5" opacity=".9"/><rect x="11.5" y="1" width="3.5" height="4" rx=".5" opacity=".5"/><rect x="11.5" y="6" width="3.5" height="4" rx=".5" opacity=".5"/><rect x="11.5" y="11" width="3.5" height="4" rx=".5" opacity=".5"/></svg><span>Left Focus</span></div>
+        <span class="sp">│</span>
+        <div class="seg"><svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="3.5" height="4" rx=".5" opacity=".5"/><rect x="1" y="6" width="3.5" height="4" rx=".5" opacity=".5"/><rect x="1" y="11" width="3.5" height="4" rx=".5" opacity=".5"/><rect x="6" y="1" width="9" height="14" rx=".5" opacity=".9"/></svg><span>Right Focus</span></div>
+        <div class="addb"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10" stroke-linecap="round"/></svg><span>Add</span></div>
       </div>
       <div class="right">
-        <div class="usage"><span class="ring"></span><span>62% · 5h</span></div>
-        <span class="gear">
-          <svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor"><path d="M9 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path fill-rule="evenodd" d="M7.25 1a.75.75 0 0 0-.75.75v1.15a5.5 5.5 0 0 0-1.62.67l-.82-.82a.75.75 0 0 0-1.06 0L1.69 4.06a.75.75 0 0 0 0 1.06l.82.82A5.5 5.5 0 0 0 1.84 7.5H.75a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h1.1a5.5 5.5 0 0 0 .67 1.62l-.82.82a.75.75 0 0 0 0 1.06l1.36 1.36a.75.75 0 0 0 1.06 0l.82-.82a5.5 5.5 0 0 0 1.56.66v1.05a.75.75 0 0 0 .75.75h2a.75.75 0 0 0 .75-.75v-1.05a5.5 5.5 0 0 0 1.56-.66l.82.82a.75.75 0 0 0 1.06 0l1.36-1.36a.75.75 0 0 0 0-1.06l-.82-.82a5.5 5.5 0 0 0 .66-1.56h1.06a.75.75 0 0 0 .75-.75v-2a.75.75 0 0 0-.75-.75h-1.06a5.5 5.5 0 0 0-.66-1.56l.82-.82a.75.75 0 0 0 0-1.06l-1.36-1.36a.75.75 0 0 0-1.06 0l-.82.82a5.5 5.5 0 0 0-1.56-.66V1.75a.75.75 0 0 0-.75-.75h-2Z" clip-rule="evenodd"/></svg>
-        </span>
+        <div class="usage">
+          <span class="umeter"><i style="height:3px"></i><i style="height:4px"></i><i style="height:5px"></i><i style="height:6px"></i><i style="height:7px"></i><i style="height:8px"></i><i style="height:9px"></i><i style="height:11px;background:#5fd38b"></i></span>
+          <span>1% · 4h 54m</span>
+        </div>
+        <span class="gear"><svg width="14" height="14" viewBox="0 0 18 18" fill="currentColor"><path d="M9 11.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/><path fill-rule="evenodd" d="M7.25 1a.75.75 0 0 0-.75.75v1.15a5.5 5.5 0 0 0-1.62.67l-.82-.82a.75.75 0 0 0-1.06 0L1.69 4.06a.75.75 0 0 0 0 1.06l.82.82A5.5 5.5 0 0 0 1.84 7.5H.75a.75.75 0 0 0-.75.75v2a.75.75 0 0 0 .75.75h1.1a5.5 5.5 0 0 0 .67 1.62l-.82.82a.75.75 0 0 0 0 1.06l1.36 1.36a.75.75 0 0 0 1.06 0l.82-.82a5.5 5.5 0 0 0 1.56.66v1.05a.75.75 0 0 0 .75.75h2a.75.75 0 0 0 .75-.75v-1.05a5.5 5.5 0 0 0 1.56-.66l.82.82a.75.75 0 0 0 1.06 0l1.36-1.36a.75.75 0 0 0 0-1.06l-.82-.82a5.5 5.5 0 0 0 .66-1.56h1.06a.75.75 0 0 0 .75-.75v-2a.75.75 0 0 0-.75-.75h-1.06a5.5 5.5 0 0 0-.66-1.56l.82-.82a.75.75 0 0 0 0-1.06l-1.36-1.36a.75.75 0 0 0-1.06 0l-.82.82a5.5 5.5 0 0 0-1.56-.66V1.75a.75.75 0 0 0-.75-.75h-2Z" clip-rule="evenodd"/></svg></span>
       </div>
     </div>
 
-    <!-- prompt bar -->
+    <!-- prompt library bar -->
     <div class="promptbar">
-      <span class="chip"><span class="star">✦</span> Plan a feature</span>
-      <span class="chip"><span class="star">✦</span> Write tests</span>
-      <span class="chip"><span class="star">✦</span> Review the diff</span>
-      <span class="hint">⌘1 Grid · ⌘2 Focus · ⌃1–6 Jump</span>
+      <span class="pchip"><span class="ic"></span>Fix</span>
+      <span class="pchip"><span class="ic"></span>Write tests</span>
+      <span class="pchip"><span class="ic"></span>Review the diff</span>
+      <span class="paddp">+</span>
+      <span class="pright">⌘1 Grid · ⌘2 Focus · ⌃1–6 Jump to pane</span>
     </div>
 
     <!-- grid -->
     <div class="grid">
 
-      <!-- pane 1: acme-storefront — claude active -->
+      <!-- PANE 1: acme-shop -->
       <div class="pane">
         <div class="phead">
-          <span class="dot" style="background:#22d3ee;box-shadow:0 0 6px #22d3ee"></span>
-          <span class="fname">acme-storefront</span>
-          <span class="spacer"></span>
-          <span class="git"><span class="br">⎇ main</span><span class="dirty">●3</span></span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l4 4-4 4M9 12h3" stroke-linecap="round" stroke-linejoin="round"/></svg>Claude</span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l8 8M11 3l-8 8" stroke-linecap="round"/></svg>Clear</span>
+          <span class="dot" style="background:#56c8d8;box-shadow:0 0 6px #56c8d8"></span>
+          <span class="nm">acme-shop</span>
+          <span class="sp"></span>
+          <span class="hgrp">
+            <span class="port"><span class="pd"></span><u>Port 4321</u> <span class="sep">|</span> Stop</span>
+            <span class="git"><span class="br">⎇ main</span><span class="dt">●9</span></span>
+            <span class="hbtn">★ Favorites</span>
+            <span class="hbtn">⑂ Fork</span>
+            <span class="hbtn run">⚡ Running</span>
+            <span class="hbtn">✕ Clear</span>
+          </span>
         </div>
-        <div class="term"><pre><span class="logo">▗ ▗   ▖ ▖</span>  <span class="w">Claude Code v2.1.0</span>
-<span class="logo">  ▘▘ ▝▝  </span>  <span class="g">Opus 4.8 (1M context) · Claude Max</span>
-           <span class="g">~/dev/acme-storefront</span>
+        <div class="term"><pre><span class="bul">●</span> All three em dashes were inside <span class="b">&lt;style&gt;</span> comments (lines 88–94),
+  not the markup — harmless. Div tags balance (26/26) and the
+  checkout flow renders clean at every breakpoint.
 
-<span class="g">❯</span> <span class="w">add a wishlist toggle to the product card</span>
+  <span class="w">All 6 review notes applied</span> <span class="grn">✓</span>
+  1. Hero CTA → boxed <span class="b">.buy-cta</span> component (eyebrow / headline /
+     "Add to cart →"), replacing the inline text link.
+  2. "Type" column now renders as subtle <span class="or">tags</span> (Apparel,
+     Accessories, Footwear, …) for visual hierarchy.
+  3. Mobile: the 4-up grid folds to one column — no empty cells.
+  4. Skeletons match the final card height (no layout shift).
 
-<span class="bullet">⏺</span> I'll add a heart toggle to <span class="cy">ProductCard</span> and persist it
-  through the cart store.
+  <span class="w">Files touched</span> (kept in sync per CLAUDE.md):
+  <span class="b">- src/components/ProductCard.tsx</span> — tag chips + skeleton
+  <span class="b">- src/components/Cart.tsx</span> — boxed CTA
+  <span class="b">- src/styles/globals.css</span> — .buy-cta + tag tokens
 
-<span class="bullet">⏺</span> <span class="w">Update</span>(src/components/ProductCard.tsx)
-  <span class="g">⎿  Added 14 lines</span>
+  <span class="cy">tsc --noEmit</span> and the Vitest suite both pass.
 
-<span class="bullet">⏺</span> <span class="w">Bash</span>(npm test -- ProductCard)
-  <span class="g">⎿  </span><span class="grn">✓ 12 passed</span><span class="g"> (1.3s)</span>
+  👉 Open the storefront and click <span class="w">Reload</span>. Want me to add a
+  Playwright check that keeps the CTA above the fold on mobile?
 
-<span class="bullet">⏺</span> Done — the button toggles wishlist state and<span class="cursor"></span></pre></div>
+<span class="g">✳ Cooked for 3m 02s · 1 shell still running</span>
+<span class="g center">new task? <span class="cy">/clear</span> to save <span class="w">318.6k</span> tokens</span>
+<span class="rule">────────────────────────────────────────────────────────</span>
+<span class="g">›</span> <span class="cursor"></span>
+<span class="cy">acme-shop</span> <span class="g">|</span> <span class="g">⌥ main</span> <span class="g">|</span> Opus 4.8 (1M context) <span class="g">|</span> <span class="g">Ctx:</span> <span class="grn">33%</span> <span class="g">|</span> <span class="g">Usage:</span> 4% <span class="uon">▰</span><span class="uoff">▰▰▰▰▰▰</span> <span class="g">→ Reset: 02:10 AM</span>
+<span class="rose">▶▶ bypass permissions on</span> <span class="g">· 1 shell · ← for agents</span></pre></div>
       </div>
 
-      <!-- pane 2: pixel-quest — claude waiting (amber glow) -->
-      <div class="pane waiting">
-        <div class="phead">
-          <span class="dot lg" style="background:#fb923c;box-shadow:0 0 6px #fb923c"></span>
-          <span class="fname">pixel-quest</span>
-          <span class="spacer"></span>
-          <span class="git"><span class="br">⎇ feat/levels</span><span class="dirty">●7</span></span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l4 4-4 4M9 12h3" stroke-linecap="round" stroke-linejoin="round"/></svg>Running</span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l8 8M11 3l-8 8" stroke-linecap="round"/></svg>Clear</span>
-        </div>
-        <div class="term"><pre><span class="g">❯</span> <span class="w">fix the wall-collision bug on level 3</span>
-
-<span class="bullet">⏺</span> Found it — the AABB check skips the Y axis when
-  velocity is high. I'll clamp before resolving.
-
-<span class="bullet">⏺</span> <span class="w">Update</span>(src/engine/Collision.ts)
-
-<span class="box">╭─</span> <span class="w">Make this edit to Collision.ts?</span> <span class="box">────────────╮</span>
-<span class="box">│</span>  <span class="or">❯ 1. Yes</span>                                    <span class="box">│</span>
-<span class="box">│</span>  <span class="w">2. Yes, and don't ask again this session</span>    <span class="box">│</span>
-<span class="box">│</span>  <span class="g">3. No, tell Claude what to do (esc)</span>         <span class="box">│</span>
-<span class="box">╰──────────────────────────────────────────────╯</span></pre></div>
-      </div>
-
-      <!-- pane 3: weather-cli — shell with dev server detected -->
+      <!-- PANE 2: pixel-quest -->
       <div class="pane">
         <div class="phead">
-          <span class="dot" style="background:#fbbf24;box-shadow:0 0 6px #fbbf24"></span>
-          <span class="fname dim">weather-cli</span>
-          <span class="spacer"></span>
-          <span class="port"><span class="pd"></span><a>Port 5173</a><span class="sep">|</span><span>Stop</span></span>
-          <span class="git"><span class="br">⎇ main</span></span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l4 4-4 4M9 12h3" stroke-linecap="round" stroke-linejoin="round"/></svg>Claude</span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l8 8M11 3l-8 8" stroke-linecap="round"/></svg>Clear</span>
+          <span class="dot" style="background:#5fd38b;box-shadow:0 0 6px #5fd38b"></span>
+          <span class="nm">pixel-quest</span>
+          <span class="sp"></span>
+          <span class="hgrp">
+            <span class="git"><span class="br">⎇ feat/levels</span><span class="dt">●7</span></span>
+            <span class="hbtn">★ Favorites</span>
+            <span class="hbtn">⑂ Fork</span>
+            <span class="hbtn run">⚡ Running</span>
+            <span class="hbtn">✕ Clear</span>
+          </span>
         </div>
-        <div class="term"><pre><span class="grn">~/dev/weather-cli</span> <span class="g">$</span> npm run dev
+        <div class="term"><pre><span class="g">Ran 1 shell command</span>
 
-<span class="g">&gt; weather-cli@1.0.0 dev</span>
-<span class="g">&gt; vite</span>
+<span class="bul">●</span> Here's the full picture of the level-3 collision bug:
 
-  <span class="pur">VITE</span> <span class="g">v5.4.21</span>  ready in 412 ms
+  The player tunnels through the east wall only when horizontal
+  speed exceeds <span class="w">~9 px/frame</span> — a classic tunneling case. The
+  broad-phase AABB is fine; the narrow phase resolves X and Y in
+  one step and overshoots.
 
-  <span class="grn">➜</span>  <span class="w">Local</span>:   <span class="cy">http://localhost:5173/</span>
-  <span class="grn">➜</span>  <span class="w">Network</span>: use <span class="g">--host</span> to expose
-  <span class="grn">➜</span>  press <span class="w">h + enter</span> to show help
+  <span class="w">What I changed</span>
+  <span class="b">- src/engine/Collision.ts</span> — resolve axes separately, clamp
+    penetration before applying the response (swept AABB).
+  <span class="b">- src/engine/World.ts</span> — cap dt so a long frame can't
+    teleport a body past a tile.
 
-<span class="grn">~/dev/weather-cli</span> <span class="g">$</span> <span class="cursor"></span></pre></div>
+  <span class="w">Please do this:</span>
+  1. Reload <span class="b">http://localhost:5173/</span>, start level 3, dash into
+     the east wall at full speed.
+  2. Open the console, copy the two <span class="b">[physics]</span> lines.
+  3. Paste them back to me.
+
+  This confirms the fix held — <span class="b">penetration</span> should read 0.00
+  and <span class="b">contacts</span> should list the wall tile once, not twice.
+
+<span class="g">✳ Churned for 1m 48s · 1 shell still running</span>
+<span class="g center">new task? <span class="cy">/clear</span> to save <span class="w">142k</span> tokens</span>
+<span class="rule">────────────────────────────────────────────────────────</span>
+<span class="g">›</span> <span class="cursor"></span>
+<span class="cy">pixel-quest</span> <span class="g">|</span> <span class="g">⌥ feat/levels</span> <span class="g">|</span> Opus 4.8 (1M context) <span class="g">|</span> <span class="g">Ctx:</span> <span class="grn">22%</span> <span class="g">|</span> <span class="g">Usage:</span> 8% <span class="uon">▰</span><span class="uoff">▰▰▰▰▰▰</span> <span class="g">→ Reset: 05:30 PM</span>
+<span class="rose">▶▶ bypass permissions on</span> <span class="g">(shift+tab to cycle) · ← for agents</span></pre></div>
       </div>
 
-      <!-- pane 4: docs-site — claude session, summary -->
+      <!-- PANE 3: weather-cli -->
       <div class="pane">
         <div class="phead">
-          <span class="dot" style="background:#a78bfa;box-shadow:0 0 6px #a78bfa"></span>
-          <span class="fname">docs-site</span>
-          <span class="spacer"></span>
-          <span class="git"><span class="br">⎇ main</span><span class="ahead">↑2</span></span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l4 4-4 4M9 12h3" stroke-linecap="round" stroke-linejoin="round"/></svg>Claude</span>
-          <span class="act"><svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3l8 8M11 3l-8 8" stroke-linecap="round"/></svg>Clear</span>
+          <span class="dot" style="background:#e2c08d;box-shadow:0 0 6px #e2c08d"></span>
+          <span class="nm dim">weather-cli</span>
+          <span class="sp"></span>
+          <span class="hgrp">
+            <span class="port"><span class="pd"></span><u>Port 5173</u> <span class="sep">|</span> Stop</span>
+            <span class="git"><span class="br">⎇ main</span></span>
+            <span class="hbtn">★ Favorites</span>
+            <span class="hbtn">⑂ Fork</span>
+            <span class="hbtn run">⚡ Running</span>
+            <span class="hbtn">✕ Clear</span>
+          </span>
         </div>
-        <div class="term"><pre><span class="g">❯</span> <span class="w">/init</span>
+        <div class="term"><pre><span class="bul">●</span> Done — added the 7-day forecast view and wired it to the
+  cache. Did a brightness/contrast pass so it reads in a terminal:
 
-<span class="bullet">⏺</span> Reviewed the project — here's what I found:
+  <span class="b">-</span> The temperature gradient spans cold→hot on a fixed scale,
+    so 12° looks the same across cities.
+  <span class="b">-</span> Sparkline row under each day (hourly highs), aligned to
+    the table grid.
+  <span class="b">-</span> Network: responses cached 10 min; stale-while-revalidate
+    keeps it snappy offline.
 
-  <span class="cy">•</span> Astro + Tailwind docs site, 38 pages
-  <span class="cy">•</span> Search powered by Pagefind
-  <span class="cy">•</span> Deploys to GitHub Pages on push to main
+  <span class="w">Files touched</span> (kept in sync per CLAUDE.md):
+  <span class="b">- src/views/Forecast.tsx</span> — 7-day grid + sparklines
+  <span class="b">- src/lib/cache.ts</span> — SWR cache with TTL
+  <span class="b">- src/styles/theme.css</span> — temperature scale tokens
 
-<span class="bullet">⏺</span> <span class="w">Write</span>(CLAUDE.md)
-  <span class="g">⎿  Wrote 41 lines — build commands + conventions</span>
+  <span class="cy">tsc --noEmit</span> passes clean.
 
-<span class="bullet">⏺</span> All set. CLAUDE.md captures the dev/build/preview
-  scripts and the content structure.
+  👉 The dev server already picked it up — open <span class="b">localhost:5173</span>
+  and search a city. Want a <span class="b">--json</span> flag so the CLI can pipe
+  the forecast into other tools?
 
-  <span class="g">Ready for your next task.</span><span class="cursor"></span></pre></div>
+<span class="g">✳ Worked for 4m 19s · 1 shell still running</span>
+<span class="g center">new task? <span class="cy">/clear</span> to save <span class="w">121k</span> tokens</span>
+<span class="rule">────────────────────────────────────────────────────────</span>
+<span class="g">›</span> <span class="cursor"></span>
+<span class="cy">weather-cli</span> <span class="g">|</span> <span class="g">⌥ main</span> <span class="g">|</span> Opus 4.8 (1M context) <span class="g">|</span> <span class="g">Ctx:</span> <span class="grn">18%</span> <span class="g">|</span> <span class="g">Usage:</span> 6% <span class="uon">▰</span><span class="uoff">▰▰▰▰▰▰</span> <span class="g">→ Reset: 02:10 AM</span>
+<span class="rose">▶▶ bypass permissions on</span> <span class="g">· 1 shell · ← for agents</span></pre></div>
+      </div>
+
+      <!-- PANE 4: notes-app -->
+      <div class="pane">
+        <div class="phead">
+          <span class="dot" style="background:#b48ead;box-shadow:0 0 6px #b48ead"></span>
+          <span class="nm">notes-app</span>
+          <span class="sp"></span>
+          <span class="hgrp">
+            <span class="git"><span class="br">⎇ main</span><span class="ah">↑2</span></span>
+            <span class="hbtn">★ Favorites</span>
+            <span class="hbtn">⑂ Fork</span>
+            <span class="hbtn run">⚡ Running</span>
+            <span class="hbtn">✕ Clear</span>
+          </span>
+        </div>
+        <div class="term"><pre><span class="bul">●</span> Reviewed the project and seeded memory. What I found:
+
+  <span class="cy">-</span> Tauri + React notes app, 41 components, local-first.
+  <span class="cy">-</span> Notes persist to SQLite via the Rust side; search is FTS5.
+  <span class="cy">-</span> Sync is optional (end-to-end encrypted) and currently off.
+
+<span class="bul">●</span> Wrote <span class="b">CLAUDE.md</span> — build/dev/test commands, the IPC
+  boundary between the web and Rust layers, and the "never block
+  the main thread" rule the codebase already follows.
+
+  <span class="w">Two quick wins I noticed while reading:</span>
+  1. The editor re-renders the whole list on each keystroke — a
+     memo on <span class="b">&lt;NoteRow&gt;</span> would cut that to the changed row.
+  2. FTS5 queries aren't debounced; <span class="w">150 ms</span> would smooth typing.
+
+  Want me to take either of those, or start on the encrypted-sync
+  toggle you mentioned earlier?
+
+<span class="g">✳ Cogitated for 6m 27s · 2 shells still running</span>
+<span class="g center">new task? <span class="cy">/clear</span> to save <span class="w">207k</span> tokens</span>
+<span class="rule">────────────────────────────────────────────────────────</span>
+<span class="g">›</span> <span class="cursor"></span>
+<span class="cy">notes-app</span> <span class="g">|</span> <span class="g">⌥ main</span> <span class="g">|</span> Opus 4.8 (1M context) <span class="g">|</span> <span class="g">Ctx:</span> <span class="grn">24%</span> <span class="g">|</span> <span class="g">Usage:</span> 5% <span class="uon">▰</span><span class="uoff">▰▰▰▰▰▰</span> <span class="g">→ Reset: 02:10 AM</span>
+<span class="rose">▶▶ bypass permissions on</span> <span class="g">· 2 shells · ← for agents</span></pre></div>
       </div>
 
     </div>

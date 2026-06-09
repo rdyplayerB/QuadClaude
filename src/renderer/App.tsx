@@ -190,10 +190,10 @@ function App() {
         {/* Left side - after traffic lights */}
         <div className="flex items-center gap-2 pl-[72px]">
           <span
-            className="text-[11px] tracking-widest uppercase text-[--ui-text-dimmed]"
+            className="text-[12px] font-medium text-[--ui-text-secondary]"
             title="QuadClaude — the ADHD workspace for Claude Code"
           >
-            quadclaude
+            QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
           <span className="text-[10px] text-[--ui-text-faint]">v1.14.0</span>
