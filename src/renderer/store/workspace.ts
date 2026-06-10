@@ -7,6 +7,10 @@ import {
   WorkspaceState,
   DEFAULT_HOTKEYS,
   DEFAULT_BACKGROUND,
+  DEFAULT_AGENT_PROFILES,
+  CLAUDE_PROFILE_ID,
+  PAIR_RING_COLORS,
+  AgentProfile,
   GitStatus,
   BackgroundConfig,
   ServerInfo,
@@ -38,6 +42,12 @@ interface WorkspaceStore extends WorkspaceState {
   // Pane actions
   updatePane: (id: number, updates: Partial<PaneConfig>) => void
   setPaneState: (id: number, state: PaneState) => void
+  setPaneAgent: (id: number, agentId: string) => void
+
+  // Pane pairing (orchestrator ⇄ worker)
+  pairPanes: (orchestratorId: number, workerId: number) => void
+  unpairPane: (id: number) => void
+  swapPairRoles: (id: number) => void
   setPaneLabel: (id: number, label: string) => void
   setPaneCwd: (id: number, cwd: string) => void
   setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
@@ -65,6 +75,38 @@ const debouncedSave = (saveFn: () => void) => {
   saveTimeout = setTimeout(saveFn, 500) // Debounce by 500ms
 }
 
+// Strip all pairing fields from a pane (used when dissolving a pair).
+function stripPair(pane: PaneConfig): PaneConfig {
+  if (!pane.pairId && !pane.pairRole && !pane.pairColor) return pane
+  const { pairId: _i, pairRole: _r, pairColor: _c, ...rest } = pane
+  return rest
+}
+
+function genPairId(): string {
+  try {
+    return crypto.randomUUID()
+  } catch {
+    return 'pair-' + Math.abs(Math.floor(performance.now() * 1000)).toString(36)
+  }
+}
+
+// Guarantee the Claude builtin always exists and a valid default is selected.
+// Backwards compatible: older saves with no agentProfiles get the seed.
+function seedAgentProfiles(
+  saved: AgentProfile[] | undefined,
+  savedDefaultId: string | undefined,
+): { agentProfiles: AgentProfile[]; defaultAgentId: string } {
+  let agentProfiles = saved && saved.length > 0 ? saved : DEFAULT_AGENT_PROFILES
+  if (!agentProfiles.some((p) => p.builtin === 'claude')) {
+    agentProfiles = [...DEFAULT_AGENT_PROFILES, ...agentProfiles]
+  }
+  const defaultAgentId =
+    savedDefaultId && agentProfiles.some((p) => p.id === savedDefaultId)
+      ? savedDefaultId
+      : CLAUDE_PROFILE_ID
+  return { agentProfiles, defaultAgentId }
+}
+
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   // Initial state
   layout: 'grid',
@@ -79,6 +121,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     savedPrompts: [],
     favoriteDirectories: [],
     background: DEFAULT_BACKGROUND,
+    agentProfiles: DEFAULT_AGENT_PROFILES,
+    defaultAgentId: CLAUDE_PROFILE_ID,
   },
   isInitialized: false,
 
@@ -98,6 +142,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       if (background.customWallpapers && background.customWallpapers.length > MAX_CUSTOM_WALLPAPERS) {
         background.customWallpapers = background.customWallpapers.slice(-MAX_CUSTOM_WALLPAPERS)
       }
+
+      // Seed agent profiles (backwards compat): always keep the Claude builtin
+      // present, and ensure a valid default agent.
+      const { agentProfiles, defaultAgentId } = seedAgentProfiles(
+        savedState.preferences?.agentProfiles,
+        savedState.preferences?.defaultAgentId,
+      )
 
       // Migrate removed layouts to 'grid'
       let layout = savedState.layout
@@ -128,6 +179,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           savedPrompts,
           favoriteDirectories,
           background,
+          agentProfiles,
+          defaultAgentId,
         },
         isInitialized: true,
       })
@@ -153,6 +206,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           savedPrompts: [],
           favoriteDirectories: [],
           background: DEFAULT_BACKGROUND,
+          agentProfiles: DEFAULT_AGENT_PROFILES,
+          defaultAgentId: CLAUDE_PROFILE_ID,
         },
         isInitialized: true,
       })
@@ -244,8 +299,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   removePane: (id) => {
     const { panes, activePaneId, focusPaneId } = get()
     if (panes.length <= MIN_PANES) return null
-    if (!panes.some((p) => p.id === id)) return null
-    const remaining = panes.filter((p) => p.id !== id)
+    const removed = panes.find((p) => p.id === id)
+    if (!removed) return null
+    // Dissolve the removed pane's pair so its partner doesn't keep a ghost ring.
+    const dissolvePairId = removed.pairId
+    const remaining = panes
+      .filter((p) => p.id !== id)
+      .map((p) => (dissolvePairId && p.pairId === dissolvePairId ? stripPair(p) : p))
     const nextActive = activePaneId === id ? remaining[0].id : activePaneId
     const nextFocus = focusPaneId === id ? remaining[0].id : focusPaneId
     set({ panes: remaining, activePaneId: nextActive, focusPaneId: nextFocus })
@@ -297,6 +357,75 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set((state) => ({
       panes: state.panes.map((pane) =>
         pane.id === id ? { ...pane, workingDirectory: cwd } : pane
+      ),
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPaneAgent: (id, agentId) => {
+    // Persist which agent this pane runs, so the window remembers its role.
+    const currentPane = get().panes.find((p) => p.id === id)
+    if (currentPane?.agentId === agentId) return
+
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === id ? { ...pane, agentId } : pane
+      ),
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  pairPanes: (orchestratorId, workerId) => {
+    if (orchestratorId === workerId) return
+    set((state) => {
+      const o = state.panes.find((p) => p.id === orchestratorId)
+      const w = state.panes.find((p) => p.id === workerId)
+      if (!o || !w) return {}
+      // Dissolve any pair either pane already belongs to (and its old partner).
+      const dissolving = new Set([o.pairId, w.pairId].filter(Boolean) as string[])
+      // Pick the first ring color not in use by a surviving pair.
+      const usedColors = new Set(
+        state.panes
+          .filter((p) => p.pairId && !dissolving.has(p.pairId) && p.pairColor)
+          .map((p) => p.pairColor as string),
+      )
+      const pairColor = PAIR_RING_COLORS.find((c) => !usedColors.has(c)) ?? PAIR_RING_COLORS[0]
+      const pairId = genPairId()
+      // Single update: form the new pair and clear old partners atomically.
+      const panes = state.panes.map((p) => {
+        if (p.id === orchestratorId) {
+          return { ...stripPair(p), pairId, pairRole: 'orchestrator' as const, pairColor }
+        }
+        if (p.id === workerId) {
+          return { ...stripPair(p), pairId, pairRole: 'worker' as const, pairColor }
+        }
+        if (p.pairId && dissolving.has(p.pairId)) return stripPair(p)
+        return p
+      })
+      return { panes }
+    })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  unpairPane: (id) => {
+    const pane = get().panes.find((p) => p.id === id)
+    if (!pane?.pairId) return
+    const pairId = pane.pairId
+    set((state) => ({
+      panes: state.panes.map((p) => (p.pairId === pairId ? stripPair(p) : p)),
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  swapPairRoles: (id) => {
+    const pane = get().panes.find((p) => p.id === id)
+    if (!pane?.pairId) return
+    const pairId = pane.pairId
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.pairId === pairId
+          ? { ...p, pairRole: p.pairRole === 'orchestrator' ? 'worker' : 'orchestrator' }
+          : p,
       ),
     }))
     debouncedSave(() => get().saveWorkspace())

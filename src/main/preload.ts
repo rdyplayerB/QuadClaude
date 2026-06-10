@@ -4,8 +4,8 @@ import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, Context
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   // PTY operations
-  createPty: (paneId: number, cwd?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.PTY_CREATE, paneId, cwd),
+  createPty: (paneId: number, cwd?: string, env?: Record<string, string>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PTY_CREATE, paneId, cwd, env),
 
   killPty: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_KILL, paneId),
@@ -123,7 +123,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 declare global {
   interface Window {
     electronAPI: {
-      createPty: (paneId: number, cwd?: string) => Promise<boolean>
+      createPty: (paneId: number, cwd?: string, env?: Record<string, string>) => Promise<boolean>
       killPty: (paneId: number) => Promise<void>
       getCwd: (paneId: number) => Promise<string | null>
       getGitStatus: (paneId: number) => Promise<GitStatus | null>

@@ -930,10 +930,10 @@ function sendMenuAction(action: MenuAction) {
 // Setup IPC handlers
 function setupIPC() {
   // PTY creation
-  ipcMain.handle(IPC_CHANNELS.PTY_CREATE, async (_, paneId: number, cwd?: string) => {
+  ipcMain.handle(IPC_CHANNELS.PTY_CREATE, async (_, paneId: number, cwd?: string, env?: Record<string, string>) => {
     logger.info('pty', `Creating PTY for pane ${paneId}`, cwd ? `cwd: ${cwd}` : 'using default cwd')
     try {
-      const result = await ptyManager?.createPty(paneId, cwd)
+      const result = await ptyManager?.createPty(paneId, cwd, env)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
       } else {

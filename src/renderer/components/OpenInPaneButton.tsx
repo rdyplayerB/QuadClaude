@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '../store/workspace'
-import { sendToTerminal, focusTerminal } from './TerminalPane'
+import { focusTerminal, launchAgent, resolvePaneProfile } from './TerminalPane'
 
 interface OpenInPaneButtonProps {
   paneId: number
@@ -56,10 +56,12 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
     const dir = await resolveDir()
     if (!dir) return
     const store = useWorkspaceStore.getState()
-    const skip = store.preferences.dangerouslySkipPermissions === true
-    const claude = skip ? 'claude --dangerously-skip-permissions' : 'claude'
-    // cd into the same project folder, then start Claude
-    sendToTerminal(targetId, `cd "${dir}" && ${claude}\n`)
+    // Launch the TARGET pane's assigned agent (Claude / local model / ...) in a
+    // fresh shell rooted at this project's folder. forceCwd guarantees the right
+    // directory and injects the agent's env without leaking secrets.
+    const targetPane = store.panes.find((p) => p.id === targetId)
+    const profile = resolvePaneProfile(targetPane, store.preferences)
+    await launchAgent(targetId, profile, dir, dir)
     store.setActivePaneId(targetId)
     focusTerminal(targetId)
   }, [resolveDir])

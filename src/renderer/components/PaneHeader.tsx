@@ -1,9 +1,10 @@
 import { DragEvent, memo } from 'react'
 import { MIN_PANES } from '../../shared/types'
 import { useWorkspaceStore } from '../store/workspace'
-import { clearTerminal, sendToTerminal, disposeTerminalForPane } from './TerminalPane'
+import { clearTerminal, disposeTerminalForPane } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
 import { OpenInPaneButton } from './OpenInPaneButton'
+import { AgentBadge } from './AgentBadge'
 
 // Custom MIME type for pane drag operations
 export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
@@ -49,13 +50,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
-  const claudeRunning = pane.state === 'claude-active' || pane.state === 'claude-waiting'
-  const skipPermissions = useWorkspaceStore((s) => s.preferences.dangerouslySkipPermissions === true)
-  const startClaude = () => {
-    if (claudeRunning) return
-    const cmd = skipPermissions ? 'claude --dangerously-skip-permissions\r' : 'claude\r'
-    sendToTerminal(paneId, cmd)
-  }
 
   const servers = pane.servers ?? []
   const openPort = (port: number) => {
@@ -195,27 +189,17 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         )}
         <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
         <OpenInPaneButton paneId={paneId} />
-        <button
-          onClick={startClaude}
-          disabled={claudeRunning}
-          className={`flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors ${
-            claudeRunning
-              ? 'opacity-40 cursor-default text-[--ui-text-dimmed]'
-              : 'text-[--ui-text-dimmed] hover:text-[--ui-text-primary]'
-          }`}
-          title={claudeRunning ? 'Claude is already running in this pane' : `Start Claude${skipPermissions ? ' (skip permissions)' : ''}`}
-        >
-          {skipPermissions ? (
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-orange]">
-              <path d="M9 1L3 9h4l-2 6 7-9H8l1-5z" />
-            </svg>
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M4 4l4 4-4 4M9 12h3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          )}
-          <span className="text-[10px] leading-none">{claudeRunning ? 'Running' : 'Claude'}</span>
-        </button>
+        {pane.pairId && (
+          <span
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-none capitalize shrink-0"
+            style={{ color: pane.pairColor, backgroundColor: `${pane.pairColor}1a` }}
+            title={`Paired (${pane.pairRole}) — manage in the agent menu`}
+          >
+            <span aria-hidden>🔗</span>
+            {pane.pairRole}
+          </span>
+        )}
+        <AgentBadge paneId={paneId} />
         <button
           onClick={() => clearTerminal(paneId)}
           className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors rounded"

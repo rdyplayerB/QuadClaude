@@ -41,6 +41,29 @@ export interface ServerInfo {
   command: string
 }
 
+// A launchable agent: just a command + a bag of env vars typed/spawned into a
+// terminal. QuadClaude never speaks any API itself — all provider/auth/format
+// differences live inside the CLI tool the command runs (claude, opencode, ...).
+export interface AgentProfile {
+  id: string
+  name: string
+  command: string // bare executable + args, e.g. "claude" or "opencode"
+  env?: Record<string, string> // free-form; injected at PTY spawn, never echoed
+  builtin?: 'claude' // discriminator for Claude-only UI/behavior
+}
+
+export const CLAUDE_PROFILE_ID = 'claude'
+
+// Ring hues for paired panes. Each active pair claims the first free color, so
+// multiple pairs across a 6-pane grid stay visually distinct. Hex so the
+// renderer can apply them directly (border/box-shadow) without extra CSS vars.
+export const PAIR_RING_COLORS = ['#2dd4bf', '#a78bfa', '#fbbf24'] as const
+
+// Seeded so the built-in Claude path is identical to today.
+export const DEFAULT_AGENT_PROFILES: AgentProfile[] = [
+  { id: CLAUDE_PROFILE_ID, name: 'Claude Code', command: 'claude', builtin: 'claude' },
+]
+
 // Individual pane configuration
 export interface PaneConfig {
   id: number
@@ -49,6 +72,12 @@ export interface PaneConfig {
   state: PaneState
   gitStatus?: GitStatus // Git status for pane header
   servers?: ServerInfo[] // Transient: detected listening servers (not persisted)
+  agentId?: string // Which agent profile THIS pane runs; falls back to defaultAgentId
+  // Pane pairing (orchestrator ⇄ worker). Both panes in a pair share pairId and
+  // pairColor; pairRole distinguishes who drives vs who grinds. Persisted.
+  pairId?: string
+  pairRole?: 'orchestrator' | 'worker'
+  pairColor?: string // stored hue (from PAIR_RING_COLORS) so rings survive restarts
 }
 
 // Workspace state (persisted)
@@ -120,6 +149,10 @@ export interface WorkspacePreferences {
   dangerouslySkipPermissions?: boolean
   // When false, suppress the chime played when a pane starts waiting on a decision (default: enabled)
   decisionSoundEnabled?: boolean
+  // Configurable agents a pane can launch. Seeded with the built-in Claude profile.
+  agentProfiles?: AgentProfile[]
+  // Global fallback agent when a pane has no agentId assigned yet
+  defaultAgentId?: string
 }
 
 export interface WindowBounds {

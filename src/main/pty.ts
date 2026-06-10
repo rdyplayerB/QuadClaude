@@ -146,7 +146,7 @@ export class PtyManager {
     this.onExit = onExit
   }
 
-  async createPty(paneId: number, cwd?: string): Promise<boolean> {
+  async createPty(paneId: number, cwd?: string, env?: Record<string, string>): Promise<boolean> {
     // Kill existing PTY if any
     this.killPty(paneId)
 
@@ -157,15 +157,21 @@ export class PtyManager {
     try {
       // Spawn shell with no flags - node-pty provides a proper TTY so it's interactive
       // We already have the PATH from login shell, and SHELL_SESSIONS_DISABLE prevents session restore
+      // Agent-profile env (if any) is merged OVER the shell env so secrets reach
+      // the launched CLI without ever being echoed into shell history.
       const ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
         cwd: workingDir,
-        env: await getShellEnv(),
+        env: { ...(await getShellEnv()), ...(env || {}) },
       })
 
       ptyProcess.onData((data) => {
+        // A late event from a PTY that has since been replaced (env re-spawn or
+        // killPty) must not write into the new PTY's stream.
+        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
+
         // Track throughput for the performance monitor (byte length, not chars).
         const len = Buffer.byteLength(data, 'utf8')
         this.totalBytesOut += len
@@ -175,6 +181,10 @@ export class PtyManager {
       })
 
       ptyProcess.onExit(({ exitCode }) => {
+        // If this instance was already superseded (re-spawn / killPty replaced the
+        // map entry), do nothing — otherwise we'd delete the NEW pty and trigger a
+        // spurious renderer auto-respawn over it.
+        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
         this.ptys.delete(paneId)
         this.onExit(paneId, exitCode)
       })

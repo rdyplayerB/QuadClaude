@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, KeyboardEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode } from '../../shared/types'
+import { AgentsSettings } from './AgentsSettings'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -212,13 +213,22 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
             </div>
           </div>
 
+          {/* Agents Section */}
+          <AgentsSettings />
+
+          {/* Claude-only options — these apply ONLY to the built-in Claude Code
+              agent and are ignored for any other agent. */}
+          <h3 className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-3">
+            Claude Code only
+          </h3>
+
           {/* Claude Launch Section */}
           <div role="group" className="mb-2">
             <div className="flex items-center justify-between">
               <div className="flex flex-col gap-0.5 pr-3">
                 <span className="text-sm text-[--ui-text-primary]">Skip permission prompts</span>
                 <span className="text-[11px] text-[--ui-text-dimmed]">
-                  Launch the pane "Claude" button with <code>--dangerously-skip-permissions</code>
+                  Launch the Claude agent with <code>--dangerously-skip-permissions</code>
                 </span>
               </div>
               <button

@@ -6,7 +6,7 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
-import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND } from '../../shared/types'
+import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, WorkspacePreferences } from '../../shared/types'
 
 // Module-level tracking to persist across component remounts
 const initializedPtys = new Set<number>()
@@ -244,6 +244,58 @@ export function sendToTerminal(paneId: number, text: string) {
   }
 }
 
+// Transient (not persisted): the profile id whose env the current PTY for each
+// pane was spawned with. null = a plain shell (no injected env). Used to decide
+// when an agent launch must re-spawn the PTY to inject/clear env.
+const paneEnvProfile = new Map<number, string | null>()
+
+// Resolve which agent profile a pane should run: per-pane assignment, then the
+// global default, then the Claude builtin. The id-based fallthrough also makes
+// a deleted/dangling agentId degrade gracefully instead of breaking.
+export function resolvePaneProfile(
+  pane: Pick<PaneConfig, 'agentId'> | undefined,
+  prefs: Pick<WorkspacePreferences, 'agentProfiles' | 'defaultAgentId'>,
+): AgentProfile {
+  const profiles = prefs.agentProfiles ?? DEFAULT_AGENT_PROFILES
+  return (
+    profiles.find((p) => p.id === pane?.agentId) ??
+    profiles.find((p) => p.id === prefs.defaultAgentId) ??
+    profiles.find((p) => p.builtin === 'claude') ??
+    DEFAULT_AGENT_PROFILES[0]
+  )
+}
+
+// Launch an agent profile in a pane. Profiles that carry env re-spawn the shell
+// with that env (so secrets never hit shell history); env-less profiles (incl.
+// Claude) just type the command into the existing shell — identical to before.
+// forceCwd (used by Fork) forces a fresh shell in a specific directory.
+export async function launchAgent(
+  paneId: number,
+  profile: AgentProfile,
+  fallbackCwd: string,
+  forceCwd?: string,
+) {
+  const hasEnv = !!profile.env && Object.keys(profile.env).length > 0
+  const currentEnvProfile = paneEnvProfile.get(paneId) ?? null
+  // Re-spawn when a directory is forced, this profile needs env, OR the pane's
+  // PTY still carries env from a DIFFERENT profile (don't leak prior secrets).
+  const needsRespawn =
+    !!forceCwd || (hasEnv ? currentEnvProfile !== profile.id : currentEnvProfile !== null)
+  if (needsRespawn) {
+    // Use the forced dir, else the live tracked cwd (user may have cd'd).
+    const cwd = forceCwd || (await window.electronAPI.getCwd(paneId)) || fallbackCwd
+    clearTerminal(paneId)
+    await window.electronAPI.createPty(paneId, cwd, hasEnv ? profile.env : undefined)
+    paneEnvProfile.set(paneId, hasEnv ? profile.id : null)
+  }
+  let command = profile.command
+  if (profile.builtin === 'claude') {
+    const skip = useWorkspaceStore.getState().preferences.dangerouslySkipPermissions === true
+    if (skip) command += ' --dangerously-skip-permissions'
+  }
+  sendToTerminal(paneId, command + '\r')
+}
+
 export function focusTerminal(paneId: number) {
   const entry = terminals.get(paneId)
   if (entry) {
@@ -296,6 +348,7 @@ function disposeTerminal(paneId: number) {
     const scanTimer = promptScanTimers.get(paneId)
     if (scanTimer) clearTimeout(scanTimer)
     promptScanTimers.delete(paneId)
+    paneEnvProfile.delete(paneId)
     canvasAddons.delete(paneId) // addon is disposed with terminal.dispose()
 
     // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
@@ -814,9 +867,11 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           // Mark PTY as not initialized so it can be recreated
           initializedPtys.delete(paneId)
 
-          // Recreate PTY in the same directory
+          // Recreate PTY in the same directory. This is a plain shell (no agent
+          // env), so forget any env profile the prior PTY carried.
           const paneConfig = store.panes.find((p) => p.id === paneId)
           initializedPtys.add(paneId)
+          paneEnvProfile.set(paneId, null)
           await window.electronAPI.createPty(
             paneId,
             paneConfig?.workingDirectory
@@ -1045,6 +1100,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   return (
     <div
       className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      // Pair ring: matching hue on both paired panes reads as "these two are a team".
+      style={pane.pairId && pane.pairColor ? { boxShadow: `0 0 0 2px ${pane.pairColor}` } : undefined}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}

@@ -9,6 +9,8 @@ The ADHD workspace for Claude Code — run up to 6 Claude sessions side by side 
 ## Features
 
 - **4–6 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 6)
+- **Custom Agents (Bring Your Own Model)**: Launch any CLI agent (Claude Code, opencode, aider, …) against your own OpenAI-compatible endpoint — one agent per pane, chosen from the model badge
+- **Pane Pairing**: Link two panes as an orchestrator ⇄ worker team (e.g. Claude plans, a local model grinds) with a shared-color ring and role chips
 - **3 Layout Modes**: Grid (auto-balanced), Focus (1 large + rest small), Focus-Right (rest small + 1 large)
 - **Glass UI**: macOS Liquid Glass visual effects with dark-mode-only design
 - **Prompt Library**: Save and recall frequently used prompts via a floating toolbar
@@ -19,6 +21,37 @@ The ADHD workspace for Claude Code — run up to 6 Claude sessions side by side 
 - **Auto-Named Terminals**: Headers show folder/repo name automatically
 - **Workspace Persistence**: Remembers your directories, layout, and preferences between sessions
 - **Drag & Drop Reordering**: Rearrange terminal positions by dragging headers
+
+## Bring Your Own Model (Custom Agents)
+
+Each pane can launch any CLI coding agent — not just Claude Code — so you can mix Claude with a local or self-hosted model and run them side by side. QuadClaude is a **pure launcher**: it runs a command with a set of env vars in a terminal and never speaks any API itself, so it works with any tool and any provider.
+
+Add an agent in **Settings → Agents → Add agent**. A profile is just a **name**, a **command**, and an optional set of **environment variables**. Pick a preset (opencode / aider) or **Other** for anything else. The model badge in each pane header shows and switches the agent; the default agent is used for new panes.
+
+Tools configure themselves in one of two ways — the presets reflect both:
+
+- **Env-driven tools (e.g. aider)** — set the variables right in the profile:
+  - `OPENAI_API_BASE` = `http://your-host/v1`
+  - `OPENAI_API_KEY` = your key (any placeholder like `ollama` for local models that don't check it)
+- **Config-file tools (e.g. opencode)** — leave the env empty and configure the tool itself. For opencode, edit `~/.config/opencode/opencode.json`:
+
+  ```json
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+      "my-local": {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": "My Local Model",
+        "options": { "baseURL": "http://your-host/v1", "apiKey": "ollama" },
+        "models": { "your-model-id": { "name": "Your Model" } }
+      }
+    }
+  }
+  ```
+
+API keys set in a profile are injected into the agent's shell at launch and never echoed into shell history.
+
+> **Reaching a self-hosted endpoint.** Your tool runs on *your* machine, so the endpoint must be reachable from it. Local models (`http://localhost:11434/v1` for Ollama) just work. For a remote/self-hosted box, make sure the URL resolves and isn't gated behind browser SSO — a private VPN (e.g. Tailscale, or an Olares LarePass VPN to an internal entrance) is the cleanest way. Quick check: `curl http://your-host/v1/models` should return a JSON model list (HTTP 200), not a redirect.
 
 ## Installation
 
