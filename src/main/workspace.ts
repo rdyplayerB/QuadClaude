@@ -94,7 +94,7 @@ export class WorkspaceManager {
       }
 
       // Migrate removed layouts to 'grid' (horizontal, vertical, fullscreen, split removed)
-      const validLayouts: LayoutMode[] = ['grid', 'focus']
+      const validLayouts: LayoutMode[] = ['grid', 'focus', 'focus-right']
       if (!validLayouts.includes(workspace.layout as LayoutMode)) {
         logger.info('workspace', `Migrating removed layout '${workspace.layout}' to 'grid'`)
         workspace.layout = 'grid'
