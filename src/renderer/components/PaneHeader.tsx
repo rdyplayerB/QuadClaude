@@ -1,7 +1,7 @@
 import { DragEvent, memo } from 'react'
 import { MIN_PANES } from '../../shared/types'
 import { useWorkspaceStore } from '../store/workspace'
-import { clearTerminal, disposeTerminalForPane } from './TerminalPane'
+import { clearTerminal, disposeTerminalForPane, restartShell } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
 import { OpenInPaneButton } from './OpenInPaneButton'
 import { AgentBadge } from './AgentBadge'
@@ -200,6 +200,16 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           </span>
         )}
         <AgentBadge paneId={paneId} />
+        <button
+          onClick={() => restartShell(paneId, pane.workingDirectory)}
+          className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-red-400 transition-colors rounded"
+          title="Stop — kill the running process and reset the shell (recovers a locked pane)"
+        >
+          <svg width="11" height="11" viewBox="0 0 14 14" fill="currentColor">
+            <rect x="3" y="3" width="8" height="8" rx="1.5" />
+          </svg>
+          <span className="text-[10px] leading-none">Stop</span>
+        </button>
         <button
           onClick={() => clearTerminal(paneId)}
           className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors rounded"

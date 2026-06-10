@@ -248,6 +248,9 @@ export function sendToTerminal(paneId: number, text: string) {
 // pane was spawned with. null = a plain shell (no injected env). Used to decide
 // when an agent launch must re-spawn the PTY to inject/clear env.
 const paneEnvProfile = new Map<number, string | null>()
+// Panes with a launch in flight — guards against double-click / double-fire
+// sending the agent command twice (the env re-spawn path is async).
+const launchingPanes = new Set<number>()
 
 // Resolve which agent profile a pane should run: per-pane assignment, then the
 // global default, then the Claude builtin. The id-based fallthrough also makes
@@ -275,6 +278,10 @@ export async function launchAgent(
   fallbackCwd: string,
   forceCwd?: string,
 ) {
+  // Swallow rapid duplicate launches for the same pane (double-click / double-fire).
+  if (launchingPanes.has(paneId)) return
+  launchingPanes.add(paneId)
+  setTimeout(() => launchingPanes.delete(paneId), 600)
   const hasEnv = !!profile.env && Object.keys(profile.env).length > 0
   const currentEnvProfile = paneEnvProfile.get(paneId) ?? null
   // Re-spawn when a directory is forced, this profile needs env, OR the pane's
@@ -294,6 +301,17 @@ export async function launchAgent(
     if (skip) command += ' --dangerously-skip-permissions'
   }
   sendToTerminal(paneId, command + '\r')
+}
+
+// Kill whatever is running in a pane and re-spawn a fresh shell. Recovers a pane
+// that a misbehaving full-screen agent has locked (blank/unresponsive). Re-spawning
+// the PTY sends SIGHUP to the shell's process group, killing the stuck child too.
+export async function restartShell(paneId: number, fallbackCwd: string) {
+  const cwd = (await window.electronAPI.getCwd(paneId)) || fallbackCwd
+  clearTerminal(paneId)
+  paneEnvProfile.set(paneId, null)
+  await window.electronAPI.createPty(paneId, cwd)
+  useWorkspaceStore.getState().setPaneState(paneId, 'shell')
 }
 
 export function focusTerminal(paneId: number) {
