@@ -22,10 +22,10 @@ export interface SavedPrompt {
 export type PaneState = 'shell' | 'claude-active' | 'claude-waiting'
 
 // Pane count bounds. The app is "QuadClaude" so 4 is the floor; extra panes
-// can be added up to MAX_PANES, after which the grid cells get too small to
-// be useful at typical window sizes.
+// can be added up to MAX_PANES. 12 is a practical ceiling — beyond a 4x3 grid
+// the cells get too small to be useful even on large displays.
 export const MIN_PANES = 4
-export const MAX_PANES = 6
+export const MAX_PANES = 12
 
 // Focus-layout splitter: fraction of the width given to the column of small
 // panes. The default IS the minimum (small panes at their tightest); the user
@@ -55,9 +55,17 @@ export interface AgentProfile {
 export const CLAUDE_PROFILE_ID = 'claude'
 
 // Ring hues for paired panes. Each active pair claims the first free color, so
-// multiple pairs across a 6-pane grid stay visually distinct. Hex so the
-// renderer can apply them directly (border/box-shadow) without extra CSS vars.
-export const PAIR_RING_COLORS = ['#2dd4bf', '#a78bfa', '#fbbf24'] as const
+// multiple pairs across the grid stay visually distinct. Sized for up to six
+// pairs (MAX_PANES / 2). Hex so the renderer can apply them directly
+// (border/box-shadow) without extra CSS vars.
+export const PAIR_RING_COLORS = [
+  '#2dd4bf',
+  '#a78bfa',
+  '#fbbf24',
+  '#f472b6',
+  '#38bdf8',
+  '#fb923c',
+] as const
 
 // Seeded so the built-in Claude path is identical to today.
 export const DEFAULT_AGENT_PROFILES: AgentProfile[] = [

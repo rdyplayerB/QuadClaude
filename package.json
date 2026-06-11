@@ -1,7 +1,7 @@
 {
   "name": "quadclaude",
-  "version": "1.15.1",
-  "description": "The ADHD workspace for Claude Code - run up to 6 Claude sessions side by side with flexible layouts",
+  "version": "1.16.0",
+  "description": "The Claude Code client for the ADHD brain - run up to 12 Claude sessions side by side with flexible layouts",
   "main": "dist/main/index.js",
   "author": "rdyplayerB (https://x.com/rdyplayerB)",
   "license": "AGPL-3.0-or-later",

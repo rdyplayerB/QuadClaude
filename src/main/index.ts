@@ -30,7 +30,7 @@ let logWindow: BrowserWindow | null = null
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
 let workspaceManager: WorkspaceManager | null = null
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+const isDev = process.env.QC_FORCE_PROD === '1' ? false : (process.env.NODE_ENV === 'development' || !app.isPackaged)
 
 function openLogViewer() {
   if (logWindow) {

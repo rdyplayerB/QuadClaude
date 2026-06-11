@@ -1,14 +1,29 @@
 # QuadClaude
 
-The ADHD workspace for Claude Code — run up to 6 Claude sessions side by side with flexible layouts and a glass-effect UI. Six sessions, zero impulse control.
+**The Claude Code client for the ADHD brain.** Run up to 12 Claude sessions side by side in one glass window — because an agent you can't see is an agent you forgot about. A dozen sessions, zero impulse control.
+
+[![Latest release](https://img.shields.io/github/v/release/rdyplayerB/QuadClaude)](https://github.com/rdyplayerB/QuadClaude/releases)
+![Platform](https://img.shields.io/badge/platform-macOS-blue)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL%20v3-blue)](LICENSE)
 
 ![QuadClaude running four Claude Code sessions in a 2×2 grid](docs/screenshot.png)
 
-<sub>Illustrative mockup with placeholder projects. Source: [`docs/screenshot-mock.html`](docs/screenshot-mock.html).</sub>
+<sub>Real app screenshot — the four panes show demo projects with simulated session output.</sub>
+
+## Why QuadClaude
+
+Claude Code made it easy to run five agents at once. Your terminal made it easy to forget four of them exist.
+
+QuadClaude is built around one rule: **out of sight is out of mind.** Nothing lives in a tab, nothing hides behind another window — every session stays on screen with its state readable at a glance.
+
+- **Everything visible, always.** Agents don't get buried. The grid is the whole app.
+- **One glance, total state.** Every pane shows its repo, branch, ahead/behind counts, and whether Claude is working or waiting on you.
+- **Interrupt-proof.** Wander off mid-task and the grid shows exactly where you left things when you come back. Quit the app and the whole workspace restores itself.
+- **Hyperfocus on tap.** Focus layouts make one pane huge while the rest stay in the corner of your eye. Double-click a header to dive in, double-click to surface.
 
 ## Features
 
-- **4–6 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 6)
+- **4–12 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 12)
 - **Custom Agents (Bring Your Own Model)**: Launch any CLI agent (Claude Code, opencode, aider, …) against your own OpenAI-compatible endpoint — one agent per pane, chosen from the model badge
 - **Pane Pairing**: Link two panes as an orchestrator ⇄ worker team (e.g. Claude plans, a local model grinds) with a shared-color ring and role chips
 - **3 Layout Modes**: Grid (auto-balanced), Focus (1 large + rest small), Focus-Right (rest small + 1 large)
@@ -95,9 +110,9 @@ The packaged app will be in the `release` directory.
 
 | Layout | Shortcut | Description |
 |--------|----------|-------------|
-| Grid | `Cmd+1` | 2x2 equal quadrants |
-| Focus | `Cmd+2` | 1 large pane on left + 3 small on right |
-| Focus-Right | `Cmd+3` | 3 small panes on left + 1 large on right |
+| Grid | `Cmd+1` | Auto-balanced grid — 2×2 with four panes, up to 4×3 with twelve |
+| Focus | `Cmd+2` | 1 large pane on left + the rest small on the right |
+| Focus-Right | `Cmd+3` | Small panes on left + 1 large on the right |
 
 **Tip**: Double-click any terminal header to toggle focus mode on that pane.
 
@@ -105,7 +120,7 @@ The packaged app will be in the `release` directory.
 
 | Action | Shortcut |
 |--------|----------|
-| Focus Terminal 1-4 | `Cmd+Shift+1-4` |
+| Focus Terminal 1–9 | `Ctrl+1-9` (1–4 rebindable in Settings; 5–9 fixed) |
 | Clear Current Terminal | `Cmd+K` |
 | Increase Font | `Cmd++` |
 | Decrease Font | `Cmd+-` |

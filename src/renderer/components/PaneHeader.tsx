@@ -21,6 +21,12 @@ const PANE_COLORS = [
   '#a78bfa', // Purple (Terminal 4)
   '#f472b6', // Pink (Terminal 5)
   '#fb923c', // Orange (Terminal 6)
+  '#38bdf8', // Sky (Terminal 7)
+  '#34d399', // Emerald (Terminal 8)
+  '#f59e0b', // Gold (Terminal 9)
+  '#c084fc', // Violet (Terminal 10)
+  '#fb7185', // Rose (Terminal 11)
+  '#2dd4bf', // Teal (Terminal 12)
 ]
 
 // Extract folder/repo name from path
