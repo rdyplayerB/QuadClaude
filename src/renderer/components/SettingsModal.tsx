@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, KeyboardEvent, memo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode } from '../../shared/types'
 import { AgentsSettings } from './AgentsSettings'
+import { ModelRouterSettings } from './ModelRouterSettings'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -212,6 +213,9 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
               </button>
             </div>
           </div>
+
+          {/* Run any model as Claude Code (claude-code-router) */}
+          <ModelRouterSettings />
 
           {/* Agents Section */}
           <AgentsSettings />

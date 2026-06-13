@@ -211,7 +211,54 @@ export const IPC_CHANNELS = {
   PTY_DETECT_SERVERS: 'pty:detect-servers',
   PTY_KILL_SERVER: 'pty:kill-server',
   PTY_PASTE_IMAGE: 'pty:paste-image',
+
+  // Model router (claude-code-router) — run any model as the real Claude Code TUI
+  ROUTER_STATUS: 'router:status',
+  ROUTER_SAVE_PROVIDER: 'router:save-provider',
+  ROUTER_DELETE_PROVIDER: 'router:delete-provider',
+  ROUTER_TEST: 'router:test',
 } as const
+
+// --- Model router (claude-code-router) types ---------------------------------
+// QuadClaude writes ccr's local config so a pane can run `claude` against a non-
+// Anthropic model with identical look/feel. We never speak the LLM API ourselves.
+
+// What the wizard collects for one bring-your-own model.
+export interface RouterProviderInput {
+  label: string // friendly display name, e.g. "DeepSeek V3"
+  baseUrl: string // full chat/completions endpoint, e.g. https://openrouter.ai/api/v1/chat/completions
+  apiKey: string // hosted-provider key; stored in ccr's local config.json (chmod 600)
+  model: string // model id at the provider, e.g. deepseek/deepseek-chat
+  transformer?: string // optional ccr transformer key (openrouter | deepseek | gemini | ...)
+}
+
+export interface RouterStatusProvider {
+  name: string // ccr provider slug
+  model: string
+  baseUrl: string
+}
+
+export interface RouterStatus {
+  configPath: string
+  ccrInstalled: boolean
+  installHint: string // e.g. "npm install -g @musistudio/claude-code-router"
+  command: string // pane command that launches the real Claude Code TUI ("ccr code")
+  providers: RouterStatusProvider[]
+}
+
+export interface RouterSaveResult {
+  ok: boolean
+  route: string // "providerSlug,modelId"
+  command: string // pane command, e.g. "ccr code"
+  env: Record<string, string> // env to put on the created AgentProfile (ANTHROPIC_MODEL)
+  ccrInstalled: boolean
+  error?: string
+}
+
+export interface RouterTestResult {
+  ok: boolean
+  error?: string
+}
 
 // Rate limit usage data from Anthropic API
 export interface UsageData {
