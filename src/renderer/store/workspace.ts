@@ -156,9 +156,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         layout = 'grid'
       }
 
-      // Reset all pane states to 'shell' on startup - Claude sessions don't survive app restart
+      // Reset all pane states to 'shell' on startup - Claude sessions don't survive app
+      // restart. Pairing is also stripped: an orchestrator⇄worker delegation link belongs
+      // to a single session, so it must NOT carry over — the next launch starts unpaired
+      // and only re-pairs if the user delegates again.
       const panes = savedState.panes?.map((pane: PaneConfig) => ({
-        ...pane,
+        ...stripPair(pane),
         state: 'shell' as PaneState,
       })) ?? []
 
@@ -184,6 +187,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         },
         isInitialized: true,
       })
+      // Persist the cleaned state so the on-disk workspace doesn't keep stale pairing
+      // (delegation links from a previous session) around between launches.
+      get().saveWorkspace()
     } catch (error) {
       console.error('Failed to load workspace:', error)
       // Create default state

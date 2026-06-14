@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -124,6 +124,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.NET_LOOPBACK_STATUS) as Promise<LoopbackStatus>,
   ensureLoopback: () =>
     ipcRenderer.invoke(IPC_CHANNELS.NET_ENSURE_LOOPBACK) as Promise<LoopbackStatus>,
+  delegationSummaries: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_SUMMARIES) as Promise<DelegationProjectSummary[]>,
+  delegationEvents: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EVENTS) as Promise<DelegationEvent[]>,
+  delegationClear: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_CLEAR) as Promise<DelegationProjectSummary[]>,
+  delegationExport: (save: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EXPORT, save) as Promise<{ text: string; path: string | null; canceled: boolean }>,
+  clipboardWriteText: (text: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, text) as Promise<boolean>,
+  onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
+    const handler = (_: unknown, event: DelegationEvent) => callback(event)
+    ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.DELEGATION_EVENT, handler)
+  },
 
   // File utilities
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
@@ -175,6 +190,12 @@ declare global {
       routerClearDelegation: () => Promise<RouterDelegationStatus>
       loopbackStatus: () => Promise<LoopbackStatus>
       ensureLoopback: () => Promise<LoopbackStatus>
+      delegationSummaries: () => Promise<DelegationProjectSummary[]>
+      delegationEvents: () => Promise<DelegationEvent[]>
+      delegationClear: () => Promise<DelegationProjectSummary[]>
+      delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
+      clipboardWriteText: (text: string) => Promise<boolean>
+      onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void
       markPerf: (label: string) => void

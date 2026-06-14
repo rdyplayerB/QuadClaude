@@ -163,6 +163,16 @@ export interface WorkspacePreferences {
   defaultAgentId?: string
   // Per-pane network isolation so dev servers in different panes don't fight over ports
   portIsolation?: PortIsolation
+  // Delegation workflow: master switch + how the worker feed window is offered
+  delegation?: DelegationPrefs
+}
+
+// Delegation is opt-in. When enabled and a delegation model is configured, the app
+// offers a live "worker" window the first time Claude delegates in a session. The
+// approval itself is session-scoped and ephemeral (re-asked each new Claude session),
+// so it isn't persisted here — only the master switch is.
+export interface DelegationPrefs {
+  enabled?: boolean
 }
 
 // Strategy for keeping each pane's dev servers from colliding on the same port.
@@ -260,7 +270,60 @@ export const IPC_CHANNELS = {
   // Per-pane port isolation — manage macOS lo0 loopback aliases
   NET_LOOPBACK_STATUS: 'net:loopback-status',
   NET_ENSURE_LOOPBACK: 'net:ensure-loopback',
+  // Delegation telemetry — per-project rollups of what was delegated and whether it worked
+  DELEGATION_SUMMARIES: 'delegation:summaries',
+  DELEGATION_EVENTS: 'delegation:events',
+  DELEGATION_CLEAR: 'delegation:clear',
+  DELEGATION_EXPORT: 'delegation:export',
+  // Pushed (main → renderer) when a new delegation event lands in events.jsonl
+  DELEGATION_EVENT: 'delegation:event',
+  // Write text to the system clipboard from main (reliable regardless of window focus)
+  CLIPBOARD_WRITE_TEXT: 'clipboard:write-text',
 } as const
+
+// --- Delegation telemetry ----------------------------------------------------
+// One structured event per `qcdelegate` run, appended to ~/.quadclaude/events.jsonl by
+// the worker script. This is the machine-readable source of truth for "how much was
+// delegated, and did it work?" — distinct from the human-readable delegation.log feed.
+export interface DelegationEvent {
+  ts: string // ISO-8601 UTC
+  type: 'delegation'
+  project: string // absolute path of the project (git toplevel, or PWD)
+  pane: string // originating pane id (QC_PANE), "" if launched outside a pane
+  task: string // QC_TASK tag, or "untagged"
+  route: string // "providerSlug,modelId" the worker ran against
+  durationSec: number
+  exit: number // worker exit code (0 = the claude -p run succeeded)
+  promptChars: number
+  coldStartRetries: number // how many warm-up retries it took before the model responded
+  gitMode: 'repo' | 'shadow' | 'none' // how change-attribution was measured
+  insertions: number // lines the worker added (measured by snapshot diff)
+  deletions: number // lines the worker removed
+  files: string // ";"-joined list of changed file paths (capped)
+  check: { command: string; exit: number } | null // ground-truth check result, if QC_CHECK was set
+  promptPreview?: string // first ~1000 chars of the task sent to the worker (what was delegated)
+  outputPreview?: string // last ~1500 chars of the worker's output (how it responded — for diagnosing)
+}
+
+// Per-project rollup the UI reads. Cumulative across the project's whole history.
+export interface DelegationProjectSummary {
+  project: string
+  projectName: string
+  delegations: number
+  succeeded: number // exit === 0
+  failed: number
+  checked: number // delegations that ran a QC_CHECK
+  checkPassed: number // of those, how many passed (objective "it worked")
+  coldStartRetries: number // total warm-up retries across all runs
+  insertions: number // total lines delegated (added)
+  deletions: number
+  filesTouched: number
+  firstAt: string
+  lastAt: string
+  // Derived (filled in on read):
+  successRate?: number | null // succeeded / delegations
+  checkRate?: number | null // checkPassed / checked — the truest "did delegation work?"
+}
 
 // --- Model router (claude-code-router) types ---------------------------------
 // QuadClaude writes ccr's local config so a pane can run `claude` against a non-
