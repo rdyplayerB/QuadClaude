@@ -138,6 +138,9 @@ if [ -n "$ckcmd" ]; then
 fi
 
 # --- Emit one structured event (dependency-free; the app reads this) -------
+# Skip telemetry for QC_NOLOG runs (e.g. connectivity warm-up pings) so they don't
+# pollute delegation stats.
+if [ -n "$QC_NOLOG" ]; then rm -f "$out"; exit "$rc"; fi
 # Escape a value for embedding inside a JSON string: backslash, quote, and any
 # control chars (newline/CR/tab) flattened to spaces so the JSON stays valid.
 jesc() { printf %s "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
