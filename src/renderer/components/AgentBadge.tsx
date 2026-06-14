@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '../store/workspace'
-import { launchAgent, resolvePaneProfile } from './TerminalPane'
+import { launchAgent, resolvePaneProfile, sendToTerminal } from './TerminalPane'
 
 interface AgentBadgeProps {
   paneId: number
@@ -77,6 +77,16 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   const doPair = useCallback(
     (workerId: number) => {
       pairPanes(paneId, workerId) // this pane is the orchestrator
+      // Make the pairing functional: stream the live delegation feed into the worker
+      // pane so the worker's output actually shows up there (which is what people
+      // expect). Only when it's an idle shell — never type into a running agent.
+      const w = useWorkspaceStore.getState().panes.find((p) => p.id === workerId)
+      if (w && w.state === 'shell') {
+        sendToTerminal(
+          workerId,
+          'clear; mkdir -p ~/.quadclaude && touch ~/.quadclaude/delegation.log && tail -F ~/.quadclaude/delegation.log\n',
+        )
+      }
       setPairMode(false)
       setOpen(false)
     },
