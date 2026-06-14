@@ -12,6 +12,10 @@
 #   qcdecide "monster data" delegate "spec-driven JSON" "node test/validate_monsters.mjs"
 set -o pipefail
 qc="$HOME/.quadclaude"; log="$qc/delegation.log"; events="$qc/events.jsonl"; mkdir -p "$qc"
+# Mirror into a per-orchestrator feed file (in addition to the global log) so a pane
+# scoped to this Claude session (QC_PANE) sees only its own decisions. Empty -> global only.
+feeds=("$log")
+if [ -n "$QC_PANE" ]; then mkdir -p "$qc/feed"; feeds+=("$qc/feed/$QC_PANE.log"); fi
 
 group="$1"; verdict="$2"; reason="$3"; check="$4"
 if [ -z "$group" ] || { [ "$verdict" != "keep" ] && [ "$verdict" != "delegate" ]; }; then
@@ -27,7 +31,7 @@ ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [ "$verdict" = "delegate" ]; then col=173; label="DELEGATE → qwen"; else col=39; label="KEEP (Claude)"; fi
 extra=""; [ "$verdict" = "delegate" ] && [ -n "$check" ] && extra="  · check: $check"
 printf '\n\033[38;5;%sm── %s · decision · %s → %s ──\033[0m\n\033[2m%s%s\033[0m\n' \
-  "$col" "$(date '+%H:%M:%S')" "$group" "$label" "$reason" "$extra" | tee -a "$log"
+  "$col" "$(date '+%H:%M:%S')" "$group" "$label" "$reason" "$extra" | tee -a "${feeds[@]}"
 
 jesc() { printf %s "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
 printf '{"ts":"%s","type":"decision","project":"%s","pane":"%s","group":"%s","verdict":"%s","reason":"%s","check":"%s"}\n' \

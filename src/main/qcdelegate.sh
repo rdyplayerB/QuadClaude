@@ -26,6 +26,13 @@ events="$qc/events.jsonl"
 route_file="$qc/delegation-model"
 mkdir -p "$qc"
 
+# Feed targets. Everything still goes to the global delegation.log (the "All" feed), and
+# ALSO to a per-orchestrator file ~/.quadclaude/feed/<QC_PANE>.log when we know which
+# QuadClaude pane launched us — so a feed pane scoped to this Claude session sees only its
+# own delegations. Empty QC_PANE (e.g. run outside QuadClaude) -> global feed only.
+feeds=("$log")
+if [ -n "$QC_PANE" ]; then mkdir -p "$qc/feed"; feeds+=("$qc/feed/$QC_PANE.log"); fi
+
 route="$(cat "$route_file" 2>/dev/null | tr -d '[:space:]')"
 if [ -z "$route" ]; then
   echo "qcdelegate: no delegation model set. Pick one in QuadClaude -> Settings -> Models." >&2
@@ -39,7 +46,7 @@ engine="${QC_ENGINE:-aider}"
 in_git=0
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then in_git=1; fi
 if [ "$engine" = "aider" ] && [ "$in_git" -ne 1 ]; then
-  printf '\033[2mqcdelegate: not a git repo — falling back to the claude engine for this run.\033[0m\n' | tee -a "$log"
+  printf '\033[2mqcdelegate: not a git repo — falling back to the claude engine for this run.\033[0m\n' | tee -a "${feeds[@]}"
   engine="claude"
 fi
 
@@ -47,7 +54,7 @@ fi
 # If the default aider engine isn't installed, fall back to the legacy claude/ccr engine
 # rather than failing — delegation keeps working, just without aider's nicer loop.
 if [ "$engine" = "aider" ] && ! command -v aider >/dev/null 2>&1; then
-  printf '\033[2mqcdelegate: aider not installed — falling back to the claude engine. Install aider for the better loop: python3 -m pip install --user aider-install && aider-install (or brew install aider).\033[0m\n' | tee -a "$log"
+  printf '\033[2mqcdelegate: aider not installed — falling back to the claude engine. Install aider for the better loop: python3 -m pip install --user aider-install && aider-install (or brew install aider).\033[0m\n' | tee -a "${feeds[@]}"
   engine="claude"
 fi
 if [ "$engine" = "aider" ]; then
@@ -119,7 +126,7 @@ NODE
 fi
 
 printf '\n\033[38;5;173m-- %s . delegate via %s (%s) --------------------\033[0m\n\033[2m%s\033[0m\n' \
-  "$(date '+%H:%M:%S')" "$engine" "$route" "$*" | tee -a "$log"
+  "$(date '+%H:%M:%S')" "$engine" "$route" "$*" | tee -a "${feeds[@]}"
 
 # Compose the worker prompt: prepend a per-task brief if the orchestrator left one in
 # the working dir. Durable context belongs in CLAUDE.md (auto-loaded by the worker); the
@@ -212,7 +219,7 @@ else
     rc=$?
     if [ "$attempt" -lt 3 ] && grep -qiE "may not exist|may not have access|model.*not found" "$out"; then
       cold=$((cold + 1))
-      printf '\033[2mqcdelegate: model cold -- warming and retrying (%s)...\033[0m\n' "$attempt" | tee -a "$log"
+      printf '\033[2mqcdelegate: model cold -- warming and retrying (%s)...\033[0m\n' "$attempt" | tee -a "${feeds[@]}"
       sleep 2
       attempt=$((attempt + 1))
       continue
@@ -220,7 +227,7 @@ else
     break
   done
 fi
-cat "$out" | tee -a "$log"
+cat "$out" | tee -a "${feeds[@]}"
 dur=$((SECONDS - t0))
 
 # --- Attribution: diff the after-snapshot against the before-snapshot ------
@@ -250,7 +257,7 @@ fi
 if [ -n "$QC_NOLOG" ]; then rm -f "$out"; exit "$rc"; fi
 # Completion status line into the feed so the worker window shows a clear RESULT.
 ckdisp="no check"; if [ -n "$ckcmd" ]; then [ "$ckx" = "0" ] && ckdisp="check ✓" || ckdisp="check ✗($ckx)"; fi
-printf '\033[2m── done · %s · exit %s · %s · +%s/-%s lines · %ss ──\033[0m\n' "$engine" "$rc" "$ckdisp" "$ins" "$del" "$dur" | tee -a "$log"
+printf '\033[2m── done · %s · exit %s · %s · +%s/-%s lines · %ss ──\033[0m\n' "$engine" "$rc" "$ckdisp" "$ins" "$del" "$dur" | tee -a "${feeds[@]}"
 # Escape a value for embedding inside a JSON string: backslash, quote, and any
 # control chars (newline/CR/tab) flattened to spaces so the JSON stays valid.
 jesc() { printf %s "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
