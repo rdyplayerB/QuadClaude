@@ -88,10 +88,27 @@ if [ -f "$brief" ]; then
 else
   prompt="$*"
 fi
+t0=$SECONDS
+pchars=$(printf %s "$prompt" | wc -c | tr -d ' ')
 printf %s "$prompt" | ANTHROPIC_BASE_URL="http://127.0.0.1:3456" \\
 ANTHROPIC_AUTH_TOKEN="ccr" \\
 ANTHROPIC_MODEL="$route" \\
   claude -p --dangerously-skip-permissions --allowedTools "Read Write Edit MultiEdit Bash Glob Grep LS TodoWrite" 2>&1 | tee -a "$log"
+rc=$?
+dur=$((SECONDS - t0))
+qtask="$QC_TASK"; [ -z "$qtask" ] && qtask=untagged
+# Rich telemetry: capture the exact prompt, the worker's diff, and (if QC_CHECK is set)
+# a ground-truth check (tests/lint/build), then log it. No-op if qctrace is absent.
+if command -v qctrace >/dev/null 2>&1; then
+  pf=$(mktemp); printf %s "$prompt" > "$pf"
+  df=$(mktemp); files=""
+  if git rev-parse --git-dir >/dev/null 2>&1; then git diff > "$df" 2>/dev/null; files=$(git status --porcelain 2>/dev/null | head -40 | tr '\\n' ';'); fi
+  ckx=""
+  if [ -n "$QC_CHECK" ]; then sh -c "$QC_CHECK" >/dev/null 2>&1; ckx=$?; fi
+  QC_PROMPT_FILE="$pf" QC_DIFF_FILE="$df" QC_FILES="$files" QC_CHECK_CMD="$QC_CHECK" QC_CHECK_EXIT="$ckx" \\
+    qctrace delegate "$qtask" "$route" "$dur" "$rc" "$pchars" || true
+  rm -f "$pf" "$df"
+fi
 `
 
 // Minimal shape of ccr's config we touch. We preserve any other keys the user set.
