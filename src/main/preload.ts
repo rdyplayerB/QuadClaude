@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -128,6 +128,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_SUMMARIES) as Promise<DelegationProjectSummary[]>,
   delegationEvents: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EVENTS) as Promise<DelegationEvent[]>,
+  delegationDecisions: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_DECISIONS) as Promise<DelegationDecision[]>,
   delegationClear: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_CLEAR) as Promise<DelegationProjectSummary[]>,
   delegationExport: (save: boolean) =>
@@ -192,6 +194,7 @@ declare global {
       ensureLoopback: () => Promise<LoopbackStatus>
       delegationSummaries: () => Promise<DelegationProjectSummary[]>
       delegationEvents: () => Promise<DelegationEvent[]>
+      delegationDecisions: () => Promise<DelegationDecision[]>
       delegationClear: () => Promise<DelegationProjectSummary[]>
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
       clipboardWriteText: (text: string) => Promise<boolean>

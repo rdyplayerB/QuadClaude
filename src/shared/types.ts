@@ -273,6 +273,7 @@ export const IPC_CHANNELS = {
   // Delegation telemetry — per-project rollups of what was delegated and whether it worked
   DELEGATION_SUMMARIES: 'delegation:summaries',
   DELEGATION_EVENTS: 'delegation:events',
+  DELEGATION_DECISIONS: 'delegation:decisions',
   DELEGATION_CLEAR: 'delegation:clear',
   DELEGATION_EXPORT: 'delegation:export',
   // Pushed (main → renderer) when a new delegation event lands in events.jsonl
@@ -303,6 +304,19 @@ export interface DelegationEvent {
   check: { command: string; exit: number } | null // ground-truth check result, if QC_CHECK was set
   promptPreview?: string // first ~1000 chars of the task sent to the worker (what was delegated)
   outputPreview?: string // last ~1500 chars of the worker's output (how it responded — for diagnosing)
+}
+
+// A recorded orchestrator KEEP/DELEGATE decision for one unit of work, emitted by
+// `qcdecide`. Gives visibility into what Claude chose NOT to delegate, not just what it did.
+export interface DelegationDecision {
+  ts: string
+  type: 'decision'
+  project: string
+  pane: string
+  group: string // the unit of work being decided (a file, a system, a data file…)
+  verdict: 'keep' | 'delegate'
+  reason: string
+  check: string // the QC_CHECK that will gate it (delegate only); "" otherwise
 }
 
 // Per-project rollup the UI reads. Cumulative across the project's whole history.

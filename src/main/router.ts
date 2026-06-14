@@ -13,6 +13,7 @@ import { logger } from './logger'
 import { RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus } from '../shared/types'
 import { MERGE_PLUGIN_B64 } from './ccr-plugins/merge-system.b64'
 import { QCDELEGATE_B64 } from './qcdelegate.b64'
+import { QCDECIDE_B64 } from './qcdecide.b64'
 
 const CONFIG_DIR = path.join(os.homedir(), '.claude-code-router')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
@@ -34,6 +35,7 @@ const DELEGATION_ROUTE_FILE = path.join(QC_DIR, 'delegation-model')
 const DELEGATION_LOG = path.join(QC_DIR, 'delegation.log')
 const DELEGATE_BIN_DIR = path.join(os.homedir(), '.local', 'bin')
 const DELEGATE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdelegate')
+const DECIDE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdecide')
 
 // Compatibility transformer: makes small/local models (e.g. qwen3-coder via Ollama)
 // reliably tool-call under Claude Code's large prompt. We install it and route
@@ -54,6 +56,8 @@ export const DELEGATION_FEED_COMMAND =
 // script), warms past local-model cold starts, measures exactly what it changed, and
 // appends a structured event to ~/.quadclaude/events.jsonl for the app to roll up.
 const DELEGATE_SCRIPT_BODY = Buffer.from(QCDELEGATE_B64, 'base64').toString('utf8')
+// Companion helper: records the orchestrator's KEEP/DELEGATE decisions to the feed + log.
+const DECIDE_SCRIPT_BODY = Buffer.from(QCDECIDE_B64, 'base64').toString('utf8')
 
 // Minimal shape of ccr's config we touch. We preserve any other keys the user set.
 interface CcrProvider {
@@ -266,6 +270,7 @@ export class RouterManager {
   private writeDelegateScript(): void {
     fs.mkdirSync(DELEGATE_BIN_DIR, { recursive: true })
     fs.writeFileSync(DELEGATE_SCRIPT, DELEGATE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
+    fs.writeFileSync(DECIDE_SCRIPT, DECIDE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
   }
 
   // Install the compatibility transformer plugin and route delegation through a

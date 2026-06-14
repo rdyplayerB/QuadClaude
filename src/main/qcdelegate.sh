@@ -141,6 +141,9 @@ fi
 # Skip telemetry for QC_NOLOG runs (e.g. connectivity warm-up pings) so they don't
 # pollute delegation stats.
 if [ -n "$QC_NOLOG" ]; then rm -f "$out"; exit "$rc"; fi
+# Completion status line into the feed so the worker window shows a clear RESULT.
+ckdisp="no check"; if [ -n "$ckcmd" ]; then [ "$ckx" = "0" ] && ckdisp="check ✓" || ckdisp="check ✗($ckx)"; fi
+printf '\033[2m── done · exit %s · %s · +%s/-%s lines · %ss ──\033[0m\n' "$rc" "$ckdisp" "$ins" "$del" "$dur" | tee -a "$log"
 # Escape a value for embedding inside a JSON string: backslash, quote, and any
 # control chars (newline/CR/tab) flattened to spaces so the JSON stays valid.
 jesc() { printf %s "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }

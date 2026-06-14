@@ -19,7 +19,7 @@ import os from 'os'
 import fs from 'fs'
 import path from 'path'
 import { logger } from './logger'
-import { DelegationEvent, DelegationProjectSummary } from '../shared/types'
+import { DelegationEvent, DelegationProjectSummary, DelegationDecision } from '../shared/types'
 
 const QC_DIR = path.join(os.homedir(), '.quadclaude')
 const EVENTS_PATH = path.join(QC_DIR, 'events.jsonl')
@@ -97,6 +97,28 @@ function readEvents(): DelegationEvent[] {
   return out
 }
 
+// Decision records (KEEP/DELEGATE) from qcdecide — tolerant parse of the same file.
+function readDecisions(): DelegationDecision[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(EVENTS_PATH, 'utf8')
+  } catch {
+    return []
+  }
+  const out: DelegationDecision[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const e = JSON.parse(t)
+      if (e && e.type === 'decision' && typeof e.group === 'string') out.push(e as DelegationDecision)
+    } catch {
+      /* skip */
+    }
+  }
+  return out
+}
+
 // Fold a single event into a project's running totals.
 function applyEvent(s: DelegationProjectSummary, e: DelegationEvent): void {
   s.delegations += 1
@@ -153,12 +175,20 @@ class DelegationLog {
     return events.slice(0, limit)
   }
 
+  // KEEP/DELEGATE decisions for the dashboard's decision ledger, most-recent-first.
+  getDecisions(limit = 2000): DelegationDecision[] {
+    const d = readDecisions()
+    d.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+    return d.slice(0, limit)
+  }
+
   // A single self-contained, human- AND machine-readable report of all delegation
   // activity — built to be pasted straight back to Claude to analyze and improve how
   // it delegates to custom LLMs. Markdown summary + a fenced JSON block of every event.
   buildReport(): string {
     const summaries = this.getSummaries()
     const events = this.getEvents()
+    const decisions = this.getDecisions()
     const stamp = new Date().toISOString()
     const L: string[] = []
     L.push(`# QuadClaude delegation log`)
@@ -190,6 +220,14 @@ class DelegationLog {
       L.push(`- **${s.projectName}** — ${s.delegations} delegations, ${s.succeeded} ok, check-pass ${cr}, ${s.insertions} lines, ${s.filesTouched} files, ${s.coldStartRetries} cold retries`)
     }
     L.push('')
+    if (decisions.length) {
+      const kept = decisions.filter((d) => d.verdict === 'keep').length
+      L.push(`## Decisions (KEEP/DELEGATE ledger) — ${kept} kept, ${decisions.length - kept} delegated`)
+      for (const d of decisions) {
+        L.push(`- [${d.verdict.toUpperCase()}] ${d.group} — ${d.reason}${d.check ? ` (check: ${d.check})` : ''}`)
+      }
+      L.push('')
+    }
     L.push(`## Events (most recent first)`)
     for (const e of events) {
       const ck = e.check ? (e.check.exit === 0 ? 'check:PASS' : `check:FAIL(${e.check.exit})`) : 'check:none'
@@ -301,7 +339,8 @@ class DelegationLog {
         if (!t) continue
         try {
           const e = JSON.parse(t)
-          if (e && e.type === 'delegation' && typeof e.project === 'string') cb(e as DelegationEvent)
+          // Forward both delegations and decisions so the dashboard live-refreshes on either.
+          if (e && (e.type === 'delegation' || e.type === 'decision')) cb(e as DelegationEvent)
         } catch {
           /* skip malformed */
         }

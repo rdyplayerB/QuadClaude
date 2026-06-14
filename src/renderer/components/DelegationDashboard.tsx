@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { DelegationProjectSummary, DelegationEvent, RouterDelegationStatus } from '../../shared/types'
+import { DelegationProjectSummary, DelegationEvent, DelegationDecision, RouterDelegationStatus } from '../../shared/types'
 
 interface Props {
   isOpen: boolean
@@ -53,6 +53,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [status, setStatus] = useState<RouterDelegationStatus | null>(null)
   const [summaries, setSummaries] = useState<DelegationProjectSummary[]>([])
   const [events, setEvents] = useState<DelegationEvent[]>([])
+  const [decisions, setDecisions] = useState<DelegationDecision[]>([])
   const [filterProject, setFilterProject] = useState<string | null>(null)
   const [outcome, setOutcome] = useState<'all' | 'issues'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -63,6 +64,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
 
   const refresh = useCallback(() => {
     window.electronAPI.delegationSummaries().then(setSummaries).catch(() => {})
+    window.electronAPI.delegationDecisions().then(setDecisions).catch(() => {})
     window.electronAPI.delegationEvents().then(setEvents).catch(() => {}).finally(() => setLoaded(true))
   }, [])
 
@@ -188,7 +190,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
         <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
           {!loaded ? (
             <div className="text-center text-[--ui-text-dimmed] py-20 text-sm">Loading…</div>
-          ) : events.length === 0 ? (
+          ) : events.length === 0 && decisions.length === 0 ? (
             <div className="text-center text-[--ui-text-dimmed] py-20">
               <p className="text-sm mb-1">No delegations recorded yet.</p>
               <p className="text-[12px]">When Claude runs <span className="font-mono">qcdelegate</span> or <span className="font-mono">qwen</span> in a pane, each call is logged here — what was delegated, what changed, and whether it worked.</p>
@@ -204,6 +206,31 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                 <Kpi label="Cold starts" value={String(totals.cold)} sub="warm-up retries" tone={totals.cold > 0 ? 'warn' : undefined} />
                 <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" />
               </div>
+
+              {/* Decision ledger — what Claude chose to KEEP vs DELEGATE, and why */}
+              {decisions.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Decisions</span>
+                    <span className="text-[10px] text-[--ui-text-dimmed]">
+                      {decisions.filter((d) => d.verdict === 'keep').length} kept · {decisions.filter((d) => d.verdict === 'delegate').length} delegated
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {decisions.slice(0, 40).map((d, i) => (
+                      <div key={d.ts + d.group + i} className="glass-control rounded-lg px-3 py-1.5 flex items-center gap-3">
+                        <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0" title={new Date(d.ts).toLocaleString()}>{rel(d.ts)}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${d.verdict === 'keep' ? 'bg-sky-400/15 text-sky-300' : 'bg-orange-400/15 text-orange-300'}`}>
+                          {d.verdict === 'keep' ? 'KEEP' : 'DELEGATE'}
+                        </span>
+                        <span className="text-xs text-[--ui-text-primary] truncate shrink-0 max-w-[28%]" title={d.group}>{d.group}</span>
+                        <span className="text-[11px] text-[--ui-text-dimmed] truncate flex-1 min-w-0" title={d.reason}>{d.reason}</span>
+                        {d.check && <span className="text-[10px] font-mono text-[--ui-text-dimmed] hidden md:inline truncate max-w-[24%]" title={d.check}>{d.check}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Per-project */}
               <div>
