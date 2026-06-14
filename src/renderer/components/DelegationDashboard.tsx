@@ -146,24 +146,27 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3 border-b glass-border shrink-0">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-semibold text-[--ui-text-primary]">Delegation</h2>
-            <button
-              onClick={() => updatePreferences({ delegation: { ...preferences.delegation, enabled: !enabled } })}
-              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-all ${enabled ? 'bg-emerald-400/15 text-emerald-300' : 'glass-control text-[--ui-text-muted]'}`}
-              title="Toggle delegation"
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-[--ui-text-dimmed]'}`} />
-              {enabled ? 'Enabled' : 'Disabled'}
-            </button>
-            {enabled && (
-              capable
-                ? <span className="text-[11px] text-[--ui-text-dimmed]">→ <span className="font-mono text-[--ui-text-secondary]">{shortRoute(status!.route)}</span></span>
-                : <span className="text-[11px] text-amber-300">No model set — configure one in Settings → Models</span>
-            )}
+        <div className="flex items-start justify-between px-5 py-3 border-b glass-border shrink-0 gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-base font-semibold text-[--ui-text-primary]">Delegation</h2>
+              <button
+                onClick={() => updatePreferences({ delegation: { ...preferences.delegation, enabled: !enabled } })}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] transition-all ${enabled ? 'bg-emerald-400/15 text-emerald-300' : 'glass-control text-[--ui-text-muted]'}`}
+                title="Toggle delegation"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-[--ui-text-dimmed]'}`} />
+                {enabled ? 'Enabled' : 'Disabled'}
+              </button>
+              {enabled && (
+                capable
+                  ? <span className="text-[11px] text-[--ui-text-dimmed] truncate">→ <span className="font-mono text-[--ui-text-secondary]">{shortRoute(status!.route)}</span></span>
+                  : <span className="text-[11px] text-amber-300 truncate">No model set — configure one in Settings → Models</span>
+              )}
+            </div>
+            <p className="text-[11px] text-[--ui-text-dimmed] mt-0.5">Every task Claude hands to a local model — what changed, and whether it worked.</p>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={refresh} className="px-2.5 py-1.5 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]" title="Refresh">Refresh</button>
             <button onClick={copyLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary] disabled:opacity-40" title="Copy the full log to clipboard">Copy log</button>
             <button onClick={saveLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-xs rounded-lg bg-[--accent] text-white hover:opacity-90 disabled:opacity-40" title="Save the full log to a file">Export</button>
@@ -208,7 +211,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-sm text-[--ui-text-primary] truncate">{s.projectName}</span>
-                          <span className="text-[10px] text-[--ui-text-dimmed] shrink-0">{s.lastAt ? rel(s.lastAt) : ''}</span>
+                          <span className="text-[10px] text-[--ui-text-dimmed] shrink-0" title={s.lastAt ? new Date(s.lastAt).toLocaleString() : ''}>{s.lastAt ? rel(s.lastAt) : ''}</span>
                         </div>
                         <div className="flex items-center gap-2 mt-1 text-[11px] text-[--ui-text-dimmed]">
                           <span>{s.delegations} calls</span>
@@ -249,13 +252,14 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                     return (
                       <div key={key} className="glass-control rounded-lg overflow-hidden">
                         <button onClick={() => setExpanded(isOpenRow ? null : key)} className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[--ui-bg-active]/40 transition-colors">
-                          <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0">{rel(e.ts)}</span>
+                          <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0" title={new Date(e.ts).toLocaleString()}>{rel(e.ts)}</span>
                           <span className="text-xs text-[--ui-text-primary] truncate flex-1 min-w-0">{e.task === 'untagged' ? <span className="text-[--ui-text-dimmed]">untagged</span> : e.task}</span>
                           <span className="text-[10px] font-mono text-[--ui-text-dimmed] hidden sm:inline">{shortRoute(e.route)}</span>
                           {e.exit === 0 ? <Badge text="ok" tone="good" /> : <Badge text={`exit ${e.exit}`} tone="bad" />}
                           {e.check && <Badge text={e.check.exit === 0 ? 'check ✓' : 'check ✕'} tone={checkTone} />}
                           {e.coldStartRetries > 0 && <Badge text={`cold ${e.coldStartRetries}`} tone="warn" />}
-                          <span className="text-[10px] text-[--ui-text-dimmed] w-16 text-right shrink-0">+{e.insertions}/-{e.deletions}</span>
+                          <span className="text-[10px] text-[--ui-text-dimmed] w-10 text-right shrink-0 tabular-nums">{e.durationSec}s</span>
+                          <span className="text-[10px] text-[--ui-text-dimmed] w-16 text-right shrink-0 tabular-nums">+{e.insertions}/-{e.deletions}</span>
                         </button>
                         {isOpenRow && (
                           <div className="px-3 pb-3 pt-1 space-y-2 text-[11px] border-t glass-border">
