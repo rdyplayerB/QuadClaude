@@ -48,6 +48,8 @@ interface WorkspaceStore extends WorkspaceState {
   pairPanes: (orchestratorId: number, workerId: number) => void
   unpairPane: (id: number) => void
   swapPairRoles: (id: number) => void
+  // Live-feed panes (standalone; several allowed)
+  setPaneLiveFeed: (id: number, on: boolean) => void
   setPaneLabel: (id: number, label: string) => void
   setPaneCwd: (id: number, cwd: string) => void
   setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
@@ -163,6 +165,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const panes = savedState.panes?.map((pane: PaneConfig) => ({
         ...stripPair(pane),
         state: 'shell' as PaneState,
+        liveFeed: false, // the tail process doesn't survive a restart — start clean
       })) ?? []
 
       // Restore the focus splitter (clamped; default for older saves).
@@ -433,6 +436,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           ? { ...p, pairRole: p.pairRole === 'orchestrator' ? 'worker' : 'orchestrator' }
           : p,
       ),
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPaneLiveFeed: (id, on) => {
+    const current = get().panes.find((p) => p.id === id)
+    if (!current || !!current.liveFeed === on) return
+    set((state) => ({
+      panes: state.panes.map((p) => (p.id === id ? { ...p, liveFeed: on } : p)),
     }))
     debouncedSave(() => get().saveWorkspace())
   },

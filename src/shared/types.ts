@@ -86,6 +86,10 @@ export interface PaneConfig {
   pairId?: string
   pairRole?: 'orchestrator' | 'worker'
   pairColor?: string // stored hue (from PAIR_RING_COLORS) so rings survive restarts
+  // Live-feed panes tail ~/.quadclaude/delegation.log to show delegation activity.
+  // Standalone (not tied to a 1:1 pair) so you can open several. Transient: cleared on
+  // load since the underlying `tail` process doesn't survive an app restart.
+  liveFeed?: boolean
 }
 
 // Workspace state (persisted)

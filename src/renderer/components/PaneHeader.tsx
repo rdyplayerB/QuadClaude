@@ -1,13 +1,19 @@
 import { DragEvent, memo } from 'react'
 import { MIN_PANES } from '../../shared/types'
 import { useWorkspaceStore } from '../store/workspace'
-import { clearTerminal, disposeTerminalForPane, restartShell } from './TerminalPane'
+import { clearTerminal, disposeTerminalForPane, restartShell, sendToTerminal } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
 import { OpenInPaneButton } from './OpenInPaneButton'
 import { AgentBadge } from './AgentBadge'
 
 // Custom MIME type for pane drag operations
 export const PANE_DRAG_TYPE = 'application/x-quadclaude-pane'
+
+// One-click "live feed": tail the global delegation log into this pane so you can watch
+// keep/delegate decisions and worker output scroll by. Standalone (not a 1:1 pair), so
+// you can open the feed in as many idle panes as you like.
+const FEED_TAIL_CMD =
+  'clear; mkdir -p ~/.quadclaude && touch ~/.quadclaude/delegation.log && tail -F ~/.quadclaude/delegation.log\n'
 
 interface PaneHeaderProps {
   paneId: number
@@ -49,6 +55,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
   const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
   const removePane = useWorkspaceStore((s) => s.removePane)
+  const setPaneLiveFeed = useWorkspaceStore((s) => s.setPaneLiveFeed)
   // The original four panes (slots 0-3) are permanent; only extras (slot 4+)
   // can be closed, and the store floor keeps the count from dropping below 4.
   const canClose = paneIndex >= MIN_PANES
@@ -69,6 +76,17 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     if (removed === null) return
     window.electronAPI.killPty(removed)
     disposeTerminalForPane(removed)
+  }
+
+  // Turn this idle pane into a live delegation-feed viewer (tails the global log), or
+  // stop it. Standalone — open it in as many idle panes as you want.
+  const startLiveFeed = () => {
+    setPaneLiveFeed(paneId, true)
+    sendToTerminal(paneId, FEED_TAIL_CMD)
+  }
+  const stopLiveFeed = () => {
+    sendToTerminal(paneId, '\x03') // Ctrl-C ends the `tail -F`
+    setPaneLiveFeed(paneId, false)
   }
 
   // Display name is the folder/repo name from working directory
@@ -179,6 +197,28 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
             {pane.pairRole}
           </span>
         )}
+        {/* Live delegation feed: one-click on any idle pane → tails the global feed.
+            Hidden while a Claude session is running so we never type into it. */}
+        {pane.liveFeed ? (
+          <button
+            onClick={stopLiveFeed}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-none shrink-0 text-[--git-cyan] bg-[--git-cyan]/10 hover:bg-[--git-cyan]/20 transition-colors"
+            title="Stop the live delegation feed in this pane"
+          >
+            <span aria-hidden>📡</span>
+            <span>Live feed</span>
+            <span className="opacity-60">×</span>
+          </button>
+        ) : pane.state === 'shell' ? (
+          <button
+            onClick={startLiveFeed}
+            className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--git-cyan] transition-colors rounded"
+            title="Open the live delegation feed here — tails keep/delegate decisions + worker output. You can open it in several idle panes."
+          >
+            <span aria-hidden className="text-[11px] leading-none">📡</span>
+            <span className="text-[10px] leading-none">Live feed</span>
+          </button>
+        ) : null}
         <AgentBadge paneId={paneId} />
         <button
           onClick={() => restartShell(paneId, pane.workingDirectory)}
