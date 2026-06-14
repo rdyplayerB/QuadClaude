@@ -82,29 +82,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     setActivePaneId(paneId)
   }
 
-  // State indicators - each pane gets its own unique color
-  const stateIndicator = () => {
-    if (pane.state === 'claude-waiting') {
-      return (
-        <span
-          className="w-2 h-2 rounded-full animate-pulse"
-          style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 6px var(--git-orange)' }}
-          title="Claude is waiting for your decision"
-        />
-      )
-    }
-    if (pane.state === 'claude-active') {
-      return (
-        <span
-          className="w-1.5 h-1.5 rounded-full animate-pulse"
-          style={{ backgroundColor: paneColor }}
-          title="Claude Active"
-        />
-      )
-    }
-    return null // Don't show indicator for normal shell
-  }
-
   return (
     <div
       className="pane-header glass-pane-header overflow-hidden flex items-center font-mono text-[12px] titlebar-no-drag transition-colors h-8"
@@ -118,9 +95,6 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         onDragStart={handleDragStart}
         className="flex-1 flex items-center gap-1.5 px-2.5 cursor-grab active:cursor-grabbing overflow-hidden h-full"
       >
-        {/* State indicator */}
-        {stateIndicator()}
-
         {/* Display name (auto from folder) */}
         <span
           className={`truncate select-none ${isActive ? 'text-[--ui-text-primary]' : 'text-[--ui-text-muted]'}`}
