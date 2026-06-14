@@ -7,6 +7,16 @@ interface LiveFeedButtonProps {
   paneId: number
 }
 
+// The human name shown in a pane header — the folder/repo name of its cwd (e.g. "diablo")
+// — so feed scopes are identifiable by project, not just "Terminal N". Mirrors
+// getFolderName in PaneHeader.
+function paneName(dir: string): string {
+  if (!dir) return ''
+  if (/^\/Users\/[^/]+\/?$/.test(dir)) return '~'
+  const parts = dir.split('/')
+  return parts[parts.length - 1] || parts[parts.length - 2] || ''
+}
+
 // The shell command that tails a feed into this pane. scope === undefined → the global
 // delegation log (all sessions); a pane id → that orchestrator's per-session feed file
 // (written by qcdelegate/qcdecide when QC_PANE matches), so multiple feeds can each track
@@ -24,16 +34,18 @@ function feedCmd(scope?: number): string {
 // into a live session.
 export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedButtonProps) {
   const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
-  // Candidate orchestrators: other panes currently running a Claude session.
+  // Candidate orchestrators: other panes currently running a Claude session. Carry both
+  // the project name (folder) and the "Terminal N" label so the menu shows both.
   const candidates = useWorkspaceStore((s) =>
     s.panes
       .filter((p) => p.id !== paneId && (p.state === 'claude-active' || p.state === 'claude-waiting'))
-      .map((p) => ({ id: p.id, label: p.label })),
+      .map((p) => ({ id: p.id, name: paneName(p.workingDirectory), term: p.label })),
   )
   const scopeLabel = useWorkspaceStore((s) => {
     if (pane?.liveFeedScope === undefined) return 'All'
     const o = s.panes.find((p) => p.id === pane.liveFeedScope)
-    return o?.label ?? `Terminal ${(pane.liveFeedScope ?? 0) + 1}`
+    if (!o) return `Terminal ${(pane.liveFeedScope ?? 0) + 1}`
+    return paneName(o.workingDirectory) || o.label
   })
   const setPaneLiveFeed = useWorkspaceStore((s) => s.setPaneLiveFeed)
 
@@ -139,10 +151,13 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
               <button
                 key={c.id}
                 onClick={() => start(c.id)}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] truncate flex items-center gap-2"
+                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
               >
                 <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[--git-green] animate-pulse" />
-                {c.label}
+                <span className="truncate flex-1">{c.name || c.term}</span>
+                {c.name && (
+                  <span className="text-[9px] text-[--ui-text-muted] shrink-0">{c.term}</span>
+                )}
               </button>
             ))}
           </div>
