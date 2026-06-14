@@ -54,6 +54,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [summaries, setSummaries] = useState<DelegationProjectSummary[]>([])
   const [events, setEvents] = useState<DelegationEvent[]>([])
   const [filterProject, setFilterProject] = useState<string | null>(null)
+  const [outcome, setOutcome] = useState<'all' | 'issues'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -108,7 +109,13 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   }, [events])
 
   const checkRate = totals.checked ? totals.checkPass / totals.checked : null
-  const shownEvents = filterProject ? events.filter((e) => e.project === filterProject) : events
+  // "Issues" = the worker errored OR its ground-truth check failed — the rows worth
+  // studying to improve delegation.
+  const isIssue = (e: DelegationEvent) => e.exit !== 0 || (!!e.check && e.check.exit !== 0)
+  const issueCount = events.filter(isIssue).length
+  const shownEvents = events
+    .filter((e) => (filterProject ? e.project === filterProject : true))
+    .filter((e) => (outcome === 'issues' ? isIssue(e) : true))
 
   const copyLog = async () => {
     setBusy(true)
@@ -231,8 +238,21 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
               {/* Timeline */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <div className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">
-                    Calls {filterProject && <span className="text-[--accent] normal-case">· filtered</span>}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">
+                      Calls {filterProject && <span className="text-[--accent] normal-case">· filtered</span>}
+                    </span>
+                    <div className="flex items-center glass-control rounded-md p-0.5 text-[10px]">
+                      {(['all', 'issues'] as const).map((o) => (
+                        <button
+                          key={o}
+                          onClick={() => setOutcome(o)}
+                          className={`px-2 py-0.5 rounded transition-all ${outcome === o ? 'glass-control-active text-[--ui-text-primary]' : 'text-[--ui-text-muted] hover:text-[--ui-text-secondary]'}`}
+                        >
+                          {o === 'all' ? 'All' : `Issues${issueCount ? ` (${issueCount})` : ''}`}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex items-center gap-3">
                     {filterProject && <button onClick={() => setFilterProject(null)} className="text-[11px] text-[--ui-text-muted] hover:text-[--ui-text-primary]">Clear filter</button>}
@@ -248,6 +268,11 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                   </div>
                 </div>
                 <div className="space-y-1">
+                  {shownEvents.length === 0 && (
+                    <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">
+                      {outcome === 'issues' ? 'No issues — every delegation here succeeded ✓' : 'No calls for this filter.'}
+                    </div>
+                  )}
                   {shownEvents.map((e) => {
                     const key = e.ts + e.task + e.project
                     const isOpenRow = expanded === key
