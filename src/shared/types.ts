@@ -217,6 +217,10 @@ export const IPC_CHANNELS = {
   ROUTER_SAVE_PROVIDER: 'router:save-provider',
   ROUTER_DELETE_PROVIDER: 'router:delete-provider',
   ROUTER_TEST: 'router:test',
+  // Delegation — hand bulk work to a cheaper configured model via a `qcdelegate` CLI
+  ROUTER_SET_DELEGATION: 'router:set-delegation',
+  ROUTER_DELEGATION_STATUS: 'router:delegation-status',
+  ROUTER_CLEAR_DELEGATION: 'router:clear-delegation',
 } as const
 
 // --- Model router (claude-code-router) types ---------------------------------
@@ -258,6 +262,18 @@ export interface RouterSaveResult {
 export interface RouterTestResult {
   ok: boolean
   error?: string
+}
+
+// State of the generic `qcdelegate` worker that hands bulk tasks to a cheaper model.
+export interface RouterDelegationStatus {
+  command: string // the CLI name an orchestrator calls, e.g. "qcdelegate"
+  scriptPath: string // where the generated worker script lives
+  scriptExists: boolean
+  binDir: string // dir the script is written to (must be on the user's PATH)
+  onPath: boolean // is `command` resolvable from the login shell?
+  route: string // "providerSlug,modelId" of the delegation model; "" when unset
+  logPath: string // delegation feed log
+  feedCommand: string // pane command that tails the feed live
 }
 
 // Rate limit usage data from Anthropic API

@@ -25,6 +25,7 @@ QuadClaude is built around one rule: **out of sight is out of mind.** Nothing li
 
 - **4–12 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 12)
 - **Run Any Model as Claude Code**: Drive the *real* Claude Code TUI with any non-Anthropic model (OpenRouter, DeepSeek, any OpenAI-compatible API) — identical look, identical behavior (applies edits instead of dumping code). Add it from a one-screen wizard.
+- **Delegation**: Let your main Claude hand bulk/mechanical work to a cheaper configured model via a generated `qcdelegate` command — the worker applies edits and you watch it live in a feed pane.
 - **Custom Agents (Bring Your Own Model)**: Launch any CLI agent (Claude Code, opencode, aider, …) against your own OpenAI-compatible endpoint — one agent per pane, chosen from the model badge
 - **Pane Pairing**: Link two panes as an orchestrator ⇄ worker team (e.g. Claude plans, a local model grinds) with a shared-color ring and role chips
 - **3 Layout Modes**: Grid (auto-balanced), Focus (1 large + rest small), Focus-Right (rest small + 1 large)
@@ -58,6 +59,18 @@ pane → real `claude` TUI → claude-code-router (local) → your hosted API (O
 Add as many models as you like and run them in different panes simultaneously. Your API key is written only to claude-code-router's local config (`~/.claude-code-router/config.json`, `chmod 600`) — never to the cloud, never echoed into shell history.
 
 > **How close to 100%?** The TUI is *literally* Claude Code, so it's indistinguishable visually. The only real tells are the model's own intelligence/speed and the occasional self-identity slip (a model saying "I'm Qwen"). Everything QuadClaude controls is identical.
+
+### Delegation: offload bulk work to a cheaper model
+
+Once you've added a model, you can use it as a **delegation worker** — let your main Claude (the orchestrator) hand off grunt work (boilerplate, repetitive edits, scaffolding) to a cheaper model from the command line, saving your budget for planning and review.
+
+In **Settings → Models → Delegation**, pick which configured model handles delegation. QuadClaude writes a `qcdelegate` command to `~/.local/bin` that runs the real `claude -p` through the router against that model — it **applies edits** in the current directory and returns a tight summary (instead of dumping code). Nothing is hardcoded; it targets whatever model you chose.
+
+Then:
+- **Copy orchestrator instructions** — paste the snippet into your orchestrator's `~/.claude/CLAUDE.md` so it knows when and how to call `qcdelegate "<task>"`.
+- **Add Delegation Feed pane** — a one-click pane that tails `~/.quadclaude/delegation.log` so you can watch the worker live.
+
+Your orchestrator then runs `qcdelegate "rename foo to bar across these files"`; the worker model does the edits, and you review the diff. Switch the delegation model anytime — the command repoints without reinstalling.
 
 ## Bring Your Own Model (Custom Agents)
 
