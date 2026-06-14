@@ -30,6 +30,37 @@ try {
 
 let mainWindow: BrowserWindow | null = null
 let stopDelegationWatch: (() => void) | null = null
+
+// Bridge the app's delegation toggle to the Claude running inside a pane: write an
+// authoritative status file the orchestrator (and a SessionStart hook) can read, so a
+// fresh session auto-detects "delegation is ON" instead of falling back to OFF-by-default.
+// Content: the model route when enabled+configured, else "off".
+function delegationModelRoute(): string {
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath('home'), '.quadclaude', 'delegation-model'), 'utf8').trim()
+    return raw.replace('-delegate,', ',') // report the user-facing route
+  } catch {
+    return ''
+  }
+}
+function delegationEnabled(): boolean {
+  try {
+    return !!workspaceManager?.load().preferences.delegation?.enabled
+  } catch {
+    return false
+  }
+}
+function syncDelegationActive(): void {
+  try {
+    const dir = path.join(app.getPath('home'), '.quadclaude')
+    fs.mkdirSync(dir, { recursive: true })
+    const route = delegationModelRoute()
+    const on = delegationEnabled() && !!route
+    fs.writeFileSync(path.join(dir, 'delegation-active'), on ? route : 'off', 'utf8')
+  } catch (error) {
+    logger.error('delegation', 'failed to sync delegation-active', error instanceof Error ? error.message : String(error))
+  }
+}
 let logWindow: BrowserWindow | null = null
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
@@ -948,9 +979,15 @@ function setupIPC() {
       // Inject per-pane port-isolation env (HOST/PORT) so dev servers don't collide,
       // and QC_PANE so a `qcdelegate` run inside this pane stamps its telemetry with the
       // originating pane id (lets the app attribute delegations to the right session).
-      const isoMode = workspaceManager?.load().preferences.portIsolation
-      const iso = portIsolationEnv(paneId, isoMode)
-      const mergedEnv = { ...(env || {}), ...iso, QC_PANE: String(paneId) }
+      const prefs = workspaceManager?.load().preferences
+      const iso = portIsolationEnv(paneId, prefs?.portIsolation)
+      // Surface the delegation toggle into the pane's shell so a Claude session can detect
+      // delegation mode from its environment (mirrors the ~/.quadclaude/delegation-active file).
+      const delegationOn = !!prefs?.delegation?.enabled && !!delegationModelRoute()
+      const delegationEnv = delegationOn
+        ? { QC_DELEGATION: '1', QC_DELEGATION_MODEL: delegationModelRoute() }
+        : { QC_DELEGATION: '' }
+      const mergedEnv = { ...(env || {}), ...iso, QC_PANE: String(paneId), ...delegationEnv }
       const result = await ptyManager?.createPty(paneId, cwd, mergedEnv)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
@@ -1011,6 +1048,7 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_SAVE, async (_, state) => {
     try {
       workspaceManager?.save(state)
+      syncDelegationActive() // keep the delegation status file current when the toggle changes
       logger.info('workspace', 'Workspace saved')
     } catch (error) {
       logger.error('workspace', 'Failed to save workspace', error instanceof Error ? error.message : String(error))
@@ -1195,6 +1233,8 @@ app.whenReady().then(() => {
   // Keep delegation telemetry bounded: fold an oversized event log into the cumulative
   // per-project rollup and drop summaries for long-abandoned projects.
   delegationLog.maintain()
+  // Publish the current delegation toggle so a Claude session in a pane can detect it.
+  syncDelegationActive()
 
   try {
     logger.info('pty', 'Initializing PtyManager')
