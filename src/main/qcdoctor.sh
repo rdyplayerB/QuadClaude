@@ -32,9 +32,25 @@ for c in qcdelegate qcdecide qwen; do
   command -v "$c" >/dev/null 2>&1 && ok "tool on PATH: $c" || bad "tool MISSING on PATH: $c"
 done
 
+# 5b. Delegation engine: aider is the default worker (QC_ENGINE=aider). ccr/claude is the
+# legacy fallback (QC_ENGINE=claude, also auto-used for non-git projects).
+eng="${QC_ENGINE:-aider}"
+if [ "$eng" = "aider" ]; then
+  if command -v aider >/dev/null 2>&1; then ok "delegation engine: aider ($(aider --version 2>/dev/null | head -1))"
+  else bad "delegation engine is aider but aider is MISSING — install: python3 -m pip install --user aider-install && aider-install (or brew install aider). Until then qcdelegate falls back to the claude engine."; fi
+else
+  ok "delegation engine: claude (legacy ccr path) via QC_ENGINE=claude"
+fi
+
 # 6. ccr inference router reachable
 if curl -s -o /dev/null --max-time 3 "http://127.0.0.1:3456" 2>/dev/null; then ok "ccr router reachable (127.0.0.1:3456)"
 else bad "ccr router NOT reachable on :3456 (qcdelegate auto-starts it; if it persists, check VPN/Olares)"; fi
+
+# 6b. Persistent keeper (launchd agent that health-checks & restarts ccr every 60s)
+plist="$HOME/Library/LaunchAgents/com.quadclaude.ccr.plist"
+if launchctl list 2>/dev/null | grep -q "com.quadclaude.ccr"; then ok "ccr keeper: persistent (launchd com.quadclaude.ccr loaded — auto-restarts ccr)"
+elif [ -f "$plist" ]; then warn "ccr keeper installed but NOT loaded — run: launchctl load -w \"$plist\""
+else warn "ccr keeper NOT installed — ccr only starts on first delegation and dies with the shell; install com.quadclaude.ccr for persistence"; fi
 
 # 7. Recent activity (decisions + delegations) — the real-time trace
 printf "\n${d}── recent activity (last 8) ──${n}\n"

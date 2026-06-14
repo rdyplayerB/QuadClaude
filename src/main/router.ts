@@ -15,6 +15,7 @@ import { MERGE_PLUGIN_B64 } from './ccr-plugins/merge-system.b64'
 import { QCDELEGATE_B64 } from './qcdelegate.b64'
 import { QCDECIDE_B64 } from './qcdecide.b64'
 import { QCDOCTOR_B64 } from './qcdoctor.b64'
+import { CCR_KEEPER_B64 } from './ccrKeeper.b64'
 
 const CONFIG_DIR = path.join(os.homedir(), '.claude-code-router')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
@@ -38,6 +39,15 @@ const DELEGATE_BIN_DIR = path.join(os.homedir(), '.local', 'bin')
 const DELEGATE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdelegate')
 const DECIDE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdecide')
 const DOCTOR_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdoctor')
+
+// Persistent ccr keeper: a launchd agent that health-checks the local router every
+// 60s and restarts it if down, so delegation doesn't depend on ccr being started by
+// hand (or surviving the shell that started it). The keeper script self-locates ccr
+// (PATH / homebrew symlink / newest nvm node bin) so a node version bump won't break it.
+const KEEPER_SCRIPT = path.join(DELEGATE_BIN_DIR, 'ccr-keeper')
+const KEEPER_LABEL = 'com.quadclaude.ccr'
+const LAUNCH_AGENTS_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents')
+const KEEPER_PLIST = path.join(LAUNCH_AGENTS_DIR, `${KEEPER_LABEL}.plist`)
 
 // Compatibility transformer: makes small/local models (e.g. qwen3-coder via Ollama)
 // reliably tool-call under Claude Code's large prompt. We install it and route
@@ -276,6 +286,62 @@ export class RouterManager {
     fs.writeFileSync(DELEGATE_SCRIPT, DELEGATE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(DECIDE_SCRIPT, DECIDE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(DOCTOR_SCRIPT, DOCTOR_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
+    this.installCcrKeeper()
+  }
+
+  // Install (and load) the persistent ccr keeper launchd agent. Idempotent: safe to
+  // call on every setDelegation. macOS-only — launchd/LaunchAgents don't exist
+  // elsewhere, so we no-op on other platforms rather than litter the disk.
+  private installCcrKeeper(): void {
+    if (process.platform !== 'darwin') return
+    try {
+      const keeperBody = Buffer.from(CCR_KEEPER_B64, 'base64').toString('utf8')
+      fs.writeFileSync(KEEPER_SCRIPT, keeperBody, { encoding: 'utf8', mode: 0o755 })
+
+      fs.mkdirSync(LAUNCH_AGENTS_DIR, { recursive: true })
+      const outLog = path.join(QC_DIR, 'ccr-keeper.out.log')
+      const errLog = path.join(QC_DIR, 'ccr-keeper.err.log')
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${KEEPER_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${KEEPER_SCRIPT}</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>KeepAlive</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>${outLog}</string>
+  <key>StandardErrorPath</key>
+  <string>${errLog}</string>
+</dict>
+</plist>
+`
+      // Only rewrite + reload the agent when the plist content actually changes, so we
+      // don't bounce a healthy keeper on every model switch.
+      const prev = fs.existsSync(KEEPER_PLIST) ? fs.readFileSync(KEEPER_PLIST, 'utf8') : ''
+      if (prev !== plist) {
+        fs.writeFileSync(KEEPER_PLIST, plist, { encoding: 'utf8' })
+      }
+      // Load is idempotent enough here: unload-then-load guarantees the latest plist is
+      // active. Errors (already-loaded, etc.) are non-fatal — the keeper still works
+      // when triggered, and qcdoctor reports load state.
+      execFile('/bin/launchctl', ['unload', KEEPER_PLIST], () => {
+        execFile('/bin/launchctl', ['load', '-w', KEEPER_PLIST], (err) => {
+          if (err) logger.info('router', 'ccr keeper load', err.message)
+          else logger.info('router', 'ccr keeper', 'installed + loaded (com.quadclaude.ccr)')
+        })
+      })
+    } catch (error) {
+      logger.info('router', 'ccr keeper install failed', error instanceof Error ? error.message : String(error))
+    }
   }
 
   // Install the compatibility transformer plugin and route delegation through a
