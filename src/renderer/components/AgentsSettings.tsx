@@ -148,8 +148,9 @@ export const AgentsSettings = memo(function AgentsSettings() {
         Agents
       </h3>
       <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
-        Each pane can launch any CLI agent. QuadClaude just runs the command with these env vars — the
-        tool (claude, opencode, …) handles the API.
+        Launch any CLI agent in a pane — QuadClaude runs the command with these env vars and the tool
+        (opencode, aider, …) handles the API. For a non-Claude model that still looks like Claude Code,
+        use <span className="text-[--ui-text-muted]">Models</span> instead.
       </p>
 
       {/* Profile list */}

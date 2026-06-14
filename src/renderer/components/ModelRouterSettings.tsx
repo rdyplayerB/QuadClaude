@@ -169,9 +169,9 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
         Run any model as Claude Code
       </h3>
       <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
-        Drive the real Claude Code TUI with a non-Anthropic model. QuadClaude routes it through{' '}
-        <span className="font-mono">claude-code-router</span>, so the pane looks and behaves exactly like Claude
-        Code — it applies edits instead of dumping code. Bring your own hosted API key.
+        Run the real Claude Code on any non-Anthropic model — routed through{' '}
+        <span className="font-mono">claude-code-router</span> so the pane looks and behaves exactly like Claude
+        Code (it applies edits instead of dumping code). Bring your own API key.
       </p>
 
       {/* ccr install state */}
