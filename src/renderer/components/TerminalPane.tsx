@@ -1108,6 +1108,20 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     return 'border border-white/[0.05]'
   }
 
+  // All pane outlines are drawn on an INSET overlay layer inside the pane, because
+  // the overflow:hidden grid-cell wrapper clips any OUTER box-shadow. This one layer
+  // carries the colored pair ring, the active-pane selection glow, and (animated via
+  // .claude-waiting-ring) the amber "Claude is waiting" pulse. Waiting takes over the
+  // layer so its pulse reads; the pane's amber border still shows underneath.
+  const paired = !!(pane.pairId && pane.pairColor)
+  const waiting = pane.state === 'claude-waiting'
+  const ringShadows: string[] = []
+  if (paired) ringShadows.push(`inset 0 0 0 2px ${pane.pairColor}`)
+  if (isActive && !waiting) {
+    ringShadows.push('inset 0 0 0 1.5px rgba(255, 255, 255, 0.7), inset 0 0 12px 1px rgba(255, 255, 255, 0.22)')
+  }
+  const showRingOverlay = waiting || ringShadows.length > 0
+
   // Background image for this pane (per-pane mode allows different images per pane)
   const paneBgImage = bgEnabled
     ? (background.mode === 'per-pane'
@@ -1118,8 +1132,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   return (
     <div
       className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
-      // Pair ring: matching hue on both paired panes reads as "these two are a team".
-      style={pane.pairId && pane.pairColor ? { boxShadow: `0 0 0 2px ${pane.pairColor}` } : undefined}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
@@ -1127,6 +1139,15 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       onDrop={handleDrop}
     >
       <PaneHeader paneId={paneId} />
+      {/* Pane outline overlay: pair ring + active selection glow + amber waiting pulse,
+          drawn as inset shadows so the wrapper's overflow:hidden can't clip them, and
+          above the terminal (z-[5]) so the terminal canvas can't cover them. */}
+      {showRingOverlay && (
+        <div
+          className={`pointer-events-none absolute inset-0 rounded z-[5] ${waiting ? 'claude-waiting-ring' : ''}`}
+          style={waiting ? undefined : { boxShadow: ringShadows.join(', ') }}
+        />
+      )}
       {/* Terminal wrapper - fills all remaining space */}
       <div
         className="flex-1 min-h-0 relative"
