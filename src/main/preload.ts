@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -114,6 +114,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_DELETE_PROVIDER, name) as Promise<void>,
   routerTest: (input: RouterProviderInput) =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_TEST, input) as Promise<RouterTestResult>,
+  routerSetDelegation: (route: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_SET_DELEGATION, route) as Promise<RouterDelegationStatus>,
+  routerDelegationStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_DELEGATION_STATUS) as Promise<RouterDelegationStatus>,
+  routerClearDelegation: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION) as Promise<RouterDelegationStatus>,
 
   // File utilities
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
@@ -160,6 +166,9 @@ declare global {
       routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
       routerDeleteProvider: (name: string) => Promise<void>
       routerTest: (input: RouterProviderInput) => Promise<RouterTestResult>
+      routerSetDelegation: (route: string) => Promise<RouterDelegationStatus>
+      routerDelegationStatus: () => Promise<RouterDelegationStatus>
+      routerClearDelegation: () => Promise<RouterDelegationStatus>
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void
       markPerf: (label: string) => void

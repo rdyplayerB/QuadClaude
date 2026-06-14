@@ -1,6 +1,6 @@
 import { memo, useEffect, useState, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { AgentProfile, RouterStatus, RouterProviderInput } from '../../shared/types'
+import { AgentProfile, RouterStatus, RouterProviderInput, RouterDelegationStatus } from '../../shared/types'
 
 // "Run any model as Claude Code." This is NOT a generic agent — it stands up the
 // real `claude` TUI pointed at a non-Anthropic model via claude-code-router, so the
@@ -75,6 +75,8 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
   const [revealKey, setRevealKey] = useState(false)
   const [testState, setTestState] = useState<{ kind: 'idle' | 'testing' | 'ok' | 'err'; msg?: string }>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
+  const [delegation, setDelegation] = useState<RouterDelegationStatus | null>(null)
+  const [copied, setCopied] = useState(false)
 
   const routerProfiles = profiles.filter((p) => p.command === ROUTER_PANE_COMMAND)
 
@@ -82,9 +84,44 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
     window.electronAPI.routerStatus().then(setStatus).catch(() => setStatus(null))
   }, [])
 
+  const refreshDelegation = useCallback(() => {
+    window.electronAPI.routerDelegationStatus().then(setDelegation).catch(() => setDelegation(null))
+  }, [])
+
   useEffect(() => {
     refreshStatus()
-  }, [refreshStatus])
+    refreshDelegation()
+  }, [refreshStatus, refreshDelegation])
+
+  // Point delegation at a configured model route (or "" to turn it off).
+  const chooseDelegation = async (route: string) => {
+    const next = route
+      ? await window.electronAPI.routerSetDelegation(route)
+      : await window.electronAPI.routerClearDelegation()
+    setDelegation(next)
+  }
+
+  // One-click pane that tails the live delegation feed.
+  const addFeedProfile = () => {
+    if (!delegation || profiles.some((p) => p.command === delegation.feedCommand)) return
+    updatePreferences({
+      agentProfiles: [...profiles, { id: genId(), name: 'Delegation Feed', command: delegation.feedCommand }],
+    })
+  }
+
+  const orchestratorSnippet = (cmd: string) =>
+    `## Delegation (QuadClaude)\n` +
+    `A \`${cmd} "<task>"\` command runs a cheaper worker model that edits files in the current ` +
+    `directory and returns a summary. Offload bulk or mechanical work to it to save budget; keep ` +
+    `planning, architecture, and review for yourself. Before each call print: 🔸 Delegating: <task>. ` +
+    `Then run ${cmd} "<clear, self-contained instruction>", review the git diff, and summarize.`
+
+  const copySnippet = () => {
+    if (!delegation) return
+    navigator.clipboard?.writeText(orchestratorSnippet(delegation.command))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   const choosePreset = (label: string) => {
     const preset = PRESETS.find((p) => p.label === label) ?? PRESETS[0]
@@ -312,6 +349,58 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
             Saving writes the model to claude-code-router's local config and creates a launchable “{`Claude Code · …`}”
             agent. Pick it on any pane to run that model as Claude Code.
           </p>
+        </div>
+      )}
+
+      {/* Delegation: hand bulk work to a cheaper model from the command line */}
+      {routerProfiles.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-[#333]">
+          <h4 className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">Delegation</h4>
+          <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
+            Hand bulk work to a cheaper model from the command line. Your orchestrator runs{' '}
+            <span className="font-mono">{delegation?.command ?? 'qcdelegate'} "task"</span> — the worker edits
+            files via the model below and logs to the feed.
+          </p>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-[--ui-text-primary]">Delegate with</span>
+            <select
+              value={delegation?.route ?? ''}
+              onChange={(e) => chooseDelegation(e.target.value)}
+              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent] max-w-[55%]"
+            >
+              <option value="">Off</option>
+              {routerProfiles.map((p) => (
+                <option key={p.id} value={p.env?.ANTHROPIC_MODEL ?? ''}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {delegation?.route && (
+            <div className="mt-3 space-y-2">
+              {!delegation.onPath && (
+                <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
+                  Created <span className="font-mono">{delegation.command}</span>, but{' '}
+                  <span className="font-mono">{delegation.binDir}</span> isn’t on your PATH — add it so the
+                  command is callable from a pane.
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <button onClick={copySnippet} className="text-xs px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
+                  {copied ? 'Copied ✓' : 'Copy orchestrator instructions'}
+                </button>
+                <button onClick={addFeedProfile} className="text-xs px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
+                  Add Delegation Feed pane
+                </button>
+              </div>
+              <p className="text-[10px] text-[--ui-text-dimmed]">
+                Paste the copied snippet into your orchestrator’s instructions (e.g. ~/.claude/CLAUDE.md) so it
+                knows when to delegate.
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

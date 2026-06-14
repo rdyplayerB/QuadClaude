@@ -1019,6 +1019,19 @@ function setupIPC() {
     return routerManager.testConnection(input)
   })
 
+  ipcMain.handle(IPC_CHANNELS.ROUTER_SET_DELEGATION, async (_, route: string) => {
+    return routerManager.setDelegation(route)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ROUTER_DELEGATION_STATUS, async () => {
+    return routerManager.delegationStatus()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION, async () => {
+    routerManager.clearDelegation()
+    return routerManager.delegationStatus()
+  })
+
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_HOME, async () => {
     const home = app.getPath('home')
     logger.info('workspace', 'Home directory requested', home)
