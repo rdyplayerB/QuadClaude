@@ -79,7 +79,16 @@ fi
 for _ in $(seq 1 30); do curl -s -o /dev/null "http://127.0.0.1:3456" && break; sleep 0.3; done
 printf '\\n\\033[38;5;173m── %s · delegate (%s) ─────────────────────\\033[0m\\n\\033[2m%s\\033[0m\\n' \\
   "$(date '+%H:%M:%S')" "$route" "$*" | tee -a "$log"
-printf %s "$*" | ANTHROPIC_BASE_URL="http://127.0.0.1:3456" \\
+# Compose the worker prompt: prepend a per-task brief if the orchestrator left one in
+# the working dir. Durable context belongs in CLAUDE.md (auto-loaded by the worker); the
+# brief is for this-task-only context the worker can't infer from the code.
+brief="$PWD/.quadclaude-brief.md"
+if [ -f "$brief" ]; then
+  prompt="$(printf '## Context from your orchestrator — read this before acting\\n%s\\n\\n## Your task\\n%s' "$(cat "$brief")" "$*")"
+else
+  prompt="$*"
+fi
+printf %s "$prompt" | ANTHROPIC_BASE_URL="http://127.0.0.1:3456" \\
 ANTHROPIC_AUTH_TOKEN="ccr" \\
 ANTHROPIC_MODEL="$route" \\
   claude -p --dangerously-skip-permissions --allowedTools "Read Write Edit MultiEdit Bash Glob Grep LS TodoWrite" 2>&1 | tee -a "$log"
