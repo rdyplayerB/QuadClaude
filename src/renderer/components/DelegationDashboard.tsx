@@ -58,10 +58,11 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [toast, setToast] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [loaded, setLoaded] = useState(false)
 
   const refresh = useCallback(() => {
     window.electronAPI.delegationSummaries().then(setSummaries).catch(() => {})
-    window.electronAPI.delegationEvents().then(setEvents).catch(() => {})
+    window.electronAPI.delegationEvents().then(setEvents).catch(() => {}).finally(() => setLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -178,7 +179,9 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
 
         {/* Body */}
         <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
-          {events.length === 0 ? (
+          {!loaded ? (
+            <div className="text-center text-[--ui-text-dimmed] py-20 text-sm">Loading…</div>
+          ) : events.length === 0 ? (
             <div className="text-center text-[--ui-text-dimmed] py-20">
               <p className="text-sm mb-1">No delegations recorded yet.</p>
               <p className="text-[12px]">When Claude runs <span className="font-mono">qcdelegate</span> or <span className="font-mono">qwen</span> in a pane, each call is logged here — what was delegated, what changed, and whether it worked.</p>
