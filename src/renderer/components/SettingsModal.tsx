@@ -316,6 +316,14 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   />
                 </SettingRow>
 
+                <SettingRow title="Delegation" caption="Hand bulk/mechanical work to a local model (Qwen) — opens a live worker feed; full log in the Delegation dashboard (chart icon, top bar)">
+                  <Toggle
+                    on={!!preferences.delegation?.enabled}
+                    onChange={() => updatePreferences({ delegation: { ...preferences.delegation, enabled: !preferences.delegation?.enabled } })}
+                    label="Delegation"
+                  />
+                </SettingRow>
+
                 <SettingRow title="Port isolation" caption="Stop dev servers in different panes from fighting over the same port">
                   <select
                     value={preferences.portIsolation ?? 'off'}
