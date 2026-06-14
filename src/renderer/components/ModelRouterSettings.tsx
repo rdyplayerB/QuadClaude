@@ -111,10 +111,21 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
 
   const orchestratorSnippet = (cmd: string) =>
     `## Delegation (QuadClaude)\n` +
-    `A \`${cmd} "<task>"\` command runs a cheaper worker model that edits files in the current ` +
-    `directory and returns a summary. Offload bulk or mechanical work to it to save budget; keep ` +
-    `planning, architecture, and review for yourself. Before each call print: 🔸 Delegating: <task>. ` +
-    `Then run ${cmd} "<clear, self-contained instruction>", review the git diff, and summarize.`
+    `\`${cmd} "<task>"\` runs a cheaper worker model that edits files in the current directory and ` +
+    `returns a summary. It shares your filesystem and auto-loads CLAUDE.md, but has NONE of this ` +
+    `conversation's context.\n\n` +
+    `When to delegate: focused, cheap-to-verify, mechanical work (boilerplate, repetitive edits, ` +
+    `scaffolding) where a wrong result is obvious in the diff. Keep planning, architecture, tricky ` +
+    `logic, and the review for yourself; skip tiny edits and anything a weak model can't reliably do.\n\n` +
+    `Giving it context: durable facts go in CLAUDE.md. For each task, write only what the worker can't ` +
+    `infer from the code to ./.quadclaude-brief.md (auto-prepended to its prompt):\n` +
+    `  Goal: <one line>\n` +
+    `  Decisions/constraints: <the few that matter>\n` +
+    `  Read these files: <a.ts, b.ts>\n` +
+    `Keep it tight — big prompts degrade weak models, so reference files instead of pasting them, and ` +
+    `delete the brief when the batch is done.\n\n` +
+    `Each call: print "🔸 Delegating: <task>", run ${cmd} "<clear, self-contained instruction>", then ` +
+    `review the git diff and summarize.`
 
   const copySnippet = () => {
     if (!delegation) return
