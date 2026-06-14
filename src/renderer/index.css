@@ -167,16 +167,20 @@ body {
   isolation: isolate;
 }
 
-/* Claude is waiting on a yes/no decision - pulsing amber glow */
+/* Claude is waiting on a yes/no decision - pulsing amber glow. Inset so it isn't
+   clipped by the pane's overflow:hidden grid-cell wrapper; applied to the ring
+   overlay (above the terminal), while the pane keeps its amber border below. */
 @keyframes claude-waiting-glow {
   0%, 100% {
-    box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.45), 0 0 10px 0 rgba(251, 146, 60, 0.20);
+    box-shadow: inset 0 0 0 1.5px rgba(251, 146, 60, 0.5), inset 0 0 12px 1px rgba(251, 146, 60, 0.22);
   }
   50% {
-    box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.95), 0 0 22px 3px rgba(251, 146, 60, 0.55);
+    box-shadow: inset 0 0 0 2px rgba(251, 146, 60, 0.95), inset 0 0 22px 3px rgba(251, 146, 60, 0.55);
   }
 }
-.claude-waiting-pane {
+.claude-waiting-ring {
   animation: claude-waiting-glow 1.4s ease-in-out infinite;
+}
+.claude-waiting-pane {
   border-color: rgba(251, 146, 60, 0.7) !important;
 }

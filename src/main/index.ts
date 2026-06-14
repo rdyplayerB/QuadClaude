@@ -5,8 +5,9 @@ import path from 'path'
 import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
+import { RouterManager } from './router'
 import { logger } from './logger'
-import { IPC_CHANNELS, MenuAction } from '../shared/types'
+import { IPC_CHANNELS, MenuAction, RouterProviderInput } from '../shared/types'
 import {
   startPerfMonitor,
   stopPerfMonitor,
@@ -30,6 +31,7 @@ let logWindow: BrowserWindow | null = null
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
 let workspaceManager: WorkspaceManager | null = null
+const routerManager = new RouterManager()
 const isDev = process.env.QC_FORCE_PROD === '1' ? false : (process.env.NODE_ENV === 'development' || !app.isPackaged)
 
 function openLogViewer() {
@@ -997,6 +999,24 @@ function setupIPC() {
     } catch (error) {
       logger.error('workspace', 'Failed to save workspace', error instanceof Error ? error.message : String(error))
     }
+  })
+
+  // Model router (claude-code-router) — write ccr config so a pane can run the real
+  // Claude Code TUI against any non-Anthropic model.
+  ipcMain.handle(IPC_CHANNELS.ROUTER_STATUS, async () => {
+    return routerManager.status()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ROUTER_SAVE_PROVIDER, async (_, input: RouterProviderInput) => {
+    return routerManager.saveProvider(input)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ROUTER_DELETE_PROVIDER, async (_, name: string) => {
+    routerManager.deleteProvider(name)
+  })
+
+  ipcMain.handle(IPC_CHANNELS.ROUTER_TEST, async (_, input: RouterProviderInput) => {
+    return routerManager.testConnection(input)
   })
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_HOME, async () => {

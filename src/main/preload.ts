@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -105,6 +105,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_EXTERNAL, url) as Promise<boolean>,
 
+  // Model router (run any model as the real Claude Code TUI)
+  routerStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_STATUS) as Promise<RouterStatus>,
+  routerSaveProvider: (input: RouterProviderInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_SAVE_PROVIDER, input) as Promise<RouterSaveResult>,
+  routerDeleteProvider: (name: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_DELETE_PROVIDER, name) as Promise<void>,
+  routerTest: (input: RouterProviderInput) =>
+    ipcRenderer.invoke(IPC_CHANNELS.ROUTER_TEST, input) as Promise<RouterTestResult>,
+
   // File utilities
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
@@ -146,6 +156,10 @@ declare global {
       pasteImage: (paneId: number, filePath: string) => Promise<boolean>
       openImageDialog: () => Promise<string | null>
       openExternal: (url: string) => Promise<boolean>
+      routerStatus: () => Promise<RouterStatus>
+      routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
+      routerDeleteProvider: (name: string) => Promise<void>
+      routerTest: (input: RouterProviderInput) => Promise<RouterTestResult>
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void
       markPerf: (label: string) => void

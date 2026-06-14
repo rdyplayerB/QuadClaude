@@ -67,8 +67,15 @@ function envRowsToRecord(rows: EnvRow[]): Record<string, string> {
   return out
 }
 
+// Router-backed "Claude Code · <model>" profiles are created and managed by the
+// "Run any model as Claude Code" section; keep them out of this raw-agent list.
+const ROUTER_PANE_COMMAND = 'ccr code'
+
 export const AgentsSettings = memo(function AgentsSettings() {
+  // `profiles` stays the full list so save/remove never drop other entries; the
+  // visible list hides router-backed profiles (managed in their own section).
   const profiles = useWorkspaceStore((s) => s.preferences.agentProfiles ?? [])
+  const visibleProfiles = profiles.filter((p) => p.command !== ROUTER_PANE_COMMAND)
   const defaultAgentId = useWorkspaceStore((s) => s.preferences.defaultAgentId)
   const updatePreferences = useWorkspaceStore((s) => s.updatePreferences)
 
@@ -141,13 +148,14 @@ export const AgentsSettings = memo(function AgentsSettings() {
         Agents
       </h3>
       <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
-        Each pane can launch any CLI agent. QuadClaude just runs the command with these env vars — the
-        tool (claude, opencode, …) handles the API.
+        Launch any CLI agent in a pane — QuadClaude runs the command with these env vars and the tool
+        (opencode, aider, …) handles the API. For a non-Claude model that still looks like Claude Code,
+        use <span className="text-[--ui-text-muted]">Models</span> instead.
       </p>
 
       {/* Profile list */}
       <div className="space-y-1.5 mb-3">
-        {profiles.map((p) => {
+        {visibleProfiles.map((p) => {
           const isDefault = (defaultAgentId ?? CLAUDE_PROFILE_ID) === p.id
           const isBuiltin = p.builtin === 'claude'
           return (

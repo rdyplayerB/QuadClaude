@@ -24,6 +24,7 @@ QuadClaude is built around one rule: **out of sight is out of mind.** Nothing li
 ## Features
 
 - **4–12 Independent Terminals**: Run separate Claude sessions in each pane; add or close extra panes beyond the core four (up to 12)
+- **Run Any Model as Claude Code**: Drive the *real* Claude Code TUI with any non-Anthropic model (OpenRouter, DeepSeek, any OpenAI-compatible API) — identical look, identical behavior (applies edits instead of dumping code). Add it from a one-screen wizard.
 - **Custom Agents (Bring Your Own Model)**: Launch any CLI agent (Claude Code, opencode, aider, …) against your own OpenAI-compatible endpoint — one agent per pane, chosen from the model badge
 - **Pane Pairing**: Link two panes as an orchestrator ⇄ worker team (e.g. Claude plans, a local model grinds) with a shared-color ring and role chips
 - **3 Layout Modes**: Grid (auto-balanced), Focus (1 large + rest small), Focus-Right (rest small + 1 large)
@@ -37,7 +38,30 @@ QuadClaude is built around one rule: **out of sight is out of mind.** Nothing li
 - **Workspace Persistence**: Remembers your directories, layout, and preferences between sessions
 - **Drag & Drop Reordering**: Rearrange terminal positions by dragging headers
 
+## Run Any Model as Claude Code
+
+Want a non-Claude model that still *looks and behaves 100% like Claude Code* — same `⏺` tool bullets, same diffs, same todo lists, and crucially the same behavior (it **applies edits** and gives a tight summary instead of dumping walls of code)? QuadClaude can run the **genuine `claude` CLI** against any hosted model.
+
+It works because the look/feel comes from Claude Code itself, not from QuadClaude. So instead of restyling another tool's output, QuadClaude runs the real client and routes its API calls to your model through [claude-code-router](https://github.com/musistudio/claude-code-router):
+
+```
+pane → real `claude` TUI → claude-code-router (local) → your hosted API (OpenRouter / DeepSeek / …)
+```
+
+**Setup (one screen):**
+
+1. Install the router once, in any pane: `npm install -g @musistudio/claude-code-router`
+2. Open **Settings → Run any model as Claude Code → Add a model**.
+3. Pick a provider preset (OpenRouter, DeepSeek, OpenAI-compatible, or Custom), paste your **base URL**, **API key**, and **model id**, give it a name, and hit **Test connection** → **Save model**.
+4. A new **“Claude Code · <your model>”** agent appears. Pick it on any pane from the model badge — that pane is now Claude Code, powered by your model.
+
+Add as many models as you like and run them in different panes simultaneously. Your API key is written only to claude-code-router's local config (`~/.claude-code-router/config.json`, `chmod 600`) — never to the cloud, never echoed into shell history.
+
+> **How close to 100%?** The TUI is *literally* Claude Code, so it's indistinguishable visually. The only real tells are the model's own intelligence/speed and the occasional self-identity slip (a model saying "I'm Qwen"). Everything QuadClaude controls is identical.
+
 ## Bring Your Own Model (Custom Agents)
+
+> The section above is the turnkey path. This one is the **raw launcher** — use it when you'd rather run a tool's own UI (opencode, aider) instead of the Claude Code TUI.
 
 Each pane can launch any CLI coding agent — not just Claude Code — so you can mix Claude with a local or self-hosted model and run them side by side. QuadClaude is a **pure launcher**: it runs a command with a set of env vars in a terminal and never speaks any API itself, so it works with any tool and any provider.
 
