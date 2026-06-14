@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -120,6 +120,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_DELEGATION_STATUS) as Promise<RouterDelegationStatus>,
   routerClearDelegation: () =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION) as Promise<RouterDelegationStatus>,
+  loopbackStatus: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.NET_LOOPBACK_STATUS) as Promise<LoopbackStatus>,
+  ensureLoopback: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.NET_ENSURE_LOOPBACK) as Promise<LoopbackStatus>,
 
   // File utilities
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
@@ -169,6 +173,8 @@ declare global {
       routerSetDelegation: (route: string) => Promise<RouterDelegationStatus>
       routerDelegationStatus: () => Promise<RouterDelegationStatus>
       routerClearDelegation: () => Promise<RouterDelegationStatus>
+      loopbackStatus: () => Promise<LoopbackStatus>
+      ensureLoopback: () => Promise<LoopbackStatus>
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void
       markPerf: (label: string) => void

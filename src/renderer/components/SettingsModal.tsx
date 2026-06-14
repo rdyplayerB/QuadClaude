@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, KeyboardEvent, memo, ReactNode } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode } from '../../shared/types'
+import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode, PortIsolation, LoopbackStatus } from '../../shared/types'
 import { AgentsSettings } from './AgentsSettings'
 import { ModelRouterSettings } from './ModelRouterSettings'
 
@@ -93,6 +93,21 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
   const [tab, setTab] = useState<TabId>('general')
   const [editingHotkey, setEditingHotkey] = useState<HotkeyField | null>(null)
   const [appVersion, setAppVersion] = useState<string>('')
+  const [loopback, setLoopback] = useState<LoopbackStatus | null>(null)
+  const [settingUpLoopback, setSettingUpLoopback] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) window.electronAPI.loopbackStatus().then(setLoopback).catch(() => setLoopback(null))
+  }, [isOpen])
+
+  const setupLoopback = async () => {
+    setSettingUpLoopback(true)
+    try {
+      setLoopback(await window.electronAPI.ensureLoopback())
+    } finally {
+      setSettingUpLoopback(false)
+    }
+  }
 
   useEffect(() => {
     window.electronAPI.getAppVersion().then(setAppVersion)
@@ -300,6 +315,55 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                     label="Skip permission prompts"
                   />
                 </SettingRow>
+
+                <SettingRow title="Port isolation" caption="Stop dev servers in different panes from fighting over the same port">
+                  <select
+                    value={preferences.portIsolation ?? 'off'}
+                    onChange={(e) => updatePreferences({ portIsolation: e.target.value as PortIsolation })}
+                    className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent]"
+                  >
+                    <option value="off">Off</option>
+                    <option value="loopback">Loopback IP</option>
+                    <option value="port">Port offset</option>
+                  </select>
+                </SettingRow>
+
+                {preferences.portIsolation === 'loopback' && (
+                  <div className="text-[11px] text-[--ui-text-dimmed] space-y-1.5 pb-1">
+                    {loopback && !loopback.supported ? (
+                      <p>This OS binds 127.0.0.0/8 without setup — loopback isolation works out of the box.</p>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span>
+                          macOS aliases:{' '}
+                          <span className={loopback?.ready ? 'text-emerald-400' : 'text-amber-300'}>
+                            {loopback ? `${loopback.configured}/${loopback.expected} set up` : '…'}
+                          </span>
+                        </span>
+                        {!loopback?.ready && (
+                          <button
+                            onClick={setupLoopback}
+                            disabled={settingUpLoopback}
+                            className="text-xs px-2 py-0.5 rounded bg-[--accent] text-white disabled:opacity-40"
+                          >
+                            {settingUpLoopback ? 'Setting up…' : 'Set up aliases (admin)'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <p>
+                      Each pane gets <span className="font-mono">HOST=127.0.0.&lt;n&gt;</span>. Frameworks that honor it
+                      isolate automatically; for ones that don’t (e.g. Vite) add{' '}
+                      <span className="font-mono">--host $HOST --port $PORT</span> to your dev script. Re-launch a pane to apply.
+                    </p>
+                  </div>
+                )}
+                {preferences.portIsolation === 'port' && (
+                  <p className="text-[11px] text-[--ui-text-dimmed] pb-1">
+                    Each pane gets a distinct <span className="font-mono">PORT</span> base (3000, 3100, …). No setup needed,
+                    for tools that honor <span className="font-mono">PORT</span>. Re-launch a pane to apply.
+                  </p>
+                )}
               </div>
             )}
 

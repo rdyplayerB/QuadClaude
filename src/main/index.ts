@@ -7,7 +7,8 @@ import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { RouterManager } from './router'
 import { logger } from './logger'
-import { IPC_CHANNELS, MenuAction, RouterProviderInput } from '../shared/types'
+import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv } from '../shared/types'
+import { loopbackStatus, ensureLoopbackAliases } from './loopback'
 import {
   startPerfMonitor,
   stopPerfMonitor,
@@ -935,7 +936,11 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.PTY_CREATE, async (_, paneId: number, cwd?: string, env?: Record<string, string>) => {
     logger.info('pty', `Creating PTY for pane ${paneId}`, cwd ? `cwd: ${cwd}` : 'using default cwd')
     try {
-      const result = await ptyManager?.createPty(paneId, cwd, env)
+      // Inject per-pane port-isolation env (HOST/PORT) so dev servers don't collide.
+      const isoMode = workspaceManager?.load().preferences.portIsolation
+      const iso = portIsolationEnv(paneId, isoMode)
+      const mergedEnv = Object.keys(iso).length > 0 ? { ...(env || {}), ...iso } : env
+      const result = await ptyManager?.createPty(paneId, cwd, mergedEnv)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
       } else {
@@ -1030,6 +1035,15 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION, async () => {
     routerManager.clearDelegation()
     return routerManager.delegationStatus()
+  })
+
+  // Per-pane port isolation — macOS loopback alias management.
+  ipcMain.handle(IPC_CHANNELS.NET_LOOPBACK_STATUS, async () => {
+    return loopbackStatus()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.NET_ENSURE_LOOPBACK, async () => {
+    return ensureLoopbackAliases()
   })
 
   ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_HOME, async () => {

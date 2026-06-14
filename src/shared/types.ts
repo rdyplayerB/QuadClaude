@@ -161,6 +161,42 @@ export interface WorkspacePreferences {
   agentProfiles?: AgentProfile[]
   // Global fallback agent when a pane has no agentId assigned yet
   defaultAgentId?: string
+  // Per-pane network isolation so dev servers in different panes don't fight over ports
+  portIsolation?: PortIsolation
+}
+
+// Strategy for keeping each pane's dev servers from colliding on the same port.
+//  - 'off'      : no isolation (default; current behavior)
+//  - 'loopback' : each pane binds its own 127.0.0.x IP (same port stays free) — macOS
+//                 needs lo0 aliases set up first
+//  - 'port'     : each pane gets a distinct base PORT (no privileges needed)
+export type PortIsolation = 'off' | 'loopback' | 'port'
+
+// The loopback IP assigned to a pane in 'loopback' mode (127.0.0.2 .. 127.0.0.13).
+export function paneLoopbackIp(paneId: number): string {
+  return `127.0.0.${2 + paneId}`
+}
+
+// Env injected into a pane's PTY so its servers don't collide with other panes'.
+// Frameworks that honor HOST/PORT pick this up automatically; for ones that ignore
+// env (e.g. Vite), reference it in the dev script: `vite --host $HOST --port $PORT`.
+export function portIsolationEnv(paneId: number, mode: PortIsolation | undefined): Record<string, string> {
+  if (mode === 'loopback') {
+    const ip = paneLoopbackIp(paneId)
+    return { HOST: ip, HOSTNAME: ip }
+  }
+  if (mode === 'port') {
+    return { PORT: String(3000 + paneId * 100) }
+  }
+  return {}
+}
+
+// State of the macOS lo0 loopback aliases required by 'loopback' isolation.
+export interface LoopbackStatus {
+  supported: boolean // false on non-macOS (range is bindable without aliases)
+  configured: number // how many of the expected aliases currently exist
+  expected: number // how many we want (one per max pane)
+  ready: boolean // all expected aliases present
 }
 
 export interface WindowBounds {
@@ -221,6 +257,9 @@ export const IPC_CHANNELS = {
   ROUTER_SET_DELEGATION: 'router:set-delegation',
   ROUTER_DELEGATION_STATUS: 'router:delegation-status',
   ROUTER_CLEAR_DELEGATION: 'router:clear-delegation',
+  // Per-pane port isolation — manage macOS lo0 loopback aliases
+  NET_LOOPBACK_STATUS: 'net:loopback-status',
+  NET_ENSURE_LOOPBACK: 'net:ensure-loopback',
 } as const
 
 // --- Model router (claude-code-router) types ---------------------------------
