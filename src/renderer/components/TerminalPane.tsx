@@ -244,6 +244,13 @@ export function sendToTerminal(paneId: number, text: string) {
   }
 }
 
+// Has this pane's xterm been mounted yet? The delegation worker-feed needs to know,
+// because sendToTerminal silently no-ops before the terminal exists — the original
+// cause of the "worker window stays empty" bug. Callers retry until this is true.
+export function hasTerminal(paneId: number): boolean {
+  return terminals.has(paneId)
+}
+
 // Transient (not persisted): the profile id whose env the current PTY for each
 // pane was spawned with. null = a plain shell (no injected env). Used to decide
 // when an agent launch must re-spawn the PTY to inject/clear env.

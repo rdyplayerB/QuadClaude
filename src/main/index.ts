@@ -6,6 +6,7 @@ import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { RouterManager } from './router'
+import { delegationLog } from './delegationLog'
 import { logger } from './logger'
 import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv } from '../shared/types'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
@@ -28,6 +29,7 @@ try {
 }
 
 let mainWindow: BrowserWindow | null = null
+let stopDelegationWatch: (() => void) | null = null
 let logWindow: BrowserWindow | null = null
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
@@ -633,6 +635,13 @@ function createWindow() {
     // Reveal the window now that content has painted - avoids the empty
     // transparent flash during the Dock launch animation.
     mainWindow?.show()
+    // Push new delegation events to the renderer (drives the live dashboard and the
+    // session-scoped worker-feed prompt). Re-armed on every load; the prior watcher
+    // is cleared first so a reload doesn't stack pollers.
+    stopDelegationWatch?.()
+    stopDelegationWatch = delegationLog.startWatching((event) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.DELEGATION_EVENT, event)
+    })
     // Ensure zoom is exactly 1.0 to prevent scaling differences
     mainWindow?.webContents.setZoomFactor(1.0)
 
@@ -936,10 +945,12 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.PTY_CREATE, async (_, paneId: number, cwd?: string, env?: Record<string, string>) => {
     logger.info('pty', `Creating PTY for pane ${paneId}`, cwd ? `cwd: ${cwd}` : 'using default cwd')
     try {
-      // Inject per-pane port-isolation env (HOST/PORT) so dev servers don't collide.
+      // Inject per-pane port-isolation env (HOST/PORT) so dev servers don't collide,
+      // and QC_PANE so a `qcdelegate` run inside this pane stamps its telemetry with the
+      // originating pane id (lets the app attribute delegations to the right session).
       const isoMode = workspaceManager?.load().preferences.portIsolation
       const iso = portIsolationEnv(paneId, isoMode)
-      const mergedEnv = Object.keys(iso).length > 0 ? { ...(env || {}), ...iso } : env
+      const mergedEnv = { ...(env || {}), ...iso, QC_PANE: String(paneId) }
       const result = await ptyManager?.createPty(paneId, cwd, mergedEnv)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
@@ -1035,6 +1046,43 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION, async () => {
     routerManager.clearDelegation()
     return routerManager.delegationStatus()
+  })
+
+  // Delegation telemetry — per-project rollups, raw events, export, and a wipe action.
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_SUMMARIES, async () => {
+    return delegationLog.getSummaries()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_EVENTS, async () => {
+    return delegationLog.getEvents()
+  })
+
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_CLEAR, async () => {
+    delegationLog.clearAll()
+    return delegationLog.getSummaries()
+  })
+
+  // Clipboard write from main — reliable even when the renderer isn't focused (the
+  // renderer's navigator.clipboard.writeText silently fails without focus/user-gesture).
+  ipcMain.handle(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, async (_, text: string) => {
+    clipboard.writeText(text)
+    return true
+  })
+
+  // Build the shareable report; if `save` is requested, write it via a save dialog.
+  // Always returns the report text so the renderer can also copy it to the clipboard.
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_EXPORT, async (_, save: boolean) => {
+    const text = delegationLog.buildReport()
+    if (!save) return { text, path: null, canceled: false }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Export delegation log',
+      defaultPath: path.join(app.getPath('downloads'), `delegation-log-${stamp}.md`),
+      filters: [{ name: 'Markdown', extensions: ['md'] }, { name: 'All Files', extensions: ['*'] }],
+    })
+    if (result.canceled || !result.filePath) return { text, path: null, canceled: true }
+    fs.writeFileSync(result.filePath, text, 'utf8')
+    return { text, path: result.filePath, canceled: false }
   })
 
   // Per-pane port isolation — macOS loopback alias management.
@@ -1139,6 +1187,10 @@ app.whenReady().then(() => {
   } catch (error) {
     logger.error('workspace', 'Failed to initialize WorkspaceManager', error instanceof Error ? error.message : String(error))
   }
+
+  // Keep delegation telemetry bounded: fold an oversized event log into the cumulative
+  // per-project rollup and drop summaries for long-abandoned projects.
+  delegationLog.maintain()
 
   try {
     logger.info('pty', 'Initializing PtyManager')

@@ -1,13 +1,61 @@
 import { useEffect, useCallback, useState } from 'react'
 import { TerminalGrid } from './components/TerminalGrid'
 import { SettingsModal } from './components/SettingsModal'
+import { DelegationDashboard } from './components/DelegationDashboard'
 import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
 import { UsageIndicator } from './components/UsageIndicator'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
+import { useDelegation, PendingApproval } from './hooks/useDelegation'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
+
+// First-delegation-of-the-session prompt: offer to show the worker's live output in a
+// window. Approval is remembered only for this Claude session (re-asked next session).
+function DelegationApprovalModal({
+  pending,
+  onApprove,
+  onDecline,
+}: {
+  pending: PendingApproval
+  onApprove: () => void
+  onDecline: () => void
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[60]" role="presentation">
+      <div
+        className="glass-elevated glass-border rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5 backdrop-blur-xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delegation-approval-title"
+      >
+        <h2 id="delegation-approval-title" className="text-sm font-semibold text-[--ui-text-primary] mb-1">
+          Show delegated work in a window?
+        </h2>
+        <p className="text-[12px] text-[--ui-text-secondary] leading-relaxed mb-4">
+          Claude in Pane {pending.orchestratorId + 1} is delegating to{' '}
+          <span className="font-mono text-[--ui-text-primary]">{pending.route || 'a local model'}</span>. Open a live worker
+          window to watch its output? You’ll only be asked once this session.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onDecline}
+            className="px-3 py-1.5 text-sm rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary] transition-all"
+          >
+            Not now
+          </button>
+          <button
+            onClick={onApprove}
+            className="px-3 py-1.5 text-sm rounded-lg bg-[--accent] text-white hover:opacity-90 transition-all"
+          >
+            Show in a window
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
 // only appears when the grid has a blank cell). Hidden at the pane cap.
@@ -41,6 +89,10 @@ function App() {
   const setFocusPaneId = useWorkspaceStore((s) => s.setFocusPaneId)
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isDashboardOpen, setIsDashboardOpen] = useState(false)
+
+  // Delegation worker-window workflow (session-scoped approval + live feed).
+  const { pending: delegationPending, approve: approveDelegation, decline: declineDelegation } = useDelegation()
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {
@@ -196,7 +248,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.19.0</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.21.0</span>
         </div>
 
         {/* Center - layout selector + add pane */}
@@ -209,6 +261,18 @@ function App() {
         <div className="flex items-center gap-0.5">
           <UsageIndicator />
           <span className="text-[--ui-text-faint] text-xs px-1">│</span>
+          {/* Delegation dashboard */}
+          <button
+            onClick={() => setIsDashboardOpen(true)}
+            className="px-1.5 py-1 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
+            title="Delegation dashboard"
+            aria-label="Open delegation dashboard"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 13.5V2.5M2 13.5h12" />
+              <rect x="4" y="8" width="2.2" height="3.5" /><rect x="7.4" y="5.5" width="2.2" height="6" /><rect x="10.8" y="3" width="2.2" height="8.5" />
+            </svg>
+          </button>
           {/* Settings */}
           <button
             onClick={() => setIsSettingsOpen(true)}
@@ -237,6 +301,18 @@ function App() {
 
       {/* Settings modal */}
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+
+      {/* Dedicated delegation dashboard */}
+      <DelegationDashboard isOpen={isDashboardOpen} onClose={() => setIsDashboardOpen(false)} />
+
+      {/* Delegation worker-window approval prompt */}
+      {delegationPending && (
+        <DelegationApprovalModal
+          pending={delegationPending}
+          onApprove={approveDelegation}
+          onDecline={declineDelegation}
+        />
+      )}
     </div>
   )
 }
