@@ -6,15 +6,15 @@
  * the dashboard's "clear telemetry"). Append-only, plain JSONL — portable and greppable.
  *
  * Subcommands:
- *   record     Append a labeled outcome for one delegated unit. Driven by env (QCE_*),
- *              called automatically by qcdelegate after every run. Classifies the unit,
- *              derives ground truth from the QC_CHECK exit, appends to outcomes.jsonl, and
- *              re-distills the rubric every few outcomes.
- *   suggest    `qceval suggest "<files or description>"` → the LEARNED prior for that kind
- *              of unit (DELEGATE / KEEP / needs-check) from the distilled rubric. This is
- *              the evaluator USING its memory to inform the next keep/delegate decision.
- *   verdict    `qceval verdict <task> ship|revert|edit` → record the real human outcome so
- *              calibration can learn how often the eval itself was right.
+ *   record     Append a labeled outcome for one delegated unit (env QCE_*). Auto-called by
+ *              qcdelegate. Classifies the unit, derives ground truth from the QC_CHECK exit.
+ *   judge      `qceval judge "<task/spec>"` → run an ADVERSARIAL PANEL of independent
+ *              skeptics over the working-tree diff (correctness / completeness / edge-cases),
+ *              each prompted to REFUTE it, biased to flag when unsure. Emits SHIP / CAUTION /
+ *              REVIEW and folds the votes into the matching outcome. This is what makes a
+ *              green QC_CHECK trustworthy — it catches "passed the test but subtly wrong".
+ *   suggest    `qceval suggest "<unit>"` → learned keep/delegate prior + failure modes.
+ *   verdict    `qceval verdict <task> ship|revert|edit` → record the real human outcome.
  */
 const fs = require('fs')
 const os = require('os')
@@ -27,8 +27,6 @@ const OUTCOMES = path.join(DIR, 'outcomes.jsonl')
 const RUBRIC = path.join(DIR, 'rubric.md')
 fs.mkdirSync(DIR, { recursive: true })
 
-// Heuristic task class from changed files + the task text. Coarse on purpose — the
-// rubric just needs stable buckets to accumulate pass-rates against.
 function classify(files, task) {
   const f = (files || '').toLowerCase()
   const t = (task || '').toLowerCase()
@@ -43,6 +41,45 @@ function classify(files, task) {
 function readJsonl(p) {
   if (!fs.existsSync(p)) return []
   return fs.readFileSync(p, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+}
+
+// Resolve the OpenAI-compatible endpoint the panel judges through, from ccr's config +
+// the delegation route file (same source qcdelegate uses). QC_JUDGE_MODEL overrides the
+// judge model (e.g. point judging at a stronger model than the worker).
+function resolveEndpoint() {
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude-code-router', 'config.json'), 'utf8'))
+    const route = fs.readFileSync(path.join(QC, 'delegation-model'), 'utf8').trim()
+    const [slug, model] = route.split(',')
+    const p = (cfg.Providers || []).find((x) => x.name === slug)
+    if (!p || !p.api_base_url) return null
+    return { base: p.api_base_url.replace(/\/chat\/completions\/?$/, ''), key: p.api_key || '', model: process.env.QC_JUDGE_MODEL || model || (p.models || [])[0] }
+  } catch { return null }
+}
+
+async function askJudge(ep, lens, task, diff, failModes) {
+  const sys = 'You are a meticulous adversarial code reviewer. Your job is to find why a change is WRONG, not to praise it. Be skeptical: if you are unsure whether something is correct, treat it as a defect. Reply with ONLY compact JSON: {"defect":true|false,"severity":"low|med|high","reason":"<one short sentence>"}.'
+  const user = `TASK GIVEN TO THE CODER:\n${task}\n\nKNOWN FAILURE MODES from past delegations — check for these specifically:\n${failModes || '(none recorded)'}\n\nYOUR REVIEW LENS: ${lens.ask}\n\nUNIFIED DIFF UNDER REVIEW:\n${diff.slice(0, 9000)}`
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), 60000)
+  try {
+    const r = await fetch(ep.base + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ep.key },
+      body: JSON.stringify({ model: ep.model, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], stream: false, temperature: 0.2, max_tokens: 220 }),
+      signal: ctrl.signal,
+    })
+    clearTimeout(t)
+    const j = await r.json()
+    const txt = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || ''
+    const m = txt.match(/\{[\s\S]*\}/)
+    let parsed = { defect: true, severity: 'low', reason: 'unparseable judge response' }
+    if (m) { try { parsed = JSON.parse(m[0]) } catch {} }
+    return { lens: lens.key, defect: !!parsed.defect, severity: parsed.severity || 'low', reason: String(parsed.reason || '').slice(0, 200) }
+  } catch (e) {
+    clearTimeout(t)
+    return { lens: lens.key, defect: true, severity: 'low', reason: 'judge error: ' + (e && e.message || e) }
+  }
 }
 
 const cmd = process.argv[2]
@@ -69,17 +106,59 @@ if (cmd === 'record') {
     source: e.QCE_SOURCE || 'qcdelegate',
   }
   fs.appendFileSync(OUTCOMES, JSON.stringify(rec) + '\n')
-  // Re-distill every few outcomes so the rubric tracks reality without churn.
   const n = readJsonl(OUTCOMES).length
   if (n % 3 === 0) { try { execFileSync('qclearn', { stdio: 'ignore' }) } catch {} }
   console.error(`qceval: recorded ${rec.taskClass} outcome (${rec.groundTruth}) → eval/outcomes.jsonl [${n}]`)
   process.exit(0)
 }
 
+if (cmd === 'judge') {
+  ;(async () => {
+    const task = process.argv.slice(3).join(' ') || '(task description not provided)'
+    let diff = ''
+    for (const args of [['diff', '--no-color'], ['diff', '--no-color', '--staged']]) {
+      try { diff = execFileSync('git', args, { encoding: 'utf8', maxBuffer: 16e6 }); if (diff.trim()) break } catch {}
+    }
+    if (!diff.trim()) { console.log('qceval judge: no working-tree diff to judge.'); process.exit(0) }
+    const ep = resolveEndpoint()
+    if (!ep || typeof fetch !== 'function') { console.log('qceval judge: no inference endpoint (need ccr config + delegation-model).'); process.exit(0) }
+    let failModes = ''
+    if (fs.existsSync(RUBRIC)) { const seg = fs.readFileSync(RUBRIC, 'utf8').split('## Failure modes')[1] || ''; failModes = seg.split('\n').filter((l) => l.startsWith('- ')).slice(0, 6).join('\n') }
+    const lenses = [
+      { key: 'correctness', ask: 'Does this diff CORRECTLY implement the task? Trace the core logic for real bugs.' },
+      { key: 'completeness', ask: 'Did it do EVERYTHING the task asked, or only part? Name anything missing, stubbed, or skipped.' },
+      { key: 'edge-cases', ask: 'Find edge cases it gets wrong: off-by-one, inclusive vs exclusive bounds, null/empty/zero, mutation.' },
+    ]
+    const results = await Promise.all(lenses.map((l) => askJudge(ep, l, task, diff, failModes)))
+    const defects = results.filter((r) => r.defect)
+    const high = defects.some((r) => String(r.severity).toLowerCase() === 'high')
+    const verdict = defects.length === 0 ? 'SHIP' : ((high || defects.length >= 2) ? 'REVIEW' : 'CAUTION')
+    const out = []
+    out.push(`\n[2m🧑‍⚖️ adversarial panel (${ep.model}) — ${defects.length}/${results.length} lenses flagged[0m`)
+    for (const r of results) out.push(`  ${r.defect ? '⚠' : '✓'} ${r.lens.padEnd(13)} ${r.defect ? '[' + r.severity + '] ' : ''}${r.reason}`)
+    const vcol = verdict === 'SHIP' ? 32 : verdict === 'REVIEW' ? 31 : 33
+    out.push(`  [${vcol}m→ verdict: ${verdict}[0m`)
+    const text = out.join('\n')
+    console.log(text)
+    // Mirror into the live feed so a 📡 pane shows the verdict too.
+    try {
+      const feeds = [path.join(QC, 'delegation.log')]
+      if (process.env.QC_PANE) { fs.mkdirSync(path.join(QC, 'feed'), { recursive: true }); feeds.push(path.join(QC, 'feed', process.env.QC_PANE + '.log')) }
+      for (const f of feeds) fs.appendFileSync(f, text + '\n')
+    } catch {}
+    // Fold the votes into the matching outcome (enriches the eval memory + future calibration).
+    if (process.env.QC_TASK) {
+      const all = readJsonl(OUTCOMES)
+      for (let i = all.length - 1; i >= 0; i--) { if (all[i].task === process.env.QC_TASK) { all[i].judges = results; all[i].judgeVerdict = verdict; break } }
+      fs.writeFileSync(OUTCOMES, all.map((o) => JSON.stringify(o)).join('\n') + '\n')
+    }
+    process.exit(0)
+  })()
+}
+
 if (cmd === 'suggest') {
   const text = process.argv.slice(3).join(' ')
   const cls = classify(text, text)
-  // Prefer the distilled rubric; fall back to computing from raw outcomes.
   const outs = readJsonl(OUTCOMES).filter((o) => o.taskClass === cls)
   const checked = outs.filter((o) => o.groundTruth === 'pass' || o.groundTruth === 'fail')
   const passed = checked.filter((o) => o.groundTruth === 'pass').length
@@ -91,14 +170,9 @@ if (cmd === 'suggest') {
   else if (rate >= 0.6) rec = `DELEGATE + strong QC_CHECK (${Math.round(rate * 100)}%)`
   else rec = `KEEP / heavy-verify (${Math.round(rate * 100)}% pass — qwen weak here)`
   console.log(`class=${cls}  →  ${rec}`)
-  // Surface any recorded failure modes so the decision/judge can watch for them.
   if (fs.existsSync(RUBRIC)) {
-    const r = fs.readFileSync(RUBRIC, 'utf8')
-    const m = r.split('## Failure modes')[1]
-    if (m) {
-      const fm = m.split('\n').filter((l) => l.startsWith('- ')).slice(0, 4)
-      if (fm.length) console.log('watch for:\n' + fm.join('\n'))
-    }
+    const m = fs.readFileSync(RUBRIC, 'utf8').split('## Failure modes')[1]
+    if (m) { const fm = m.split('\n').filter((l) => l.startsWith('- ')).slice(0, 4); if (fm.length) console.log('watch for:\n' + fm.join('\n')) }
   }
   process.exit(0)
 }
@@ -106,20 +180,16 @@ if (cmd === 'suggest') {
 if (cmd === 'verdict') {
   const task = process.argv[3]
   const verdict = process.argv[4]
-  if (!task || !['ship', 'revert', 'edit'].includes(verdict)) {
-    console.error('usage: qceval verdict <task> ship|revert|edit')
-    process.exit(2)
-  }
-  // Annotate the most recent outcome for this task with the real human outcome.
+  if (!task || !['ship', 'revert', 'edit'].includes(verdict)) { console.error('usage: qceval verdict <task> ship|revert|edit'); process.exit(2) }
   const all = readJsonl(OUTCOMES)
-  for (let i = all.length - 1; i >= 0; i--) {
-    if (all[i].task === task) { all[i].humanVerdict = verdict; break }
-  }
+  for (let i = all.length - 1; i >= 0; i--) { if (all[i].task === task) { all[i].humanVerdict = verdict; break } }
   fs.writeFileSync(OUTCOMES, all.map((o) => JSON.stringify(o)).join('\n') + '\n')
   try { execFileSync('qclearn', { stdio: 'ignore' }) } catch {}
   console.log(`qceval: recorded human verdict '${verdict}' for task '${task}' (calibration updated)`)
   process.exit(0)
 }
 
-console.error('usage: qceval record | suggest "<text>" | verdict <task> ship|revert|edit')
-process.exit(2)
+if (!['record', 'judge', 'suggest', 'verdict'].includes(cmd)) {
+  console.error('usage: qceval record | judge "<task>" | suggest "<text>" | verdict <task> ship|revert|edit')
+  process.exit(2)
+}

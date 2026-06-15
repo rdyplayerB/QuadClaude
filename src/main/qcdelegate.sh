@@ -289,6 +289,14 @@ if command -v qceval >/dev/null 2>&1; then
     qceval record >/dev/null 2>&1 || true
 fi
 
+# Adversarial verifier: run the multi-judge panel over the worker's diff when asked
+# (QC_JUDGE=1) OR whenever there's no runnable QC_CHECK — in that case the panel is the
+# ONLY verification, so a green-looking result isn't trusted blind. Skippable with
+# QC_NO_JUDGE=1. Best-effort; never blocks. Votes fold back into the eval memory.
+if command -v qceval >/dev/null 2>&1 && [ -z "$QC_NO_JUDGE" ] && { [ -n "$QC_JUDGE" ] || [ -z "$ckcmd" ]; }; then
+  QC_TASK="$qtask" qceval judge "$*" 2>&1 | tee -a "${feeds[@]}" || true
+fi
+
 # Backward-compat: keep feeding a user-installed qctrace tool if present.
 if command -v qctrace >/dev/null 2>&1; then
   pf="$(mktemp)"; printf %s "$prompt" > "$pf"
