@@ -35,8 +35,8 @@ done
 # 5a. Durable learning memory (survives app updates; never cleared by the dashboard)
 if command -v qceval >/dev/null 2>&1 && command -v qclearn >/dev/null 2>&1; then
   oc="$qc/eval/outcomes.jsonl"
-  n="$( [ -f "$oc" ] && grep -c . "$oc" 2>/dev/null || echo 0 )"
-  ok "eval memory: $n outcome(s) in ~/.quadclaude/eval (durable; qceval/qclearn on PATH)"
+  ocount="$( [ -f "$oc" ] && grep -c . "$oc" 2>/dev/null || echo 0 )"
+  ok "eval memory: $ocount outcome(s) in ~/.quadclaude/eval (durable; qceval/qclearn on PATH)"
 else warn "learning evaluator (qceval/qclearn) not on PATH — delegation won't self-improve"; fi
 
 # 5b. Delegation engine: aider is the default worker (QC_ENGINE=aider). ccr/claude is the
