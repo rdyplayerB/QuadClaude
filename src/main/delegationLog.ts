@@ -172,7 +172,23 @@ class DelegationLog {
   getEvents(limit = 2000): DelegationEvent[] {
     const events = readEvents()
     events.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
-    return events.slice(0, limit)
+    const sliced = events.slice(0, limit)
+    // Attach the human verdict (ship/revert/edit) recorded per task in the durable eval
+    // memory, so the dashboard shows which calls you've already judged. Best-effort.
+    try {
+      const raw = fs.readFileSync(path.join(QC_DIR, 'eval', 'outcomes.jsonl'), 'utf8')
+      const byTask = new Map<string, 'ship' | 'revert' | 'edit'>()
+      for (const line of raw.split('\n')) {
+        const t = line.trim()
+        if (!t) continue
+        try {
+          const o = JSON.parse(t)
+          if (o.task && o.humanVerdict) byTask.set(o.task, o.humanVerdict)
+        } catch { /* skip malformed */ }
+      }
+      if (byTask.size) for (const e of sliced) { const v = byTask.get(e.task); if (v) e.humanVerdict = v }
+    } catch { /* no eval memory yet */ }
+    return sliced
   }
 
   // KEEP/DELEGATE decisions for the dashboard's decision ledger, most-recent-first.

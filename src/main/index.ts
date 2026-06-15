@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog, clipboa
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
+import { execFile } from 'child_process'
 import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
@@ -1102,6 +1103,17 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.DELEGATION_CLEAR, async () => {
     delegationLog.clearAll()
     return delegationLog.getSummaries()
+  })
+
+  // Record the real outcome of a delegated task (ship/revert/edit) into the durable eval
+  // memory via `qceval verdict`, so calibration learns how often the eval was right.
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_VERDICT, async (_, task: string, verdict: string) => {
+    if (!['ship', 'revert', 'edit'].includes(verdict) || !task || task === 'untagged') return false
+    return new Promise<boolean>((resolve) => {
+      // Run through a login shell so the user's PATH (node + ~/.local/bin) resolves; task and
+      // verdict go as positional args ($1/$2) to avoid any shell injection.
+      execFile('/bin/zsh', ['-lc', 'qceval verdict "$1" "$2"', 'qcverdict', task, verdict], { timeout: 8000 }, (err) => resolve(!err))
+    })
   })
 
   // Clipboard write from main — reliable even when the renderer isn't focused (the

@@ -282,6 +282,7 @@ export const IPC_CHANNELS = {
   DELEGATION_EVENTS: 'delegation:events',
   DELEGATION_DECISIONS: 'delegation:decisions',
   DELEGATION_CLEAR: 'delegation:clear',
+  DELEGATION_VERDICT: 'delegation:verdict',
   DELEGATION_EXPORT: 'delegation:export',
   // Pushed (main → renderer) when a new delegation event lands in events.jsonl
   DELEGATION_EVENT: 'delegation:event',
@@ -311,6 +312,7 @@ export interface DelegationEvent {
   check: { command: string; exit: number } | null // ground-truth check result, if QC_CHECK was set
   promptPreview?: string // first ~1000 chars of the task sent to the worker (what was delegated)
   outputPreview?: string // last ~1500 chars of the worker's output (how it responded — for diagnosing)
+  humanVerdict?: 'ship' | 'revert' | 'edit' // your recorded real outcome (did the delegated change stick?) — feeds eval calibration
 }
 
 // A recorded orchestrator KEEP/DELEGATE decision for one unit of work, emitted by

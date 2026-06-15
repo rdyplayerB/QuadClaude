@@ -69,6 +69,15 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
     window.electronAPI.delegationEvents().then(setEvents).catch(() => {}).finally(() => setLoaded(true))
   }, [])
 
+  // Record your real outcome for a delegated task (ship/revert/edit) → qceval verdict →
+  // durable eval memory → calibration. The dashboard then shows which calls you've judged.
+  const recordVerdict = useCallback(async (task: string, verdict: 'ship' | 'revert' | 'edit') => {
+    if (!task || task === 'untagged') { flash('This call has no QC_TASK tag to record a verdict against.'); return }
+    const ok = await window.electronAPI.delegationVerdict(task, verdict).catch(() => false)
+    flash(ok ? `Recorded "${verdict}" for ${task}` : 'Could not record verdict (is qceval installed?)')
+    if (ok) refresh()
+  }, [refresh])
+
   useEffect(() => {
     if (!isOpen) return
     window.electronAPI.routerDelegationStatus().then(setStatus).catch(() => {})
@@ -341,9 +350,26 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                           {e.coldStartRetries > 0 && <Badge text={`cold ${e.coldStartRetries}`} tone="warn" />}
                           <span className="text-[10px] text-[--ui-text-dimmed] w-10 text-right shrink-0 tabular-nums">{e.durationSec}s</span>
                           <span className="text-[10px] text-[--ui-text-dimmed] w-16 text-right shrink-0 tabular-nums">+{e.insertions}/-{e.deletions}</span>
+                          {e.humanVerdict && <Badge text={e.humanVerdict} tone={e.humanVerdict === 'ship' ? 'good' : e.humanVerdict === 'revert' ? 'bad' : 'warn'} />}
                         </button>
                         {isOpenRow && (
                           <div className="px-3 pb-3 pt-1 space-y-2 text-[11px] border-t glass-border">
+                            {/* Your verdict — feeds eval calibration (how often the check/judge was actually right) */}
+                            <div className="flex items-center flex-wrap gap-2">
+                              <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted]">Your outcome</span>
+                              {([['ship', 'Shipped ✓'], ['revert', 'Reverted ↩'], ['edit', 'Edited ✎']] as const).map(([v, label]) => (
+                                <button
+                                  key={v}
+                                  onClick={(ev) => { ev.stopPropagation(); recordVerdict(e.task, v) }}
+                                  disabled={e.task === 'untagged'}
+                                  className={`px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-40 ${e.humanVerdict === v ? 'bg-[--accent] text-white' : 'glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]'}`}
+                                  title={e.task === 'untagged' ? 'No QC_TASK tag to record against' : `Mark this delegation as ${v}`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                              <span className="text-[10px] text-[--ui-text-dimmed]">— did the delegated change stick? (trains the eval)</span>
+                            </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[--ui-text-dimmed]">
                               <span>project: <span className="text-[--ui-text-secondary]">{e.project}</span></span>
                               <span>pane: {e.pane || '—'}</span>

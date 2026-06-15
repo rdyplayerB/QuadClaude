@@ -132,6 +132,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_DECISIONS) as Promise<DelegationDecision[]>,
   delegationClear: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_CLEAR) as Promise<DelegationProjectSummary[]>,
+  delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_VERDICT, task, verdict) as Promise<boolean>,
   delegationExport: (save: boolean) =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EXPORT, save) as Promise<{ text: string; path: string | null; canceled: boolean }>,
   clipboardWriteText: (text: string) =>
@@ -196,6 +198,7 @@ declare global {
       delegationEvents: () => Promise<DelegationEvent[]>
       delegationDecisions: () => Promise<DelegationDecision[]>
       delegationClear: () => Promise<DelegationProjectSummary[]>
+      delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') => Promise<boolean>
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
       clipboardWriteText: (text: string) => Promise<boolean>
       onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
