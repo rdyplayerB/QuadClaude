@@ -236,6 +236,18 @@ export function clearTerminal(paneId: number) {
   }
 }
 
+// Full terminal reset — clears the buffer AND resets terminal modes. A TUI that crashes
+// or is force-stopped can leave mouse tracking (ESC[?1006h) or the alt-screen enabled; the
+// shell then echoes raw mouse sequences (^[[<35;…M) on every cursor move and looks frozen.
+// terminal.clear() does NOT undo those modes, but reset() does — so the recovery paths
+// (Stop, agent re-spawn) use this to guarantee a clean terminal.
+export function resetTerminal(paneId: number) {
+  const entry = terminals.get(paneId)
+  if (entry) {
+    entry.terminal.reset()
+  }
+}
+
 export function sendToTerminal(paneId: number, text: string) {
   const entry = terminals.get(paneId)
   if (entry) {
@@ -315,7 +327,7 @@ export async function launchAgent(
   if (needsRespawn) {
     // Use the forced dir, else the live tracked cwd (user may have cd'd).
     const cwd = forceCwd || (await window.electronAPI.getCwd(paneId)) || fallbackCwd
-    clearTerminal(paneId)
+    resetTerminal(paneId) // fresh PTY → fully reset the terminal (clears any stuck modes)
     await window.electronAPI.createPty(paneId, cwd, hasEnv ? profile.env : undefined)
     paneEnvProfile.set(paneId, hasEnv ? profile.id : null)
     refitPane(paneId) // size the new PTY to the full pane before the agent starts
@@ -333,7 +345,7 @@ export async function launchAgent(
 // the PTY sends SIGHUP to the shell's process group, killing the stuck child too.
 export async function restartShell(paneId: number, fallbackCwd: string) {
   const cwd = (await window.electronAPI.getCwd(paneId)) || fallbackCwd
-  clearTerminal(paneId)
+  resetTerminal(paneId) // full reset clears stuck modes (mouse tracking / alt-screen) left by a crashed TUI
   paneEnvProfile.set(paneId, null)
   await window.electronAPI.createPty(paneId, cwd)
   refitPane(paneId) // size the fresh PTY to the full pane (avoids a cramped window)
