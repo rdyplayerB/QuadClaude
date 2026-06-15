@@ -278,6 +278,17 @@ printf '{"ts":"%s","type":"delegation","engine":"%s","project":"%s","pane":"%s",
   "$dur" "$rc" "$pchars" "$cold" "$gitmode" "$ins" "$del" "$(jesc "$files")" "$check_json" \
   "$(jesc "$prompt_preview")" "$(jesc "$output_preview")" >> "$events"
 
+# Continuously-learning evaluator: append a labeled outcome to the durable eval memory
+# (~/.quadclaude/eval — lives in $HOME, survives app updates, never cleared by the
+# dashboard). Over projects this teaches the keep/delegate decision which work qwen
+# handles reliably. Best-effort; never blocks or fails the worker.
+if command -v qceval >/dev/null 2>&1; then
+  QCE_PROJECT="$project" QCE_TASK="$qtask" QCE_ENGINE="$engine" QCE_ROUTE="$route" \
+    QCE_FILES="$files" QCE_INS="$ins" QCE_DEL="$del" QCE_PROMPTCHARS="$pchars" \
+    QCE_CHECK_EXIT="$([ -n "$ckcmd" ] && printf %s "$ckx")" QCE_SOURCE="qcdelegate" \
+    qceval record >/dev/null 2>&1 || true
+fi
+
 # Backward-compat: keep feeding a user-installed qctrace tool if present.
 if command -v qctrace >/dev/null 2>&1; then
   pf="$(mktemp)"; printf %s "$prompt" > "$pf"

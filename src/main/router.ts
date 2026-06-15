@@ -16,6 +16,8 @@ import { QCDELEGATE_B64 } from './qcdelegate.b64'
 import { QCDECIDE_B64 } from './qcdecide.b64'
 import { QCDOCTOR_B64 } from './qcdoctor.b64'
 import { CCR_KEEPER_B64 } from './ccrKeeper.b64'
+import { QCEVAL_B64 } from './qceval.b64'
+import { QCLEARN_B64 } from './qclearn.b64'
 
 const CONFIG_DIR = path.join(os.homedir(), '.claude-code-router')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
@@ -39,6 +41,11 @@ const DELEGATE_BIN_DIR = path.join(os.homedir(), '.local', 'bin')
 const DELEGATE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdelegate')
 const DECIDE_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdecide')
 const DOCTOR_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdoctor')
+// Continuously-learning evaluator + its distiller. The DATA they read/write lives in
+// ~/.quadclaude/eval (home dir → survives app updates, never cleared); these scripts are
+// just the (regenerated) functions over that durable, app-independent memory.
+const QCEVAL_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qceval')
+const QCLEARN_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qclearn')
 
 // Persistent ccr keeper: a launchd agent that health-checks the local router every
 // 60s and restarts it if down, so delegation doesn't depend on ccr being started by
@@ -72,6 +79,9 @@ const DELEGATE_SCRIPT_BODY = Buffer.from(QCDELEGATE_B64, 'base64').toString('utf
 const DECIDE_SCRIPT_BODY = Buffer.from(QCDECIDE_B64, 'base64').toString('utf8')
 // Companion helper: one-shot health check of the whole delegation pipeline.
 const DOCTOR_SCRIPT_BODY = Buffer.from(QCDOCTOR_B64, 'base64').toString('utf8')
+// Continuously-learning evaluator + distiller over the durable eval memory.
+const QCEVAL_SCRIPT_BODY = Buffer.from(QCEVAL_B64, 'base64').toString('utf8')
+const QCLEARN_SCRIPT_BODY = Buffer.from(QCLEARN_B64, 'base64').toString('utf8')
 
 // Minimal shape of ccr's config we touch. We preserve any other keys the user set.
 interface CcrProvider {
@@ -286,6 +296,8 @@ export class RouterManager {
     fs.writeFileSync(DELEGATE_SCRIPT, DELEGATE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(DECIDE_SCRIPT, DECIDE_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(DOCTOR_SCRIPT, DOCTOR_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
+    fs.writeFileSync(QCEVAL_SCRIPT, QCEVAL_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
+    fs.writeFileSync(QCLEARN_SCRIPT, QCLEARN_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     this.installCcrKeeper()
   }
 
