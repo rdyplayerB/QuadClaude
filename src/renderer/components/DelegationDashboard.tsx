@@ -154,7 +154,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
+      <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[94vw] max-w-[1800px] max-h-[92vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
         {/* Header */}
         <div className="flex items-start justify-between px-5 py-3 border-b glass-border shrink-0 gap-4">
           <div className="min-w-0">
@@ -216,7 +216,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                       {decisions.filter((d) => d.verdict === 'keep').length} kept · {decisions.filter((d) => d.verdict === 'delegate').length} delegated
                     </span>
                   </div>
-                  <div className="space-y-1">
+                  <div className="columns-1 lg:columns-2 2xl:columns-3 gap-x-2 [&>*]:mb-1 [&>*]:break-inside-avoid">
                     {decisions.slice(0, 40).map((d, i) => (
                       <div key={d.ts + d.group + i} className="glass-control rounded-lg px-3 py-1.5 flex items-center gap-3">
                         <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0" title={new Date(d.ts).toLocaleString()}>{rel(d.ts)}</span>
@@ -235,7 +235,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
               {/* Per-project */}
               <div>
                 <div className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide mb-2">Projects</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
                   {summaries.map((s) => {
                     const active = filterProject === s.project
                     const worked = s.checked ? s.checkRate : s.successRate
