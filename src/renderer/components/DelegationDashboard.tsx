@@ -57,6 +57,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [filterProject, setFilterProject] = useState<string | null>(null)
   const [outcome, setOutcome] = useState<'all' | 'issues'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [expandedDecision, setExpandedDecision] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -154,7 +155,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[94vw] max-w-[1800px] max-h-[92vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
+      <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[94vw] max-w-[1800px] h-[92vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
         {/* Header */}
         <div className="flex items-start justify-between px-5 py-3 border-b glass-border shrink-0 gap-4">
           <div className="min-w-0">
@@ -187,7 +188,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
         </div>
 
         {/* Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-5">
+        <div className="flex-1 min-h-0 flex flex-col p-4 gap-3">
           {!loaded ? (
             <div className="text-center text-[--ui-text-dimmed] py-20 text-sm">Loading…</div>
           ) : events.length === 0 && decisions.length === 0 ? (
@@ -198,7 +199,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
           ) : (
             <>
               {/* KPIs */}
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5 shrink-0">
                 <Kpi label="Delegations" value={String(totals.n)} sub={`${totals.ok} succeeded`} />
                 <Kpi label="Check pass" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} checked`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} />
                 <Kpi label="Lines" value={totals.ins.toLocaleString()} sub="delegated" />
@@ -207,35 +208,59 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                 <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" />
               </div>
 
-              {/* Decision ledger — what Claude chose to KEEP vs DELEGATE, and why */}
-              {decisions.length > 0 && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
+              {/* Main: fixed-height panels — each scrolls independently, so filtering
+                  a project or browsing decisions never reflows the layout. */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.25fr_1fr] gap-3 overflow-y-auto lg:overflow-hidden">
+                {/* LEFT — Decisions (own scroll; click a row for full detail) */}
+                <div className="min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
+                  <div className="flex items-center gap-2 px-3 py-2 border-b glass-border shrink-0">
                     <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Decisions</span>
                     <span className="text-[10px] text-[--ui-text-dimmed]">
                       {decisions.filter((d) => d.verdict === 'keep').length} kept · {decisions.filter((d) => d.verdict === 'delegate').length} delegated
                     </span>
                   </div>
-                  <div className="columns-1 lg:columns-2 2xl:columns-3 gap-x-2 [&>*]:mb-1 [&>*]:break-inside-avoid">
-                    {decisions.slice(0, 40).map((d, i) => (
-                      <div key={d.ts + d.group + i} className="glass-control rounded-lg px-3 py-1.5 flex items-center gap-3">
-                        <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0" title={new Date(d.ts).toLocaleString()}>{rel(d.ts)}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${d.verdict === 'keep' ? 'bg-sky-400/15 text-sky-300' : 'bg-orange-400/15 text-orange-300'}`}>
-                          {d.verdict === 'keep' ? 'KEEP' : 'DELEGATE'}
-                        </span>
-                        <span className="text-xs text-[--ui-text-primary] truncate shrink-0 max-w-[28%]" title={d.group}>{d.group}</span>
-                        <span className="text-[11px] text-[--ui-text-dimmed] truncate flex-1 min-w-0" title={d.reason}>{d.reason}</span>
-                        {d.check && <span className="text-[10px] font-mono text-[--ui-text-dimmed] hidden md:inline truncate max-w-[24%]" title={d.check}>{d.check}</span>}
-                      </div>
-                    ))}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+                    {decisions.length === 0 && <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">No keep/delegate decisions logged yet.</div>}
+                    {decisions.slice(0, 100).map((d, i) => {
+                      const dkey = d.ts + d.group + i
+                      const dOpen = expandedDecision === dkey
+                      return (
+                        <div key={dkey} className="glass-control rounded-lg overflow-hidden">
+                          <button onClick={() => setExpandedDecision(dOpen ? null : dkey)} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-[--ui-bg-active]/40 transition-colors">
+                            <span className="text-[10px] text-[--ui-text-dimmed] w-12 shrink-0" title={new Date(d.ts).toLocaleString()}>{rel(d.ts)}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${d.verdict === 'keep' ? 'bg-sky-400/15 text-sky-300' : 'bg-orange-400/15 text-orange-300'}`}>{d.verdict === 'keep' ? 'KEEP' : 'DELEGATE'}</span>
+                            <span className="text-xs text-[--ui-text-primary] truncate shrink-0 max-w-[42%]" title={d.group}>{d.group}</span>
+                            <span className="text-[11px] text-[--ui-text-dimmed] truncate flex-1 min-w-0">{d.reason}</span>
+                            <svg width="9" height="9" viewBox="0 0 10 10" className={`shrink-0 text-[--ui-text-dimmed] transition-transform ${dOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M2 3.5L5 6.5L8 3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                          </button>
+                          {dOpen && (
+                            <div className="px-3 pb-3 pt-1 space-y-2 text-[11px] border-t glass-border">
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[--ui-text-dimmed]">
+                                <span>when: {new Date(d.ts).toLocaleString()}</span>
+                                {d.project && <span>project: <span className="text-[--ui-text-secondary]">{d.project}</span></span>}
+                                {d.pane && <span>pane: {d.pane}</span>}
+                                {d.check && <span>check: <span className="font-mono text-[--ui-text-secondary]">{d.check}</span></span>}
+                              </div>
+                              <div>
+                                <div className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] mb-0.5">Reason</div>
+                                <p className="text-[--ui-text-secondary] leading-relaxed">{d.reason}</p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
-              )}
 
-              {/* Per-project */}
-              <div>
-                <div className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide mb-2">Projects</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2">
+                {/* RIGHT — Projects (top, capped) + Calls (fills rest) */}
+                <div className="min-h-0 flex flex-col gap-3">
+
+                {/* Projects — capped height; scrolls if there are many */}
+                <div className="shrink-0 max-h-[38%] flex flex-col glass-control rounded-xl overflow-hidden">
+                  <div className="px-3 py-2 border-b glass-border shrink-0 text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Projects</div>
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
                   {summaries.map((s) => {
                     const active = filterProject === s.project
                     const worked = s.checked ? s.checkRate : s.successRate
@@ -259,12 +284,13 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                       </button>
                     )
                   })}
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              {/* Timeline */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
+                {/* Calls — fills the rest; scrolls. Filtering never resizes the panel. */}
+                <div className="flex-1 min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b glass-border shrink-0">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">
                       Calls {filterProject && <span className="text-[--accent] normal-case">· filtered</span>}
@@ -294,7 +320,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                     )}
                   </div>
                 </div>
-                <div className="space-y-1">
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
                   {shownEvents.length === 0 && (
                     <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">
                       {outcome === 'issues' ? 'No issues — every delegation here succeeded ✓' : 'No calls for this filter.'}
@@ -344,7 +370,9 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                       </div>
                     )
                   })}
+                  </div>
                 </div>
+              </div>
               </div>
             </>
           )}
