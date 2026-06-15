@@ -259,6 +259,23 @@ const paneEnvProfile = new Map<number, string | null>()
 // sending the agent command twice (the env re-spawn path is async).
 const launchingPanes = new Set<number>()
 
+// Re-fit a pane's xterm to its container and push the resulting cols/rows to its PTY.
+// A freshly (re)spawned PTY starts at the default 80x24, so an agent launched right after
+// a respawn renders into a cramped window until the next manual resize (e.g. switching a
+// pane to Qwen/aider and back to Claude Code). The container size hasn't changed, so we
+// just re-measure it and resize the new PTY to match — which also delivers SIGWINCH so the
+// agent re-renders at full size.
+function refitPane(paneId: number): void {
+  const entry = terminals.get(paneId)
+  if (!entry || !entry.terminal.element) return
+  try {
+    entry.fitAddon.fit()
+    window.electronAPI.resizeTerminal(paneId, entry.terminal.cols, entry.terminal.rows)
+  } catch {
+    /* ignore fit errors during transitions */
+  }
+}
+
 // Resolve which agent profile a pane should run: per-pane assignment, then the
 // global default, then the Claude builtin. The id-based fallthrough also makes
 // a deleted/dangling agentId degrade gracefully instead of breaking.
@@ -301,6 +318,7 @@ export async function launchAgent(
     clearTerminal(paneId)
     await window.electronAPI.createPty(paneId, cwd, hasEnv ? profile.env : undefined)
     paneEnvProfile.set(paneId, hasEnv ? profile.id : null)
+    refitPane(paneId) // size the new PTY to the full pane before the agent starts
   }
   let command = profile.command
   if (profile.builtin === 'claude') {
@@ -318,6 +336,7 @@ export async function restartShell(paneId: number, fallbackCwd: string) {
   clearTerminal(paneId)
   paneEnvProfile.set(paneId, null)
   await window.electronAPI.createPty(paneId, cwd)
+  refitPane(paneId) // size the fresh PTY to the full pane (avoids a cramped window)
   useWorkspaceStore.getState().setPaneState(paneId, 'shell')
 }
 
