@@ -24,16 +24,21 @@ function shortRoute(r: string): string {
   return r.split(',').pop() || r
 }
 
-// A big headline metric.
-function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad' }) {
+// A big headline metric. Pass onClick to make it an actionable button (e.g. jump to a
+// filtered view) — a count you can't act on is just decoration.
+function Kpi({ label, value, sub, tone, onClick }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad'; onClick?: () => void }) {
   const color = tone === 'good' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-400' : 'text-[--ui-text-primary]'
-  return (
-    <div className="glass-control rounded-xl px-4 py-3 flex flex-col gap-0.5 min-w-0">
+  const inner = (
+    <>
       <span className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</span>
       <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide truncate">{label}</span>
       {sub && <span className="text-[10px] text-[--ui-text-dimmed] truncate">{sub}</span>}
-    </div>
+    </>
   )
+  const base = 'glass-control rounded-xl px-4 py-3 flex flex-col gap-0.5 min-w-0'
+  return onClick
+    ? <button onClick={onClick} className={`${base} text-left hover:bg-[--ui-bg-active]/40 hover:ring-1 hover:ring-[--accent]/40 transition-all cursor-pointer`}>{inner}</button>
+    : <div className={base}>{inner}</div>
 }
 
 function Badge({ text, tone }: { text: string; tone: 'good' | 'bad' | 'warn' | 'muted' }) {
@@ -220,7 +225,12 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                 <Kpi label="Worked" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} with a check`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} />
                 <Kpi label="Delegate rate" value={delegRate == null ? '—' : pct(delegRate)} sub={`${delegateN} of ${decisions.length} units`} />
                 <Kpi label="Eval trust" value={trust == null ? '—' : `${trust}%`} sub={judged ? `${judged} judged` : 'mark outcomes to start'} tone={trust == null ? undefined : trust >= 80 ? 'good' : 'warn'} />
-                <Kpi label="Issues" value={String(issueCount)} sub="to review" tone={issueCount > 0 ? 'bad' : 'good'} />
+                <Kpi label="Issues" value={String(issueCount)} sub={issueCount > 0 ? 'click to review →' : 'none'} tone={issueCount > 0 ? 'bad' : 'good'} onClick={issueCount > 0 ? () => {
+                  setFilterProject(null)
+                  setOutcome('issues')
+                  const first = events.find(isIssue) // jump straight into the problem call's detail
+                  if (first) setExpanded(first.ts + first.task + first.project)
+                } : undefined} />
                 <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" />
               </div>
 
