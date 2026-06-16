@@ -8,54 +8,7 @@ import { UsageIndicator } from './components/UsageIndicator'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
-import { useDelegation, PendingApproval } from './hooks/useDelegation'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
-
-// First-delegation-of-the-session prompt: offer to show the worker's live output in a
-// window. Approval is remembered only for this Claude session (re-asked next session).
-function DelegationApprovalModal({
-  pending,
-  onApprove,
-  onDecline,
-}: {
-  pending: PendingApproval
-  onApprove: () => void
-  onDecline: () => void
-}) {
-  return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[60]" role="presentation">
-      <div
-        className="glass-elevated glass-border rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5 backdrop-blur-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delegation-approval-title"
-      >
-        <h2 id="delegation-approval-title" className="text-sm font-semibold text-[--ui-text-primary] mb-1">
-          Show delegated work in a window?
-        </h2>
-        <p className="text-[12px] text-[--ui-text-secondary] leading-relaxed mb-4">
-          Claude in Pane {pending.orchestratorId + 1} is delegating to{' '}
-          <span className="font-mono text-[--ui-text-primary]">{pending.route || 'a local model'}</span>. Open a live worker
-          window to watch its output? You’ll only be asked once this session.
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onDecline}
-            className="px-3 py-1.5 text-sm rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary] transition-all"
-          >
-            Not now
-          </button>
-          <button
-            onClick={onApprove}
-            className="px-3 py-1.5 text-sm rounded-lg bg-[--accent] text-white hover:opacity-90 transition-all"
-          >
-            Show in a window
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
 // only appears when the grid has a blank cell). Hidden at the pane cap.
@@ -90,9 +43,6 @@ function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isDashboardOpen, setIsDashboardOpen] = useState(false)
-
-  // Delegation worker-window workflow (session-scoped approval + live feed).
-  const { pending: delegationPending, approve: approveDelegation, decline: declineDelegation } = useDelegation()
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {
@@ -322,14 +272,6 @@ function App() {
       {/* Dedicated delegation dashboard */}
       <DelegationDashboard isOpen={isDashboardOpen} onClose={() => setIsDashboardOpen(false)} />
 
-      {/* Delegation worker-window approval prompt */}
-      {delegationPending && (
-        <DelegationApprovalModal
-          pending={delegationPending}
-          onApprove={approveDelegation}
-          onDecline={declineDelegation}
-        />
-      )}
     </div>
   )
 }

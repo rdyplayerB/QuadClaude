@@ -256,10 +256,6 @@ export function getPerfLogDir(): string {
   return path.join(app.getPath('userData'), 'perf-logs')
 }
 
-export function getPerfLogPath(): string | null {
-  return logFilePath
-}
-
 function pad(n: number): string {
   return n < 10 ? '0' + n : String(n)
 }

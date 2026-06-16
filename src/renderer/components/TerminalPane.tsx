@@ -256,13 +256,6 @@ export function sendToTerminal(paneId: number, text: string) {
   }
 }
 
-// Has this pane's xterm been mounted yet? The delegation worker-feed needs to know,
-// because sendToTerminal silently no-ops before the terminal exists — the original
-// cause of the "worker window stays empty" bug. Callers retry until this is true.
-export function hasTerminal(paneId: number): boolean {
-  return terminals.has(paneId)
-}
-
 // Transient (not persisted): the profile id whose env the current PTY for each
 // pane was spawned with. null = a plain shell (no injected env). Used to decide
 // when an agent launch must re-spawn the PTY to inject/clear env.
@@ -438,75 +431,6 @@ function isTerminalAtBottom(terminal: Terminal): boolean {
   // Add small tolerance (1 row) to account for edge cases
   return buffer.baseY + terminal.rows >= buffer.length - 1
 }
-
-// Git Status Bar component - always visible
-const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) {
-  const [showTooltip, setShowTooltip] = useState(false)
-  const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
-  const gitStatus = pane?.gitStatus
-
-  return (
-    <div className="flex items-center justify-end px-3 h-7 glass-header font-mono text-xs shrink-0 border-t border-white/[0.04] overflow-hidden min-w-0">
-      {/* Right side - branch and changes */}
-      <div
-        className="relative flex items-center gap-2 min-w-0 shrink-0"
-        onMouseEnter={() => gitStatus?.isGitRepo && setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-      >
-        {gitStatus?.isGitRepo ? (
-          <>
-            <span className="flex items-center gap-1.5">
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-green]">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-              </svg>
-              <span className="text-[--git-green]">{gitStatus.branch}</span>
-            </span>
-            {(gitStatus.ahead ?? 0) > 0 && (
-              <span className="text-[--git-cyan] flex items-center gap-0.5">
-                <span className="text-[10px]">↑</span>
-                <span>{gitStatus.ahead}</span>
-              </span>
-            )}
-            {(gitStatus.behind ?? 0) > 0 && (
-              <span className="text-[--git-yellow] flex items-center gap-0.5">
-                <span className="text-[10px]">↓</span>
-                <span>{gitStatus.behind}</span>
-              </span>
-            )}
-            {(gitStatus.dirty ?? 0) > 0 && (
-              <span className="text-[--git-orange] flex items-center gap-0.5">
-                <span className="text-[10px]">●</span>
-                <span>{gitStatus.dirty}</span>
-              </span>
-            )}
-            {/* Tooltip - positioned above */}
-            {showTooltip && (
-              <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-lg shadow-xl text-xs whitespace-nowrap z-50">
-                <div className="text-[--ui-text-primary] mb-1.5">
-                  <span className="text-[--git-green]">{gitStatus.branch}</span> branch
-                </div>
-                {(gitStatus.ahead ?? 0) > 0 && (
-                  <div className="text-[--git-cyan] py-0.5">↑ {gitStatus.ahead} commit{gitStatus.ahead !== 1 ? 's' : ''} ahead</div>
-                )}
-                {(gitStatus.behind ?? 0) > 0 && (
-                  <div className="text-[--git-yellow] py-0.5">↓ {gitStatus.behind} commit{gitStatus.behind !== 1 ? 's' : ''} behind</div>
-                )}
-                {(gitStatus.dirty ?? 0) > 0 && (
-                  <div className="text-[--git-orange] py-0.5">● {gitStatus.dirty} uncommitted</div>
-                )}
-                {(gitStatus.ahead ?? 0) === 0 && (gitStatus.behind ?? 0) === 0 && (gitStatus.dirty ?? 0) === 0 && (
-                  <div className="text-[--ui-text-muted] py-0.5">Clean working tree</div>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <span className="text-[--ui-text-faint]">—</span>
-        )}
-      </div>
-    </div>
-  )
-})
 
 // Helper to safely fit terminal while preserving scroll position
 function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
@@ -823,7 +747,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
         try {
           fitAddon.fit()
-          if (terminalRef.current) closeRowGap(terminalRef.current)
         } catch (e) {
           // Ignore fit errors
         }
