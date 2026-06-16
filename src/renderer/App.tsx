@@ -143,6 +143,23 @@ function App() {
     }
   }, [])
 
+  // Returning to the app (window focus) or the tab becoming visible can leave the active
+  // pane's xterm without keyboard focus — it stays selectable but won't accept typing or
+  // Ctrl-C. Re-focus the active terminal so panes stay usable after switching away and back.
+  // Skip while a modal is open so we don't steal its focus.
+  useEffect(() => {
+    const refocus = () => {
+      if (isSettingsOpen || isDashboardOpen || document.hidden) return
+      requestAnimationFrame(() => focusTerminal(useWorkspaceStore.getState().activePaneId))
+    }
+    window.addEventListener('focus', refocus)
+    document.addEventListener('visibilitychange', refocus)
+    return () => {
+      window.removeEventListener('focus', refocus)
+      document.removeEventListener('visibilitychange', refocus)
+    }
+  }, [isSettingsOpen, isDashboardOpen])
+
   // Enable global hotkeys (disabled when settings modal is open)
   useHotkeys(!isSettingsOpen)
 
@@ -248,7 +265,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.23.4</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.23.5</span>
         </div>
 
         {/* Center - layout selector + add pane */}

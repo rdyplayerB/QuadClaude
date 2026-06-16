@@ -724,6 +724,12 @@ function createWindow() {
   mainWindow.on('resize', saveWindowBounds)
   mainWindow.on('move', saveWindowBounds)
 
+  // Returning to the app from another window/app can leave the webContents without
+  // keyboard focus — the terminal pane stays selectable but won't accept typing or
+  // Ctrl-C until focus is restored. Re-focus the webContents on window focus; the
+  // renderer then re-focuses the active terminal's textarea.
+  mainWindow.on('focus', () => mainWindow?.webContents.focus())
+
   mainWindow.on('closed', () => {
     logger.info('window', 'Main window closed')
     mainWindow = null
