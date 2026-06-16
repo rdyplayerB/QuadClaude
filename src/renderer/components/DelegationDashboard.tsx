@@ -555,7 +555,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
         {/* Full-prompt popup — the complete untruncated prompt sent to the worker, on demand. */}
         {fullPrompt && (
           <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && setFullPrompt(null)}>
-            <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[80vw] max-w-[1100px] max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
+            <div className="glass-modal glass-border rounded-2xl shadow-2xl w-[80vw] max-w-[1100px] max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b glass-border shrink-0">
                 <span className="text-sm font-medium text-[--ui-text-primary] truncate">Full prompt · <span className="font-mono text-[--ui-text-secondary]">{fullPrompt.title}</span></span>
                 <div className="flex items-center gap-1.5 shrink-0">
