@@ -24,6 +24,21 @@ function shortRoute(r: string): string {
   return r.split(',').pop() || r
 }
 
+// Link a DELEGATE decision to the qcdelegate Call it produced. qcdecide (intent) and
+// qcdelegate (execution) share no key, so we join on project + pane + time: the call runs
+// in the same pane within a few minutes of the decision. Returns the nearest such call.
+function matchDelegationCall(d: DelegationDecision, events: DelegationEvent[]): DelegationEvent | null {
+  if (d.verdict !== 'delegate') return null
+  const dt = Date.parse(d.ts)
+  if (Number.isNaN(dt)) return null
+  const cands = events.filter(
+    (e) => e.project === d.project && (e.pane || '') === (d.pane || '') && Math.abs(Date.parse(e.ts) - dt) <= 15 * 60 * 1000,
+  )
+  if (!cands.length) return null
+  cands.sort((a, b) => Math.abs(Date.parse(a.ts) - dt) - Math.abs(Date.parse(b.ts) - dt))
+  return cands[0]
+}
+
 // A big headline metric. Pass onClick to make it an actionable button (e.g. jump to a
 // filtered view) — a count you can't act on is just decoration.
 function Kpi({ label, value, sub, tone, onClick }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad'; onClick?: () => void }) {
@@ -301,6 +316,27 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                                 <div className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] mb-0.5">Reason</div>
                                 <p className="text-[--ui-text-secondary] leading-relaxed">{d.reason}</p>
                               </div>
+                              {/* For a DELEGATE decision, surface the actual prompt that went to the worker
+                                  (from the matching Call — joined by project+pane+time). */}
+                              {d.verdict === 'delegate' && (() => {
+                                const call = matchDelegationCall(d, events)
+                                if (!call) return (
+                                  <div className="text-[10px] text-[--ui-text-dimmed]">Prompt sent to the worker isn't linked yet — the delegation may have run outside a pane or hasn't completed. (It's always in the Calls panel.)</div>
+                                )
+                                return (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2 text-[10px] text-[--ui-text-dimmed]">
+                                      <span className="uppercase tracking-wide text-[--ui-text-muted]">Prompt sent → {shortRoute(call.route)}</span>
+                                      <span>{call.exit === 0 ? 'ok' : `exit ${call.exit}`}</span>
+                                      {call.check && <span className={call.check.exit === 0 ? 'text-emerald-300' : 'text-red-300'}>{call.check.exit === 0 ? 'check ✓' : 'check ✕'}</span>}
+                                      <span>+{call.insertions}/-{call.deletions} · {call.durationSec}s</span>
+                                    </div>
+                                    {call.promptPreview
+                                      ? <pre className="whitespace-pre-wrap font-mono text-[10px] text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-44 overflow-y-auto">{call.promptPreview}</pre>
+                                      : <div className="text-[10px] text-[--ui-text-dimmed]">(prompt not captured for this call)</div>}
+                                  </div>
+                                )
+                              })()}
                             </div>
                           )}
                         </div>
