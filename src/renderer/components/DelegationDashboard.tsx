@@ -41,13 +41,13 @@ function Kpi({ label, value, sub, tone, onClick }: { label: string; value: strin
     : <div className={base}>{inner}</div>
 }
 
-function Badge({ text, tone }: { text: string; tone: 'good' | 'bad' | 'warn' | 'muted' }) {
+function Badge({ text, tone, title }: { text: string; tone: 'good' | 'bad' | 'warn' | 'muted'; title?: string }) {
   const cls =
     tone === 'good' ? 'bg-emerald-400/15 text-emerald-300' :
     tone === 'bad' ? 'bg-red-400/15 text-red-300' :
     tone === 'warn' ? 'bg-amber-400/15 text-amber-200' :
     'bg-white/5 text-[--ui-text-dimmed]'
-  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${cls}`}>{text}</span>
+  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${title ? 'cursor-help' : ''} ${cls}`} title={title}>{text}</span>
 }
 
 export function DelegationDashboard({ isOpen, onClose }: Props) {
@@ -392,30 +392,44 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                           <span className="text-[10px] text-[--ui-text-dimmed] w-16 shrink-0" title={new Date(e.ts).toLocaleString()}>{rel(e.ts)}</span>
                           <span className="text-xs text-[--ui-text-primary] truncate flex-1 min-w-0">{e.task === 'untagged' ? <span className="text-[--ui-text-dimmed]">untagged</span> : e.task}</span>
                           <span className="text-[10px] font-mono text-[--ui-text-dimmed] hidden sm:inline">{shortRoute(e.route)}</span>
-                          {e.exit === 0 ? <Badge text="ok" tone="good" /> : <Badge text={`exit ${e.exit}`} tone="bad" />}
-                          {e.check && <Badge text={e.check.exit === 0 ? 'check ✓' : 'check ✕'} tone={checkTone} />}
-                          {e.coldStartRetries > 0 && <Badge text={`cold ${e.coldStartRetries}`} tone="warn" />}
+                          {e.exit === 0
+                            ? <Badge text="ok" tone="good" title="Worker process exited cleanly — it thinks it succeeded. The check is the real verdict." />
+                            : <Badge text={`exit ${e.exit}`} tone="bad" title="The worker process errored out." />}
+                          {e.check && <Badge text={e.check.exit === 0 ? 'check ✓' : 'check ✕'} tone={checkTone} title={`Ground-truth check: ${e.check.command} → exit ${e.check.exit}\n\n${e.check.exit === 0 ? 'Passed — the delegated code actually works.' : "Failed — the delegated code didn't pass, even though the worker claimed success. Expand for details."}`} />}
+                          {e.coldStartRetries > 0 && <Badge text={`cold ${e.coldStartRetries}`} tone="warn" title={`Took ${e.coldStartRetries} warm-up retr${e.coldStartRetries === 1 ? 'y' : 'ies'} before the local model responded.`} />}
                           <span className="text-[10px] text-[--ui-text-dimmed] w-10 text-right shrink-0 tabular-nums">{e.durationSec}s</span>
                           <span className="text-[10px] text-[--ui-text-dimmed] w-16 text-right shrink-0 tabular-nums">+{e.insertions}/-{e.deletions}</span>
                           {e.humanVerdict && <Badge text={e.humanVerdict} tone={e.humanVerdict === 'ship' ? 'good' : e.humanVerdict === 'revert' ? 'bad' : 'warn'} />}
                         </button>
                         {isOpenRow && (
                           <div className="px-3 pb-3 pt-1 space-y-2 text-[11px] border-t glass-border">
-                            {/* Your verdict — feeds eval calibration (how often the check/judge was actually right) */}
+                            {/* Your verdict — feeds eval calibration (how often the check/judge was right). */}
+                            {(e.exit !== 0 || (e.check && e.check.exit !== 0)) && (
+                              <div className="text-[10px] text-amber-300/90 flex items-start gap-1.5">
+                                <span aria-hidden>⚠</span>
+                                <span>{e.check && e.check.exit !== 0 ? "This check failed — the delegated code didn't pass." : 'The worker errored.'} Nothing to fix here — just record what you ultimately did with it below, so the evaluator learns whether the check was right.</span>
+                              </div>
+                            )}
                             <div className="flex items-center flex-wrap gap-2">
-                              <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted]">Your outcome</span>
-                              {([['ship', 'Shipped ✓'], ['revert', 'Reverted ↩'], ['edit', 'Edited ✎']] as const).map(([v, label]) => (
+                              <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] flex items-center gap-1">
+                                Your outcome
+                                <span
+                                  className="text-[--ui-text-dimmed] hover:text-[--ui-text-secondary] cursor-help text-[11px] normal-case"
+                                  title={"Record what actually happened to this delegated change. You're NOT fixing anything here — you're telling the system whether the delegation worked, which trains the evaluator's trust score (the 'Eval trust' KPI: how often the check/judge matched reality).\n\nShipped ✓ — you kept it in your codebase as-is.\nReverted ↩ — you threw it away / didn't use it.\nEdited ✎ — you kept it but had to fix it yourself.\n\nExample: a failed check that you Revert = the check was right (it correctly caught broken work), which raises Eval trust."}
+                                >ⓘ</span>
+                              </span>
+                              {([['ship', 'Shipped ✓', 'Shipped — you kept it in your codebase as-is'], ['revert', 'Reverted ↩', "Reverted — you threw it away / didn't use it"], ['edit', 'Edited ✎', 'Edited — you kept it but had to fix it yourself']] as const).map(([v, label, help]) => (
                                 <button
                                   key={v}
                                   onClick={(ev) => { ev.stopPropagation(); recordVerdict(e.task, v) }}
                                   disabled={e.task === 'untagged'}
                                   className={`px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-40 ${e.humanVerdict === v ? 'bg-[--accent] text-white' : 'glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]'}`}
-                                  title={e.task === 'untagged' ? 'No QC_TASK tag to record against' : `Mark this delegation as ${v}`}
+                                  title={e.task === 'untagged' ? 'No QC_TASK tag to record against' : help}
                                 >
                                   {label}
                                 </button>
                               ))}
-                              <span className="text-[10px] text-[--ui-text-dimmed]">— did the delegated change stick? (trains the eval)</span>
+                              <span className="text-[10px] text-[--ui-text-dimmed]">— did the delegated change stick?</span>
                             </div>
                             <div className="flex flex-wrap gap-x-4 gap-y-1 text-[--ui-text-dimmed]">
                               <span>project: <span className="text-[--ui-text-secondary]">{e.project}</span></span>
