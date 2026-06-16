@@ -298,12 +298,18 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
               {insights && insights.byClass.length > 0 && (
                 <div className="shrink-0">
                   <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">What to delegate</span>
-                    <span className="text-[10px] text-[--ui-text-dimmed]">by task class{insights.firstTryRate != null ? ` · ${pct(insights.firstTryRate)} first-try` : ''}</span>
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide flex items-center gap-1">
+                      What to delegate
+                      <span
+                        className="text-[--ui-text-dimmed] hover:text-[--ui-text-secondary] cursor-help normal-case text-[11px]"
+                        title={"A read-only signal LEARNED from your delegation history — not a control; there's nothing to click or configure here.\n\nEach card is a task class (every delegation is auto-classified by its files). The % is that class's ground-truth pass rate; n is the sample size.\n\nThe badge recommends Delegate vs Keep from pass-rate + sample. It stays 'Delegate cautiously' until n≥3, then firms up: ≥85% → Delegate · <60% → Keep / heavy-verify · no check ever → Write a check first.\n\nIt updates automatically as you delegate more and mark outcomes. To add your own priors by hand, edit ~/.quadclaude/eval/rubric.md."}
+                      >ⓘ</span>
+                    </span>
+                    <span className="text-[10px] text-[--ui-text-dimmed]">learned from your outcomes · by task class{insights.firstTryRate != null ? ` · ${pct(insights.firstTryRate)} first-try` : ''}</span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                     {insights.byClass.map((c) => (
-                      <div key={c.taskClass} className="glass-control rounded-lg px-3 py-2 flex flex-col gap-1.5 min-w-0" title={`${c.passed}/${c.checked} checked passed · ${c.firstTry} first-try · ${c.n} total`}>
+                      <div key={c.taskClass} className="glass-control rounded-lg px-3 py-2 flex flex-col gap-1.5 min-w-0 cursor-help" title={`${c.taskClass}: ${c.passed}/${c.checked} checked delegation(s) passed (${c.firstTry} on the first try), ${c.n} total.\nRecommendation "${c.recommendation}" — ${c.n < 3 ? 'low sample, needs more data before it firms up' : c.passRate != null && c.passRate >= 0.85 ? 'qwen is reliable on this kind of work' : 'qwen tends to struggle here — keep it or verify heavily'}.`}>
                         <div className="flex items-baseline justify-between gap-2">
                           <span className="text-xs font-medium text-[--ui-text-primary] capitalize truncate">{c.taskClass}</span>
                           <span className={`text-base font-semibold tabular-nums ${c.tone === 'good' ? 'text-emerald-400' : c.tone === 'bad' ? 'text-red-400' : c.tone === 'warn' ? 'text-amber-300' : 'text-[--ui-text-dimmed]'}`}>{c.passRate == null ? '—' : pct(c.passRate)}</span>
