@@ -221,7 +221,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     >
       <div
         ref={modalRef}
-        className="glass-elevated glass-border rounded-xl shadow-2xl w-full max-w-3xl mx-4 h-[34rem] max-h-[88vh] flex flex-col backdrop-blur-xl overflow-hidden"
+        className="glass-modal glass-border rounded-xl shadow-2xl w-full max-w-3xl mx-4 h-[34rem] max-h-[88vh] flex flex-col backdrop-blur-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

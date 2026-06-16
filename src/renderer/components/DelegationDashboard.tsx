@@ -229,8 +229,8 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const capable = !!status?.route && status.onPath
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[96vw] max-w-[2600px] h-[93vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="glass-modal glass-border rounded-2xl shadow-2xl w-[96vw] max-w-[2600px] h-[93vh] flex flex-col overflow-hidden backdrop-blur-xl" role="dialog" aria-modal="true" aria-label="Delegation dashboard">
         {/* Header */}
         <div className="flex items-start justify-between px-5 py-3 border-b glass-border shrink-0 gap-4">
           <div className="min-w-0">

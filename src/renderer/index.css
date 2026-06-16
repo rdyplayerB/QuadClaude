@@ -35,6 +35,9 @@
   /* Glass effect - low opacity to let macOS vibrancy show through */
   --glass-bg: rgba(20, 20, 20, 0.3);
   --glass-bg-elevated: rgba(30, 30, 30, 0.25);
+  /* Modals (dashboard, settings) must stay READABLE over app content — near-opaque, unlike
+     terminal panes which use --glass-bg-elevated translucent to show the wallpaper. */
+  --glass-bg-modal: rgba(22, 22, 22, 0.97);
   --glass-bg-header: rgba(20, 20, 20, 0.65);
   --glass-bg-pane-header: rgba(20, 20, 20, 0.55);
   --glass-blur: 0px; /* Disable CSS blur - let macOS vibrancy handle it */
@@ -136,6 +139,11 @@ body {
 
 .glass-elevated {
   background: var(--glass-bg-elevated);
+}
+
+/* Opaque modal surface (dashboard / settings) — readable over terminals, not see-through. */
+.glass-modal {
+  background: var(--glass-bg-modal);
 }
 
 .glass-header {
