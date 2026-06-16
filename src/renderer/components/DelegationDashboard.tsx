@@ -250,7 +250,21 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                   : <span className="text-[11px] text-amber-300 truncate">No model set — configure one in Settings → Models</span>
               )}
             </div>
-            <p className="text-[11px] text-[--ui-text-dimmed] mt-0.5">Every task Claude hands to a local model — what changed, and whether it worked.</p>
+            <p className="text-[11px] text-[--ui-text-dimmed] mt-0.5 flex items-center gap-2 flex-wrap">
+              <span>Every task Claude hands to a local model — what changed, and whether it worked.</span>
+              {decisions.length > 0 && (() => {
+                const mins = Math.round((Date.now() - Date.parse(decisions[0].ts)) / 60000)
+                const stale = mins > 45
+                return (
+                  <span
+                    className={`cursor-help ${stale ? 'text-amber-300' : 'text-[--ui-text-secondary]'}`}
+                    title={"When a delegation-mode session last logged a keep/delegate decision (qcdecide). This is the heartbeat — if it's stale while you're actively coding, the Claude in your working pane probably isn't in delegation mode.\n\nFix: relaunch that Claude session (Stop → reopen) so its SessionStart hook re-detects delegation; older sessions started before you enabled it won't log. Then decisions will start flowing again."}
+                  >
+                    · last logged {rel(decisions[0].ts)}{stale ? ' ⚠ stale' : ''}
+                  </span>
+                )
+              })()}
+            </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={refresh} className="px-2.5 py-1.5 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]" title="Refresh">Refresh</button>
