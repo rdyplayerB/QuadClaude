@@ -273,6 +273,12 @@ fi
 # responded (last 1500 chars of output) — the signal for analyzing delegation quality.
 prompt_preview="$(printf %s "$prompt" | head -c 1000)"
 output_preview="$(tail -c 1500 "$out" 2>/dev/null | sed -E 's/\x1b\[[0-9;]*m//g')"
+# Persist the FULL prompt to a lazy per-call store so the dashboard can show it on demand
+# without bloating events.jsonl (the preview stays inline; full text loads only when clicked).
+# Named deterministically by ts+task so the app finds it from the event.
+pkey="$(printf %s "${ts}_${qtask}" | tr -c 'A-Za-z0-9._-' '_')"
+mkdir -p "$qc/prompts"
+printf %s "$prompt" > "$qc/prompts/$pkey.txt" 2>/dev/null || true
 printf '{"ts":"%s","type":"delegation","engine":"%s","project":"%s","pane":"%s","task":"%s","route":"%s","durationSec":%s,"exit":%s,"promptChars":%s,"coldStartRetries":%s,"gitMode":"%s","insertions":%s,"deletions":%s,"files":"%s","check":%s,"promptPreview":"%s","outputPreview":"%s"}\n' \
   "$ts" "$(jesc "$engine")" "$(jesc "$project")" "$(jesc "$qpane")" "$(jesc "$qtask")" "$(jesc "$route")" \
   "$dur" "$rc" "$pchars" "$cold" "$gitmode" "$ins" "$del" "$(jesc "$files")" "$check_json" \

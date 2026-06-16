@@ -284,6 +284,7 @@ export const IPC_CHANNELS = {
   DELEGATION_CLEAR: 'delegation:clear',
   DELEGATION_VERDICT: 'delegation:verdict',
   DELEGATION_INSIGHTS: 'delegation:insights',
+  DELEGATION_FULL_PROMPT: 'delegation:fullPrompt',
   DELEGATION_EXPORT: 'delegation:export',
   // Pushed (main → renderer) when a new delegation event lands in events.jsonl
   DELEGATION_EVENT: 'delegation:event',

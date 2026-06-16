@@ -41,19 +41,19 @@ function matchDelegationCall(d: DelegationDecision, events: DelegationEvent[]): 
 
 // A big headline metric. Pass onClick to make it an actionable button (e.g. jump to a
 // filtered view) — a count you can't act on is just decoration.
-function Kpi({ label, value, sub, tone, onClick }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad'; onClick?: () => void }) {
+function Kpi({ label, value, sub, tone, onClick, help }: { label: string; value: string; sub?: string; tone?: 'good' | 'warn' | 'bad'; onClick?: () => void; help?: string }) {
   const color = tone === 'good' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-300' : tone === 'bad' ? 'text-red-400' : 'text-[--ui-text-primary]'
   const inner = (
     <>
       <span className={`text-2xl font-semibold tabular-nums ${color}`}>{value}</span>
-      <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide truncate">{label}</span>
+      <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide truncate flex items-center gap-1">{label}{help && <span aria-hidden className="text-[--ui-text-dimmed] normal-case">ⓘ</span>}</span>
       {sub && <span className="text-[10px] text-[--ui-text-dimmed] truncate">{sub}</span>}
     </>
   )
   const base = 'glass-control rounded-xl px-4 py-3 flex flex-col gap-0.5 min-w-0'
   return onClick
-    ? <button onClick={onClick} className={`${base} text-left hover:bg-[--ui-bg-active]/40 hover:ring-1 hover:ring-[--accent]/40 transition-all cursor-pointer`}>{inner}</button>
-    : <div className={base}>{inner}</div>
+    ? <button onClick={onClick} title={help} className={`${base} text-left hover:bg-[--ui-bg-active]/40 hover:ring-1 hover:ring-[--accent]/40 transition-all cursor-pointer`}>{inner}</button>
+    : <div title={help} className={`${base}${help ? ' cursor-help' : ''}`}>{inner}</div>
 }
 
 function Badge({ text, tone, title }: { text: string; tone: 'good' | 'bad' | 'warn' | 'muted'; title?: string }) {
@@ -79,6 +79,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [outcome, setOutcome] = useState<'all' | 'issues'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [expandedDecision, setExpandedDecision] = useState<string | null>(null)
+  const [fullPrompt, setFullPrompt] = useState<{ title: string; text: string } | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -99,6 +100,13 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
     flash(ok ? `Recorded "${verdict}" for ${task}` : 'Could not record verdict (is qceval installed?)')
     if (ok) refresh()
   }, [refresh])
+
+  // Load the FULL prompt for a delegation (lazy — only fetched on click) into a popup.
+  const openFullPrompt = useCallback(async (ts: string, task: string, label: string) => {
+    const text = await window.electronAPI.delegationFullPrompt(ts, task).catch(() => null)
+    if (text) setFullPrompt({ title: label, text })
+    else flash('Full prompt not stored for this call (delegated before this feature, or ran outside a pane).')
+  }, [])
 
   useEffect(() => {
     if (!isOpen) return
@@ -236,17 +244,17 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
             <>
               {/* KPIs */}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5 shrink-0">
-                <Kpi label="Delegations" value={String(totals.n)} sub={`${totals.ok} ran clean`} />
-                <Kpi label="Worked" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} with a check`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} />
-                <Kpi label="Delegate rate" value={delegRate == null ? '—' : pct(delegRate)} sub={`${delegateN} of ${decisions.length} units`} />
-                <Kpi label="Eval trust" value={trust == null ? '—' : `${trust}%`} sub={judged ? `${judged} judged` : 'mark outcomes to start'} tone={trust == null ? undefined : trust >= 80 ? 'good' : 'warn'} />
-                <Kpi label="Issues" value={String(issueCount)} sub={issueCount > 0 ? 'click to review →' : 'none'} tone={issueCount > 0 ? 'bad' : 'good'} onClick={issueCount > 0 ? () => {
+                <Kpi label="Delegations" value={String(totals.n)} sub={`${totals.ok} ran clean`} help="Total delegation calls that actually ran (each is one task handed to the local model). 'Ran clean' = the worker process exited 0." />
+                <Kpi label="Worked" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} with a check`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} help="Of delegations that ran a ground-truth check (QC_CHECK), the percentage that passed. The truest 'did delegation actually work' — a worker can exit clean but still produce broken code the check catches." />
+                <Kpi label="Delegate rate" value={delegRate == null ? '—' : pct(delegRate)} sub={`${delegateN} of ${decisions.length} units`} help="Of the keep/delegate decisions Claude logged (qcdecide), the percentage it chose to DELEGATE. A 'unit' is one logged decision — NOT a prompt. Most prompts log zero decisions, so this is a sampled subset, not a prompt counter." />
+                <Kpi label="Eval trust" value={trust == null ? '—' : `${trust}%`} sub={judged ? `${judged} judged` : 'mark outcomes to start'} tone={trust == null ? undefined : trust >= 80 ? 'good' : 'warn'} help="How often the check/judge's verdict matched the real outcome you recorded (Shipped/Reverted/Edited on a Call). Starts blank; rises as you mark outcomes. This is what eventually lets you trust a green check without reviewing." />
+                <Kpi label="Issues" value={String(issueCount)} sub={issueCount > 0 ? 'click to review →' : 'none'} tone={issueCount > 0 ? 'bad' : 'good'} help="Delegations where the worker errored (exit ≠ 0) or its ground-truth check failed — the rows worth reviewing. Click to filter the Calls panel to them and open the first one." onClick={issueCount > 0 ? () => {
                   setFilterProject(null)
                   setOutcome('issues')
                   const first = events.find(isIssue) // jump straight into the problem call's detail
                   if (first) setExpanded(first.ts + first.task + first.project)
                 } : undefined} />
-                <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" />
+                <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" help="Average wall-clock seconds per delegation call. A rough efficiency signal — skewed upward by a few large tasks, so treat it as a trend, not a precise number." />
               </div>
 
               {/* Demoted volume context — informative, not a headline. */}
@@ -330,6 +338,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                                       <span>{call.exit === 0 ? 'ok' : `exit ${call.exit}`}</span>
                                       {call.check && <span className={call.check.exit === 0 ? 'text-emerald-300' : 'text-red-300'}>{call.check.exit === 0 ? 'check ✓' : 'check ✕'}</span>}
                                       <span>+{call.insertions}/-{call.deletions} · {call.durationSec}s</span>
+                                      <button onClick={(ev) => { ev.stopPropagation(); openFullPrompt(call.ts, call.task, call.task) }} className="text-[--accent] hover:underline">View full ↗</button>
                                     </div>
                                     {call.promptPreview
                                       ? <pre className="whitespace-pre-wrap font-mono text-[10px] text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-44 overflow-y-auto">{call.promptPreview}</pre>
@@ -478,7 +487,10 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                             {e.files && <div className="text-[--ui-text-dimmed]">files: <span className="font-mono text-[--ui-text-secondary]">{e.files.split(';').filter(Boolean).join('  ')}</span></div>}
                             {e.promptPreview && (
                               <div>
-                                <div className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] mb-0.5">Prompt</div>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted]">Prompt <span className="normal-case text-[--ui-text-dimmed]">(preview)</span></span>
+                                  <button onClick={(ev) => { ev.stopPropagation(); openFullPrompt(e.ts, e.task, e.task) }} className="text-[10px] text-[--accent] hover:underline">View full ↗</button>
+                                </div>
                                 <pre className="whitespace-pre-wrap font-mono text-[10px] text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-32 overflow-y-auto">{e.promptPreview}</pre>
                               </div>
                             )}
@@ -504,6 +516,25 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
         {toast && (
           <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-2 rounded-lg bg-[--ui-bg-elevated] border border-[#444] text-xs text-[--ui-text-primary] shadow-lg max-w-[80%] truncate">
             {toast}
+          </div>
+        )}
+
+        {/* Full-prompt popup — the complete untruncated prompt sent to the worker, on demand. */}
+        {fullPrompt && (
+          <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && setFullPrompt(null)}>
+            <div className="glass-elevated glass-border rounded-2xl shadow-2xl w-[80vw] max-w-[1100px] max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 border-b glass-border shrink-0">
+                <span className="text-sm font-medium text-[--ui-text-primary] truncate">Full prompt · <span className="font-mono text-[--ui-text-secondary]">{fullPrompt.title}</span></span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] text-[--ui-text-dimmed] mr-1">{fullPrompt.text.length.toLocaleString()} chars</span>
+                  <button onClick={() => { window.electronAPI.clipboardWriteText(fullPrompt.text); flash('Prompt copied') }} className="px-2.5 py-1 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]">Copy</button>
+                  <button onClick={() => setFullPrompt(null)} className="p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] rounded-lg" aria-label="Close">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
+                  </button>
+                </div>
+              </div>
+              <pre className="flex-1 min-h-0 overflow-auto p-4 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[--ui-text-secondary]">{fullPrompt.text}</pre>
+            </div>
           </div>
         )}
       </div>

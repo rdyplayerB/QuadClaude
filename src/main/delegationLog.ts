@@ -191,6 +191,17 @@ class DelegationLog {
     return sliced
   }
 
+  // The FULL untruncated prompt for a delegation, from the lazy per-call store qcdelegate
+  // writes (~/.quadclaude/prompts/<ts_task>.txt). Loaded on demand so events.jsonl stays small.
+  getFullPrompt(ts: string, task: string): string | null {
+    try {
+      const key = `${ts}_${task}`.replace(/[^A-Za-z0-9._-]/g, '_')
+      return fs.readFileSync(path.join(QC_DIR, 'prompts', `${key}.txt`), 'utf8')
+    } catch {
+      return null
+    }
+  }
+
   // "What to delegate" intelligence, distilled from the durable eval memory
   // (~/.quadclaude/eval). Surfaces per-task-class success + a delegate/keep recommendation,
   // first-try rate, and eval calibration — the optimization layer the raw event log lacks.
