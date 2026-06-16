@@ -1106,6 +1106,10 @@ function setupIPC() {
     return delegationLog.getDecisions()
   })
 
+  ipcMain.handle(IPC_CHANNELS.DELEGATION_INSIGHTS, async () => {
+    return delegationLog.getInsights()
+  })
+
   ipcMain.handle(IPC_CHANNELS.DELEGATION_CLEAR, async () => {
     delegationLog.clearAll()
     return delegationLog.getSummaries()

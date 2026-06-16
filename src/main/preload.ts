@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -130,6 +130,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EVENTS) as Promise<DelegationEvent[]>,
   delegationDecisions: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_DECISIONS) as Promise<DelegationDecision[]>,
+  delegationInsights: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_INSIGHTS) as Promise<DelegationInsights>,
   delegationClear: () =>
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_CLEAR) as Promise<DelegationProjectSummary[]>,
   delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') =>
@@ -197,6 +199,7 @@ declare global {
       delegationSummaries: () => Promise<DelegationProjectSummary[]>
       delegationEvents: () => Promise<DelegationEvent[]>
       delegationDecisions: () => Promise<DelegationDecision[]>
+      delegationInsights: () => Promise<DelegationInsights>
       delegationClear: () => Promise<DelegationProjectSummary[]>
       delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') => Promise<boolean>
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>

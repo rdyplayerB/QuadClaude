@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { DelegationProjectSummary, DelegationEvent, DelegationDecision, RouterDelegationStatus } from '../../shared/types'
+import { DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, RouterDelegationStatus } from '../../shared/types'
 
 interface Props {
   isOpen: boolean
@@ -54,6 +54,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const [summaries, setSummaries] = useState<DelegationProjectSummary[]>([])
   const [events, setEvents] = useState<DelegationEvent[]>([])
   const [decisions, setDecisions] = useState<DelegationDecision[]>([])
+  const [insights, setInsights] = useState<DelegationInsights | null>(null)
   const [filterProject, setFilterProject] = useState<string | null>(null)
   const [outcome, setOutcome] = useState<'all' | 'issues'>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -66,6 +67,7 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const refresh = useCallback(() => {
     window.electronAPI.delegationSummaries().then(setSummaries).catch(() => {})
     window.electronAPI.delegationDecisions().then(setDecisions).catch(() => {})
+    window.electronAPI.delegationInsights().then(setInsights).catch(() => {})
     window.electronAPI.delegationEvents().then(setEvents).catch(() => {}).finally(() => setLoaded(true))
   }, [])
 
@@ -121,6 +123,11 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   }, [events])
 
   const checkRate = totals.checked ? totals.checkPass / totals.checked : null
+  // Effectiveness-first headline metrics (the questions that drive "delegate more/less?").
+  const delegateN = decisions.filter((d) => d.verdict === 'delegate').length
+  const delegRate = decisions.length ? delegateN / decisions.length : null
+  const trust = insights?.calibration?.evalTrustworthiness ?? null
+  const judged = insights?.calibration?.humanLabeled ?? 0
   // "Issues" = the worker errored OR its ground-truth check failed — the rows worth
   // studying to improve delegation.
   const isIssue = (e: DelegationEvent) => e.exit !== 0 || (!!e.check && e.check.exit !== 0)
@@ -209,13 +216,43 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
             <>
               {/* KPIs */}
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5 shrink-0">
-                <Kpi label="Delegations" value={String(totals.n)} sub={`${totals.ok} succeeded`} />
-                <Kpi label="Check pass" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} checked`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} />
-                <Kpi label="Lines" value={totals.ins.toLocaleString()} sub="delegated" />
-                <Kpi label="Files" value={String(totals.files)} sub="touched" />
-                <Kpi label="Cold starts" value={String(totals.cold)} sub="warm-up retries" tone={totals.cold > 0 ? 'warn' : undefined} />
+                <Kpi label="Delegations" value={String(totals.n)} sub={`${totals.ok} ran clean`} />
+                <Kpi label="Worked" value={pct(checkRate)} sub={`${totals.checkPass}/${totals.checked} with a check`} tone={checkRate == null ? undefined : checkRate >= 0.8 ? 'good' : checkRate >= 0.5 ? 'warn' : 'bad'} />
+                <Kpi label="Delegate rate" value={delegRate == null ? '—' : pct(delegRate)} sub={`${delegateN} of ${decisions.length} units`} />
+                <Kpi label="Eval trust" value={trust == null ? '—' : `${trust}%`} sub={judged ? `${judged} judged` : 'mark outcomes to start'} tone={trust == null ? undefined : trust >= 80 ? 'good' : 'warn'} />
+                <Kpi label="Issues" value={String(issueCount)} sub="to review" tone={issueCount > 0 ? 'bad' : 'good'} />
                 <Kpi label="Avg time" value={`${totals.n ? Math.round(totals.dur / totals.n) : 0}s`} sub="per call" />
               </div>
+
+              {/* Demoted volume context — informative, not a headline. */}
+              <div className="text-[10px] text-[--ui-text-dimmed] shrink-0 -mt-1">
+                {totals.ins.toLocaleString()} lines · {totals.files} files touched{totals.cold > 0 ? ` · ${totals.cold} cold starts` : ''}{insights ? ` · ${insights.totalOutcomes} in eval memory` : ''}
+              </div>
+
+              {/* WHAT TO DELEGATE — per-task-class success + recommendation, distilled from the
+                  eval memory. The optimization view: where qwen is reliable vs where to keep. */}
+              {insights && insights.byClass.length > 0 && (
+                <div className="shrink-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">What to delegate</span>
+                    <span className="text-[10px] text-[--ui-text-dimmed]">by task class{insights.firstTryRate != null ? ` · ${pct(insights.firstTryRate)} first-try` : ''}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                    {insights.byClass.map((c) => (
+                      <div key={c.taskClass} className="glass-control rounded-lg px-3 py-2 flex flex-col gap-1.5 min-w-0" title={`${c.passed}/${c.checked} checked passed · ${c.firstTry} first-try · ${c.n} total`}>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs font-medium text-[--ui-text-primary] capitalize truncate">{c.taskClass}</span>
+                          <span className={`text-base font-semibold tabular-nums ${c.tone === 'good' ? 'text-emerald-400' : c.tone === 'bad' ? 'text-red-400' : c.tone === 'warn' ? 'text-amber-300' : 'text-[--ui-text-dimmed]'}`}>{c.passRate == null ? '—' : pct(c.passRate)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1">
+                          <Badge text={c.recommendation} tone={c.tone} />
+                          <span className="text-[10px] text-[--ui-text-dimmed] shrink-0">n={c.n}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Main: fixed-height panels — each scrolls independently, so filtering
                   a project or browsing decisions never reflows the layout. */}

@@ -19,7 +19,7 @@ import os from 'os'
 import fs from 'fs'
 import path from 'path'
 import { logger } from './logger'
-import { DelegationEvent, DelegationProjectSummary, DelegationDecision } from '../shared/types'
+import { DelegationEvent, DelegationProjectSummary, DelegationDecision, DelegationInsights, DelegationClassStat } from '../shared/types'
 
 const QC_DIR = path.join(os.homedir(), '.quadclaude')
 const EVENTS_PATH = path.join(QC_DIR, 'events.jsonl')
@@ -189,6 +189,66 @@ class DelegationLog {
       if (byTask.size) for (const e of sliced) { const v = byTask.get(e.task); if (v) e.humanVerdict = v }
     } catch { /* no eval memory yet */ }
     return sliced
+  }
+
+  // "What to delegate" intelligence, distilled from the durable eval memory
+  // (~/.quadclaude/eval). Surfaces per-task-class success + a delegate/keep recommendation,
+  // first-try rate, and eval calibration — the optimization layer the raw event log lacks.
+  getInsights(): DelegationInsights {
+    const evalDir = path.join(QC_DIR, 'eval')
+    let outcomes: Array<{ taskClass?: string; groundTruth?: string; iterations?: number }> = []
+    try {
+      outcomes = fs.readFileSync(path.join(evalDir, 'outcomes.jsonl'), 'utf8')
+        .split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l) } catch { return null } })
+        .filter(Boolean) as typeof outcomes
+    } catch { /* no eval memory yet */ }
+
+    const byClassMap: Record<string, { taskClass: string; n: number; checked: number; passed: number; firstTry: number }> = {}
+    for (const o of outcomes) {
+      const c = o.taskClass || 'logic'
+      const g = (byClassMap[c] = byClassMap[c] || { taskClass: c, n: 0, checked: 0, passed: 0, firstTry: 0 })
+      g.n++
+      if (o.groundTruth === 'pass' || o.groundTruth === 'fail') {
+        g.checked++
+        if (o.groundTruth === 'pass') { g.passed++; if ((o.iterations || 1) <= 1) g.firstTry++ }
+      }
+    }
+    const byClass: DelegationClassStat[] = Object.values(byClassMap).map((g) => {
+      const passRate = g.checked ? g.passed / g.checked : null
+      let recommendation: string
+      let tone: 'good' | 'warn' | 'bad' | 'muted'
+      if (g.checked === 0) { recommendation = 'Write a check first'; tone = 'muted' }
+      else if (g.checked < 3) { recommendation = 'Delegate cautiously'; tone = 'warn' }
+      else if ((passRate ?? 0) >= 0.85) { recommendation = 'Delegate'; tone = 'good' }
+      else if ((passRate ?? 0) >= 0.6) { recommendation = 'Delegate + check'; tone = 'warn' }
+      else { recommendation = 'Keep / heavy-verify'; tone = 'bad' }
+      return { ...g, passRate, recommendation, tone }
+    }).sort((a, b) => b.n - a.n)
+
+    const checked = outcomes.filter((o) => o.groundTruth === 'pass' || o.groundTruth === 'fail')
+    const passed = checked.filter((o) => o.groundTruth === 'pass')
+    const firstTry = passed.filter((o) => (o.iterations || 1) <= 1)
+
+    let calibration: DelegationInsights['calibration'] = null
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(evalDir, 'calibration.json'), 'utf8'))
+      calibration = {
+        humanLabeled: c.humanLabeled || 0,
+        evalTrustworthiness: c.evalTrustworthiness ?? null,
+        evalFalsePositives: c.evalFalsePositives || 0,
+        evalFalseNegatives: c.evalFalseNegatives || 0,
+      }
+    } catch { /* no calibration yet */ }
+
+    return {
+      byClass,
+      totalOutcomes: outcomes.length,
+      checkedCount: checked.length,
+      successRate: checked.length ? passed.length / checked.length : null,
+      firstTryRate: passed.length ? firstTry.length / passed.length : null,
+      calibration,
+    }
   }
 
   // KEEP/DELEGATE decisions for the dashboard's decision ledger, most-recent-first.

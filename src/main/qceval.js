@@ -89,6 +89,12 @@ if (cmd === 'record') {
   const files = e.QCE_FILES || ''
   const task = e.QCE_TASK || ''
   const checkExit = e.QCE_CHECK_EXIT
+  // iterations = how many times THIS task has been delegated (this attempt included), so
+  // "first-try" is real. Derived from prior outcomes with the same task tag (untagged can't
+  // be tracked → 1). QCE_ITER still overrides if a caller knows better.
+  const iterations = e.QCE_ITER
+    ? (parseInt(e.QCE_ITER, 10) || 1)
+    : (task && task !== 'untagged' ? readJsonl(OUTCOMES).filter((o) => o.task === task).length + 1 : 1)
   const rec = {
     ts: new Date().toISOString().slice(0, 19) + 'Z',
     project: e.QCE_PROJECT || process.cwd(),
@@ -100,7 +106,7 @@ if (cmd === 'record') {
     lines: (parseInt(e.QCE_INS || '0', 10) || 0) + (parseInt(e.QCE_DEL || '0', 10) || 0),
     promptChars: parseInt(e.QCE_PROMPTCHARS || '0', 10) || 0,
     groundTruth: checkExit === undefined || checkExit === '' ? 'none' : (checkExit === '0' ? 'pass' : 'fail'),
-    iterations: parseInt(e.QCE_ITER || '1', 10) || 1,
+    iterations,
     orchTokens: e.QCE_ORCHTOKENS ? parseInt(e.QCE_ORCHTOKENS, 10) : null,
     humanVerdict: null,
     source: e.QCE_SOURCE || 'qcdelegate',

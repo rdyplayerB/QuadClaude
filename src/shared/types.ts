@@ -283,6 +283,7 @@ export const IPC_CHANNELS = {
   DELEGATION_DECISIONS: 'delegation:decisions',
   DELEGATION_CLEAR: 'delegation:clear',
   DELEGATION_VERDICT: 'delegation:verdict',
+  DELEGATION_INSIGHTS: 'delegation:insights',
   DELEGATION_EXPORT: 'delegation:export',
   // Pushed (main → renderer) when a new delegation event lands in events.jsonl
   DELEGATION_EVENT: 'delegation:event',
@@ -326,6 +327,34 @@ export interface DelegationDecision {
   verdict: 'keep' | 'delegate'
   reason: string
   check: string // the QC_CHECK that will gate it (delegate only); "" otherwise
+}
+
+// "What to delegate" intelligence, distilled from the durable eval memory
+// (~/.quadclaude/eval). This is the layer that turns the dashboard from a log into an
+// optimization tool: it tells you which kinds of work qwen handles reliably.
+export interface DelegationClassStat {
+  taskClass: string // data | logic | ui | test | config | docs
+  n: number // total delegated units in this class
+  checked: number // how many ran a ground-truth check
+  passed: number // of checked, how many passed
+  firstTry: number // of passed, how many on the first delegation attempt
+  passRate: number | null
+  recommendation: string // Delegate | Delegate + check | Keep / heavy-verify | Write a check first
+  tone: 'good' | 'warn' | 'bad' | 'muted'
+}
+
+export interface DelegationInsights {
+  byClass: DelegationClassStat[]
+  totalOutcomes: number
+  checkedCount: number
+  successRate: number | null // of checked outcomes, fraction that passed
+  firstTryRate: number | null // of passed outcomes, fraction that passed on attempt #1
+  calibration: {
+    humanLabeled: number // delegations you marked ship/revert/edit
+    evalTrustworthiness: number | null // % the check/judge agreed with your verdict
+    evalFalsePositives: number // check said pass, you reverted
+    evalFalseNegatives: number // check said fail, you shipped
+  } | null
 }
 
 // Per-project rollup the UI reads. Cumulative across the project's whole history.
