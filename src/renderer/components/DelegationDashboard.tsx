@@ -23,6 +23,9 @@ function shortRoute(r: string): string {
   // "olares,qwen3-coder:30b" → "qwen3-coder:30b"
   return r.split(',').pop() || r
 }
+function projectName(p: string): string {
+  return p.split('/').pop() || p
+}
 
 // Link a DELEGATE decision to the qcdelegate Call it produced. qcdecide (intent) and
 // qcdelegate (execution) share no key, so we join on project + pane + time: the call runs
@@ -156,6 +159,34 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
   const delegRate = decisions.length ? delegateN / decisions.length : null
   const trust = insights?.calibration?.evalTrustworthiness ?? null
   const judged = insights?.calibration?.humanLabeled ?? 0
+  // Decisions filtered to the selected project (all by default).
+  const filteredDecisions = filterProject ? decisions.filter((d) => d.project === filterProject) : decisions
+
+  // Per-project activity for the left rail — a UNION of decisions (qcdecide) AND calls
+  // (qcdelegate). Projects appear if they have EITHER, so a project where Claude only made
+  // keep/delegate decisions (no actual delegation) still shows up with its real counts.
+  const projectList = useMemo(() => {
+    const m = new Map<string, { project: string; name: string; decisions: number; kept: number; delegated: number; calls: number; checkRate: number | null; lastAt: number }>()
+    const touch = (proj: string) => {
+      let e = m.get(proj)
+      if (!e) { e = { project: proj, name: projectName(proj), decisions: 0, kept: 0, delegated: 0, calls: 0, checkRate: null, lastAt: 0 }; m.set(proj, e) }
+      return e
+    }
+    for (const d of decisions) {
+      if (!d.project) continue
+      const e = touch(d.project)
+      e.decisions++
+      if (d.verdict === 'delegate') e.delegated++; else e.kept++
+      const t = Date.parse(d.ts); if (!Number.isNaN(t) && t > e.lastAt) e.lastAt = t
+    }
+    for (const s of summaries) {
+      const e = touch(s.project)
+      e.calls = s.delegations
+      e.checkRate = s.checked ? (s.checkRate ?? null) : null
+      const t = s.lastAt ? Date.parse(s.lastAt) : 0; if (!Number.isNaN(t) && t > e.lastAt) e.lastAt = t
+    }
+    return [...m.values()].sort((a, b) => b.lastAt - a.lastAt)
+  }, [decisions, summaries])
   // "Issues" = the worker errored OR its ground-truth check failed — the rows worth
   // studying to improve delegation.
   const isIssue = (e: DelegationEvent) => e.exit !== 0 || (!!e.check && e.check.exit !== 0)
@@ -287,20 +318,55 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                 </div>
               )}
 
-              {/* Main: fixed-height panels — each scrolls independently, so filtering
-                  a project or browsing decisions never reflows the layout. */}
-              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.25fr_1fr] gap-3 overflow-y-auto lg:overflow-hidden">
-                {/* LEFT — Decisions (own scroll; click a row for full detail) */}
+              {/* Main: Projects rail (left) selects a project; Decisions + Calls (right)
+                  filter to it. Each panel scrolls independently — no reflow. */}
+              <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-3 overflow-y-auto lg:overflow-hidden">
+                {/* LEFT — Projects rail: per-project decision + call activity; click to filter. */}
                 <div className="min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b glass-border shrink-0">
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Projects</span>
+                    {filterProject && <button onClick={() => setFilterProject(null)} className="text-[10px] text-[--accent] hover:underline">show all</button>}
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
+                    {projectList.length === 0 && <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">No project activity yet.</div>}
+                    {projectList.map((p) => {
+                      const active = filterProject === p.project
+                      return (
+                        <button
+                          key={p.project}
+                          onClick={() => setFilterProject(active ? null : p.project)}
+                          className={`w-full text-left glass-control rounded-lg px-3 py-2 transition-all ${active ? 'ring-1 ring-[--accent] bg-[--ui-bg-active]/30' : 'hover:bg-[--ui-bg-active]/40'}`}
+                          title={p.project}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm text-[--ui-text-primary] truncate">{p.name}</span>
+                            <span className="text-[10px] text-[--ui-text-dimmed] shrink-0">{p.lastAt ? rel(new Date(p.lastAt).toISOString()) : ''}</span>
+                          </div>
+                          <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 mt-1 text-[10px] text-[--ui-text-dimmed]">
+                            <span>{p.decisions} decision{p.decisions === 1 ? '' : 's'}</span>
+                            {p.delegated > 0 && <span className="text-orange-300/80">· {p.delegated} delegated</span>}
+                            {p.calls > 0 && <span>· {p.calls} call{p.calls === 1 ? '' : 's'}</span>}
+                            {p.checkRate != null && <span>· {pct(p.checkRate)} check</span>}
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* RIGHT — Decisions (filtered) on top, Calls (filtered) below. */}
+                <div className="min-h-0 flex flex-col gap-3">
+                {/* Decisions — filtered to the selected project (all by default). */}
+                <div className="flex-[3] min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2 border-b glass-border shrink-0">
-                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Decisions</span>
+                    <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Decisions{filterProject && <span className="text-[--accent] normal-case"> · {projectName(filterProject)}</span>}</span>
                     <span className="text-[10px] text-[--ui-text-dimmed]">
-                      {decisions.filter((d) => d.verdict === 'keep').length} kept · {decisions.filter((d) => d.verdict === 'delegate').length} delegated
+                      {filteredDecisions.filter((d) => d.verdict === 'keep').length} kept · {filteredDecisions.filter((d) => d.verdict === 'delegate').length} delegated
                     </span>
                   </div>
                   <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-                    {decisions.length === 0 && <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">No keep/delegate decisions logged yet.</div>}
-                    {decisions.slice(0, 100).map((d, i) => {
+                    {filteredDecisions.length === 0 && <div className="text-[11px] text-[--ui-text-dimmed] py-6 text-center">No keep/delegate decisions {filterProject ? 'for this project' : 'logged yet'}.</div>}
+                    {filteredDecisions.slice(0, 100).map((d, i) => {
                       const dkey = d.ts + d.group + i
                       const dOpen = expandedDecision === dkey
                       return (
@@ -354,43 +420,8 @@ export function DelegationDashboard({ isOpen, onClose }: Props) {
                   </div>
                 </div>
 
-                {/* RIGHT — Projects (top, capped) + Calls (fills rest) */}
-                <div className="min-h-0 flex flex-col gap-3">
-
-                {/* Projects — capped height; scrolls if there are many */}
-                <div className="shrink-0 max-h-[38%] flex flex-col glass-control rounded-xl overflow-hidden">
-                  <div className="px-3 py-2 border-b glass-border shrink-0 text-[11px] text-[--ui-text-muted] uppercase tracking-wide">Projects</div>
-                  <div className="flex-1 min-h-0 overflow-y-auto p-2">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-2">
-                  {summaries.map((s) => {
-                    const active = filterProject === s.project
-                    const worked = s.checked ? s.checkRate : s.successRate
-                    return (
-                      <button
-                        key={s.project}
-                        onClick={() => setFilterProject(active ? null : s.project)}
-                        className={`text-left glass-control rounded-lg px-3 py-2 transition-all ${active ? 'ring-1 ring-[--accent]' : 'hover:bg-[--ui-bg-active]/40'}`}
-                        title={s.project}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-sm text-[--ui-text-primary] truncate">{s.projectName}</span>
-                          <span className="text-[10px] text-[--ui-text-dimmed] shrink-0" title={s.lastAt ? new Date(s.lastAt).toLocaleString() : ''}>{s.lastAt ? rel(s.lastAt) : ''}</span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-1 text-[11px] text-[--ui-text-dimmed]">
-                          <span>{s.delegations} calls</span>
-                          <span>· {pct(worked)} {s.checked ? 'check' : 'ok'}</span>
-                          <span>· {s.insertions.toLocaleString()} lines</span>
-                          {s.coldStartRetries > 0 && <span>· {s.coldStartRetries} cold</span>}
-                        </div>
-                      </button>
-                    )
-                  })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Calls — fills the rest; scrolls. Filtering never resizes the panel. */}
-                <div className="flex-1 min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
+                {/* Calls — the actual delegations that ran; filtered to the selected project. */}
+                <div className="flex-[2] min-h-0 flex flex-col glass-control rounded-xl overflow-hidden">
                   <div className="flex items-center justify-between gap-2 px-3 py-2 border-b glass-border shrink-0">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-[--ui-text-muted] uppercase tracking-wide">
