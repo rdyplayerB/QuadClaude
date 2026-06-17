@@ -30,6 +30,16 @@ try {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+// Send to the renderer only if the window AND its webContents are still alive. node-pty
+// (and other async sources) can emit one more event after the window/webContents has been
+// destroyed on quit/reload; `mainWindow?.` guards null but NOT a destroyed-but-non-null
+// webContents, which throws "Object has been destroyed". This guards both.
+function sendToRenderer(channel: string, ...args: unknown[]): void {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args)
+  }
+}
 let stopDelegationWatch: (() => void) | null = null
 
 // Bridge the app's delegation toggle to the Claude running inside a pane: write an
@@ -672,7 +682,7 @@ function createWindow() {
     // is cleared first so a reload doesn't stack pollers.
     stopDelegationWatch?.()
     stopDelegationWatch = delegationLog.startWatching((event) => {
-      mainWindow?.webContents.send(IPC_CHANNELS.DELEGATION_EVENT, event)
+      sendToRenderer(IPC_CHANNELS.DELEGATION_EVENT, event)
     })
     // Ensure zoom is exactly 1.0 to prevent scaling differences
     mainWindow?.webContents.setZoomFactor(1.0)
@@ -974,7 +984,7 @@ function createApplicationMenu() {
 }
 
 function sendMenuAction(action: MenuAction) {
-  mainWindow?.webContents.send(IPC_CHANNELS.APP_MENU_ACTION, action)
+  sendToRenderer(IPC_CHANNELS.APP_MENU_ACTION, action)
 }
 
 // Setup IPC handlers
@@ -1265,10 +1275,10 @@ app.whenReady().then(() => {
   try {
     logger.info('pty', 'Initializing PtyManager')
     ptyManager = new PtyManager((paneId, data) => {
-      mainWindow?.webContents.send(IPC_CHANNELS.TERMINAL_OUTPUT, paneId, data)
+      sendToRenderer(IPC_CHANNELS.TERMINAL_OUTPUT, paneId, data)
     }, (paneId, exitCode) => {
       logger.info('pty', `PTY exited for pane ${paneId}`, `Exit code: ${exitCode}`)
-      mainWindow?.webContents.send(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
+      sendToRenderer(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
     })
     logger.info('pty', 'PtyManager initialized')
   } catch (error) {
@@ -1310,7 +1320,7 @@ app.whenReady().then(() => {
   // Listen for system resume (wake from sleep)
   powerMonitor.on('resume', () => {
     logger.info('app', 'System resumed from sleep')
-    mainWindow?.webContents.send(IPC_CHANNELS.SYSTEM_RESUME)
+    sendToRenderer(IPC_CHANNELS.SYSTEM_RESUME)
   })
 })
 
