@@ -15,7 +15,10 @@ const MAX_POLL_INTERVAL = 30 * 60_000 // 30 minutes max backoff
 
 let cachedToken: string | null = null
 let tokenFetchedAt = 0
-const TOKEN_CACHE_MS = 10 * 60_000 // 10 minutes
+// Short on purpose: when you switch Claude accounts the Keychain gets a NEW token, and a
+// long cache would keep reporting the PREVIOUS account's usage. Re-read often so a switch
+// is picked up within ~a minute even if the file watcher below misses it.
+const TOKEN_CACHE_MS = 60_000 // 1 minute
 
 function getOAuthToken(): Promise<string | null> {
   const now = Date.now()
@@ -119,18 +122,49 @@ function getCachePath(): string {
   return path.join(app.getPath('userData'), 'usage-cache.json')
 }
 
-function loadCachedUsage(): UsageData | null {
+function getClaudeJsonPath(): string {
+  return path.join(app.getPath('home'), '.claude.json')
+}
+
+// The signed-in Claude account's email — the identity the usage token belongs to. Claude
+// Code rewrites ~/.claude.json on every account switch, so this is always the current one.
+// Cheap regex instead of fully parsing a ~400KB file.
+function getCurrentAccountEmail(): string | null {
   try {
-    const data = fs.readFileSync(getCachePath(), 'utf-8')
-    return JSON.parse(data) as UsageData
+    const raw = fs.readFileSync(getClaudeJsonPath(), 'utf-8')
+    const m = raw.match(/"emailAddress"\s*:\s*"([^"]+)"/)
+    return m ? m[1] : null
   } catch {
     return null
   }
 }
 
-function saveCachedUsage(data: UsageData): void {
+// Mirror the current account into a tiny file the bash statusline reads, so each pane can
+// show which account it's signed into without grepping the big ~/.claude.json per render.
+function writeStatuslineAccount(email: string | null): void {
   try {
-    fs.writeFileSync(getCachePath(), JSON.stringify(data), 'utf-8')
+    fs.writeFileSync(path.join(app.getPath('home'), '.claude', '.statusline-account'), (email || '') + '\n', 'utf-8')
+  } catch {
+    // Ignore
+  }
+}
+
+function loadCachedUsage(): UsageData | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(getCachePath(), 'utf-8')) as UsageData & { _account?: string }
+    // Never show a cached value that belongs to a DIFFERENT account than the one now signed
+    // in — otherwise a freshly-switched account briefly shows the previous account's usage.
+    const acct = getCurrentAccountEmail()
+    if (acct && parsed._account && parsed._account !== acct) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function saveCachedUsage(data: UsageData, account: string | null): void {
+  try {
+    fs.writeFileSync(getCachePath(), JSON.stringify({ ...data, _account: account }), 'utf-8')
   } catch {
     // Ignore write errors
   }
@@ -153,15 +187,36 @@ export class UsagePoller {
   private latestData: UsageData | null = null
   private currentInterval = BASE_POLL_INTERVAL
   private consecutiveFailures = 0
+  private lastAccountEmail: string | null = null
+  private polling = false
+  private watching = false
 
   start(window: BrowserWindow) {
     this.window = window
-    // Load cached data immediately so UI has something to show
+    this.lastAccountEmail = getCurrentAccountEmail()
+    writeStatuslineAccount(this.lastAccountEmail) // seed the per-pane account indicator
+    // Load cached data immediately so UI has something to show (only if it's THIS account's)
     const cached = loadCachedUsage()
     if (cached) {
       this.latestData = cached
       this.window.webContents.send(IPC_CHANNELS.USAGE_UPDATE, cached)
       logger.info('usage', 'Loaded cached usage data', `${Math.round(cached.fiveHour.utilization)}% (fetched ${Math.round((Date.now() - cached.fetchedAt) / 60_000)}m ago)`)
+    }
+    // Watch ~/.claude.json (rewritten on login) so an account switch refreshes usage
+    // promptly instead of waiting for the next 5-min poll. Debounced via the cheap email
+    // compare; Claude Code writes this file often, but the email rarely changes.
+    try {
+      fs.watchFile(getClaudeJsonPath(), { interval: 5000 }, () => {
+        const acct = getCurrentAccountEmail()
+        if (acct && acct !== this.lastAccountEmail) {
+          logger.info('usage', 'Account switch detected via ~/.claude.json — refreshing', `${this.lastAccountEmail} → ${acct}`)
+          writeStatuslineAccount(acct) // update the per-pane indicator immediately
+          this.forcePoll()
+        }
+      })
+      this.watching = true
+    } catch {
+      // watch unsupported — poll-time detection still covers it
     }
     // Delay first API poll to avoid competing with startup IPC traffic
     this.timeout = setTimeout(() => this.poll(), 3000)
@@ -172,6 +227,16 @@ export class UsagePoller {
       clearTimeout(this.timeout)
       this.timeout = null
     }
+    if (this.watching) {
+      try { fs.unwatchFile(getClaudeJsonPath()) } catch { /* ignore */ }
+      this.watching = false
+    }
+  }
+
+  // Cancel the pending scheduled poll and run one now (used on account switch).
+  private forcePoll() {
+    if (this.timeout) { clearTimeout(this.timeout); this.timeout = null }
+    void this.poll()
   }
 
   getLatest(): UsageData | null {
@@ -183,35 +248,55 @@ export class UsagePoller {
   }
 
   private async poll() {
-    // Keychain read spawns /usr/bin/security and parses its output — a prime
-    // suspect for periodic main-thread cost.
-    const token = await timeOp('usage:keychain-token', () => getOAuthToken())
-    if (!token) {
-      this.currentInterval = BASE_POLL_INTERVAL
+    if (this.polling) return // a forced poll can overlap the scheduled one — skip the dup
+    this.polling = true
+    try {
+      // Detect a Claude account switch (re-login). Both the Keychain token and the account
+      // in ~/.claude.json change; if we kept the cached token + usage we'd report the
+      // PREVIOUS account. On a change, drop the cached token and stale usage, then fetch
+      // fresh for the new account.
+      const account = getCurrentAccountEmail()
+      if (account && this.lastAccountEmail && account !== this.lastAccountEmail) {
+        logger.info('usage', 'Account changed — clearing cached token + usage', `${this.lastAccountEmail} → ${account}`)
+        cachedToken = null
+        tokenFetchedAt = 0
+        this.latestData = null
+      }
+      if (account) this.lastAccountEmail = account
+      writeStatuslineAccount(account) // keep the per-pane indicator current
+
+      // Keychain read spawns /usr/bin/security and parses its output — a prime
+      // suspect for periodic main-thread cost.
+      const token = await timeOp('usage:keychain-token', () => getOAuthToken())
+      if (!token) {
+        this.currentInterval = BASE_POLL_INTERVAL
+        this.scheduleNext()
+        return
+      }
+
+      const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
+
+      if (result.rateLimited) {
+        // Exponential backoff: double interval on each 429, up to max
+        this.consecutiveFailures++
+        this.currentInterval = Math.min(
+          BASE_POLL_INTERVAL * Math.pow(2, this.consecutiveFailures),
+          MAX_POLL_INTERVAL
+        )
+        logger.info('usage', `Backing off to ${Math.round(this.currentInterval / 1000)}s`)
+      } else if (result.data) {
+        this.latestData = result.data
+        saveCachedUsage(result.data, account)
+        this.window?.webContents.send(IPC_CHANNELS.USAGE_UPDATE, result.data)
+        // Reset to base interval on success
+        this.consecutiveFailures = 0
+        this.currentInterval = BASE_POLL_INTERVAL
+      }
+      // If null but not rate limited (other error), keep current interval
+
       this.scheduleNext()
-      return
+    } finally {
+      this.polling = false
     }
-
-    const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
-
-    if (result.rateLimited) {
-      // Exponential backoff: double interval on each 429, up to max
-      this.consecutiveFailures++
-      this.currentInterval = Math.min(
-        BASE_POLL_INTERVAL * Math.pow(2, this.consecutiveFailures),
-        MAX_POLL_INTERVAL
-      )
-      logger.info('usage', `Backing off to ${Math.round(this.currentInterval / 1000)}s`)
-    } else if (result.data) {
-      this.latestData = result.data
-      saveCachedUsage(result.data)
-      this.window?.webContents.send(IPC_CHANNELS.USAGE_UPDATE, result.data)
-      // Reset to base interval on success
-      this.consecutiveFailures = 0
-      this.currentInterval = BASE_POLL_INTERVAL
-    }
-    // If null but not rate limited (other error), keep current interval
-
-    this.scheduleNext()
   }
 }
