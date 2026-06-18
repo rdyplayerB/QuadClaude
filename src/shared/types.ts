@@ -328,6 +328,31 @@ export interface DelegationDecision {
   verdict: 'keep' | 'delegate'
   reason: string
   check: string // the QC_CHECK that will gate it (delegate only); "" otherwise
+  shadow?: ShadowVerdict // counterfactual result if this unit was later shadow-tested (qcshadow)
+}
+
+// One counterfactual test from `qcshadow`: qwen re-attempted a unit Claude chose to KEEP,
+// in an ISOLATED git worktree, and we recorded whether it could have matched. qwen's
+// output is never shipped — measurement only. Appended to ~/.quadclaude/eval/shadow.jsonl.
+export type ShadowCouldMatch = 'yes' | 'likely' | 'no' | 'inconclusive'
+export interface ShadowOutcome {
+  ts: string
+  type: 'shadow'
+  group: string // the kept unit that was re-tested (matches a decision's `group`)
+  project: string
+  taskClass: string
+  qwenExit: number
+  check: { command: string; exit: number } | null // objective ground truth, if one was given
+  judgeVerdict: string // adversarial judge: SHIP | REVIEW | REJECT | unknown
+  couldMatch: ShadowCouldMatch // yes/likely = over-cautious KEEP · no = KEEP justified
+}
+
+// The trimmed shadow result attached to a decision row in the ledger.
+export interface ShadowVerdict {
+  couldMatch: ShadowCouldMatch
+  judgeVerdict: string
+  checkPassed: boolean | null
+  ts: string
 }
 
 // "What to delegate" intelligence, distilled from the durable eval memory
@@ -355,6 +380,16 @@ export interface DelegationInsights {
     evalTrustworthiness: number | null // % the check/judge agreed with your verdict
     evalFalsePositives: number // check said pass, you reverted
     evalFalseNegatives: number // check said fail, you shipped
+  } | null
+  // Counterfactual over-caution signal, rolled up from qcshadow runs (eval/shadow.jsonl):
+  // of the units Claude KEPT and we re-tested, how often qwen could have matched. This is
+  // what answers "am I keeping work qwen could have done equally well?".
+  shadow: {
+    total: number
+    matched: number // couldMatch yes|likely — qwen could have done it (over-cautious KEEP)
+    fellShort: number // couldMatch no — KEEP justified, qwen genuinely fell short
+    inconclusive: number // ran but no objective signal to compare
+    byClass: Array<{ taskClass: string; tested: number; matched: number }>
   } | null
 }
 

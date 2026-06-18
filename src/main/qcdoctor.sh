@@ -39,6 +39,13 @@ if command -v qceval >/dev/null 2>&1 && command -v qclearn >/dev/null 2>&1; then
   ok "eval memory: $ocount outcome(s) in ~/.quadclaude/eval (durable; qceval/qclearn on PATH)"
 else warn "learning evaluator (qceval/qclearn) not on PATH — delegation won't self-improve"; fi
 
+# 5b. Counterfactual over-caution tester (grades whether qwen could match what you KEPT)
+if command -v qcshadow >/dev/null 2>&1; then
+  sc="$qc/eval/shadow.jsonl"
+  scount="$( [ -f "$sc" ] && grep -c . "$sc" 2>/dev/null || echo 0 )"
+  ok "shadow tester on PATH: qcshadow ($scount counterfactual run(s) recorded)"
+else warn "qcshadow not on PATH — over-caution can't be measured (re-run delegation setup to install)"; fi
+
 # 5b. Delegation engine: aider is the default worker (QC_ENGINE=aider). ccr/claude is the
 # legacy fallback (QC_ENGINE=claude, also auto-used for non-git projects).
 eng="${QC_ENGINE:-aider}"

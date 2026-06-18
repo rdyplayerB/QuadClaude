@@ -19,7 +19,7 @@ import os from 'os'
 import fs from 'fs'
 import path from 'path'
 import { logger } from './logger'
-import { DelegationEvent, DelegationProjectSummary, DelegationDecision, DelegationInsights, DelegationClassStat } from '../shared/types'
+import { DelegationEvent, DelegationProjectSummary, DelegationDecision, DelegationInsights, DelegationClassStat, ShadowOutcome } from '../shared/types'
 
 const QC_DIR = path.join(os.homedir(), '.quadclaude')
 const EVENTS_PATH = path.join(QC_DIR, 'events.jsonl')
@@ -114,6 +114,29 @@ function readDecisions(): DelegationDecision[] {
       if (e && e.type === 'decision' && typeof e.group === 'string') out.push(e as DelegationDecision)
     } catch {
       /* skip */
+    }
+  }
+  return out
+}
+
+// Counterfactual shadow tests (qcshadow): qwen re-attempted units Claude KEPT, in
+// isolation. Tolerant parse of ~/.quadclaude/eval/shadow.jsonl.
+function readShadowOutcomes(): ShadowOutcome[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(path.join(QC_DIR, 'eval', 'shadow.jsonl'), 'utf8')
+  } catch {
+    return []
+  }
+  const out: ShadowOutcome[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const e = JSON.parse(t)
+      if (e && e.type === 'shadow' && typeof e.group === 'string') out.push(e as ShadowOutcome)
+    } catch {
+      /* skip malformed */
     }
   }
   return out
@@ -252,6 +275,26 @@ class DelegationLog {
       }
     } catch { /* no calibration yet */ }
 
+    // Counterfactual over-caution roll-up from qcshadow (eval/shadow.jsonl).
+    let shadow: DelegationInsights['shadow'] = null
+    const shadows = readShadowOutcomes()
+    if (shadows.length) {
+      const isMatch = (s: ShadowOutcome) => s.couldMatch === 'yes' || s.couldMatch === 'likely'
+      const byClassMapS: Record<string, { taskClass: string; tested: number; matched: number }> = {}
+      for (const s of shadows) {
+        const g = (byClassMapS[s.taskClass] = byClassMapS[s.taskClass] || { taskClass: s.taskClass, tested: 0, matched: 0 })
+        g.tested++
+        if (isMatch(s)) g.matched++
+      }
+      shadow = {
+        total: shadows.length,
+        matched: shadows.filter(isMatch).length,
+        fellShort: shadows.filter((s) => s.couldMatch === 'no').length,
+        inconclusive: shadows.filter((s) => s.couldMatch === 'inconclusive').length,
+        byClass: Object.values(byClassMapS).sort((a, b) => b.tested - a.tested),
+      }
+    }
+
     return {
       byClass,
       totalOutcomes: outcomes.length,
@@ -259,14 +302,34 @@ class DelegationLog {
       successRate: checked.length ? passed.length / checked.length : null,
       firstTryRate: passed.length ? firstTry.length / passed.length : null,
       calibration,
+      shadow,
     }
   }
 
   // KEEP/DELEGATE decisions for the dashboard's decision ledger, most-recent-first.
+  // Each decision is annotated with its shadow verdict (qcshadow), if the unit was
+  // later counterfactually re-tested — so the ledger that records a decision also grades it.
   getDecisions(limit = 2000): DelegationDecision[] {
     const d = readDecisions()
     d.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
-    return d.slice(0, limit)
+    const sliced = d.slice(0, limit)
+    const shadows = readShadowOutcomes()
+    if (shadows.length) {
+      for (const dec of sliced) {
+        // Match on group + project; if several, take the most recent shadow run.
+        const cands = shadows.filter((s) => s.group === dec.group && s.project === dec.project)
+        if (!cands.length) continue
+        cands.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+        const s = cands[0]
+        dec.shadow = {
+          couldMatch: s.couldMatch,
+          judgeVerdict: s.judgeVerdict,
+          checkPassed: s.check ? s.check.exit === 0 : null,
+          ts: s.ts,
+        }
+      }
+    }
+    return sliced
   }
 
   // A single self-contained, human- AND machine-readable report of all delegation

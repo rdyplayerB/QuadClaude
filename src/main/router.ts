@@ -18,6 +18,7 @@ import { QCDOCTOR_B64 } from './qcdoctor.b64'
 import { CCR_KEEPER_B64 } from './ccrKeeper.b64'
 import { QCEVAL_B64 } from './qceval.b64'
 import { QCLEARN_B64 } from './qclearn.b64'
+import { QCSHADOW_B64 } from './qcshadow.b64'
 
 const CONFIG_DIR = path.join(os.homedir(), '.claude-code-router')
 const CONFIG_PATH = path.join(CONFIG_DIR, 'config.json')
@@ -46,6 +47,9 @@ const DOCTOR_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcdoctor')
 // just the (regenerated) functions over that durable, app-independent memory.
 const QCEVAL_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qceval')
 const QCLEARN_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qclearn')
+// Counterfactual over-caution tester: re-runs a KEPT unit through qwen in an isolated
+// git worktree and records whether it could have matched (eval/shadow.jsonl).
+const QCSHADOW_SCRIPT = path.join(DELEGATE_BIN_DIR, 'qcshadow')
 
 // Persistent ccr keeper: a launchd agent that health-checks the local router every
 // 60s and restarts it if down, so delegation doesn't depend on ccr being started by
@@ -82,6 +86,7 @@ const DOCTOR_SCRIPT_BODY = Buffer.from(QCDOCTOR_B64, 'base64').toString('utf8')
 // Continuously-learning evaluator + distiller over the durable eval memory.
 const QCEVAL_SCRIPT_BODY = Buffer.from(QCEVAL_B64, 'base64').toString('utf8')
 const QCLEARN_SCRIPT_BODY = Buffer.from(QCLEARN_B64, 'base64').toString('utf8')
+const QCSHADOW_SCRIPT_BODY = Buffer.from(QCSHADOW_B64, 'base64').toString('utf8')
 
 // Minimal shape of ccr's config we touch. We preserve any other keys the user set.
 interface CcrProvider {
@@ -298,6 +303,7 @@ export class RouterManager {
     fs.writeFileSync(DOCTOR_SCRIPT, DOCTOR_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(QCEVAL_SCRIPT, QCEVAL_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     fs.writeFileSync(QCLEARN_SCRIPT, QCLEARN_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
+    fs.writeFileSync(QCSHADOW_SCRIPT, QCSHADOW_SCRIPT_BODY, { encoding: 'utf8', mode: 0o755 })
     this.installCcrKeeper()
   }
 
