@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { TerminalGrid } from './components/TerminalGrid'
 import { SettingsModal } from './components/SettingsModal'
 import { DelegationDashboard } from './components/DelegationDashboard'
@@ -43,6 +43,19 @@ function App() {
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isDashboardOpen, setIsDashboardOpen] = useState(false)
+
+  // Dashboard zoom: a font/layout scale for the delegation dashboard, controlled by the
+  // SAME Cmd +/- that sizes terminals — but only while the dashboard is open (see the menu
+  // handler below), so it never touches terminal font. Persisted across launches.
+  const [dashScale, setDashScale] = useState(() => {
+    const v = Number(localStorage.getItem('qc-dash-scale'))
+    return v >= 0.8 && v <= 1.8 ? v : 1
+  })
+  useEffect(() => { localStorage.setItem('qc-dash-scale', String(dashScale)) }, [dashScale])
+  const clampScale = (n: number) => Math.min(1.8, Math.max(0.8, Math.round(n * 10) / 10))
+  // Read latest open-state inside the (stable) menu-action handler without re-subscribing.
+  const isDashboardOpenRef = useRef(isDashboardOpen)
+  useEffect(() => { isDashboardOpenRef.current = isDashboardOpen }, [isDashboardOpen])
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {
@@ -161,10 +174,13 @@ function App() {
           sendToTerminal(store.activePaneId, 'claude\n')
           break
         case 'increase-font':
-          store.updatePreferences({ fontSize: Math.min(24, store.preferences.fontSize + 1) })
+          // While the dashboard is open, Cmd+ zooms IT instead of the terminals.
+          if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s + 0.1))
+          else store.updatePreferences({ fontSize: Math.min(24, store.preferences.fontSize + 1) })
           break
         case 'decrease-font':
-          store.updatePreferences({ fontSize: Math.max(10, store.preferences.fontSize - 1) })
+          if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s - 0.1))
+          else store.updatePreferences({ fontSize: Math.max(10, store.preferences.fontSize - 1) })
           break
         case 'open-settings':
           setIsSettingsOpen(true)
@@ -215,7 +231,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.25.6</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.26.5</span>
         </div>
 
         {/* Center - layout selector + add pane */}
@@ -270,7 +286,7 @@ function App() {
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
 
       {/* Dedicated delegation dashboard */}
-      <DelegationDashboard isOpen={isDashboardOpen} onClose={() => setIsDashboardOpen(false)} />
+      <DelegationDashboard isOpen={isDashboardOpen} onClose={() => setIsDashboardOpen(false)} scale={dashScale} onScaleChange={(n) => setDashScale(clampScale(n))} />
 
     </div>
   )
