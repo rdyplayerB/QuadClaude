@@ -168,25 +168,39 @@ export class PtyManager {
       })
 
       ptyProcess.onData((data) => {
-        // A late event from a PTY that has since been replaced (env re-spawn or
-        // killPty) must not write into the new PTY's stream.
-        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
+        // NEVER let a JS throw escape this callback. node-pty invokes it from a native
+        // ThreadSafeFunction; a synchronous throw here becomes ThrowAsJavaScriptException
+        // → std::terminate → SIGABRT (a hard crash, especially during app teardown when
+        // the window/webContents is mid-destroy). Swallow + log instead of aborting.
+        try {
+          // A late event from a PTY that has since been replaced (env re-spawn or
+          // killPty) must not write into the new PTY's stream.
+          if (this.ptys.get(paneId)?.pty !== ptyProcess) return
 
-        // Track throughput for the performance monitor (byte length, not chars).
-        const len = Buffer.byteLength(data, 'utf8')
-        this.totalBytesOut += len
-        this.perPaneBytesOut.set(paneId, (this.perPaneBytesOut.get(paneId) || 0) + len)
+          // Track throughput for the performance monitor (byte length, not chars).
+          const len = Buffer.byteLength(data, 'utf8')
+          this.totalBytesOut += len
+          this.perPaneBytesOut.set(paneId, (this.perPaneBytesOut.get(paneId) || 0) + len)
 
-        this.onOutput(paneId, data)
+          this.onOutput(paneId, data)
+        } catch (err) {
+          logger.error('pty', `onData handler threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+        }
       })
 
       ptyProcess.onExit(({ exitCode }) => {
-        // If this instance was already superseded (re-spawn / killPty replaced the
-        // map entry), do nothing — otherwise we'd delete the NEW pty and trigger a
-        // spurious renderer auto-respawn over it.
-        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
-        this.ptys.delete(paneId)
-        this.onExit(paneId, exitCode)
+        // Same hard rule as onData: a throw here aborts the process via node-pty's native
+        // callback. Guard the whole body.
+        try {
+          // If this instance was already superseded (re-spawn / killPty replaced the
+          // map entry), do nothing — otherwise we'd delete the NEW pty and trigger a
+          // spurious renderer auto-respawn over it.
+          if (this.ptys.get(paneId)?.pty !== ptyProcess) return
+          this.ptys.delete(paneId)
+          this.onExit(paneId, exitCode)
+        } catch (err) {
+          logger.error('pty', `onExit handler threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+        }
       })
 
       this.ptys.set(paneId, {
@@ -570,13 +584,22 @@ export class PtyManager {
       // QuadClaude pane leaves processes behind. Fire-and-forget; never blocks
       // or throws into the kill path.
       this.detectOrphansAfterKill(paneId, shellPid).catch(() => {})
-      instance.pty.kill()
+      // Drop the map entry FIRST so any late onData/onExit for this pty short-circuits
+      // on the identity check (the callbacks compare against the map) and can't run
+      // into a teardown. Then kill — guarded, because node-pty's kill() can throw
+      // (EIO/ESRCH if the child already exited) and that must not escape the quit path.
       this.ptys.delete(paneId)
+      try {
+        instance.pty.kill()
+      } catch (err) {
+        logger.warn('pty', `kill() threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+      }
     }
   }
 
   killAll(): void {
-    for (const [paneId] of this.ptys) {
+    // Snapshot keys — killPty mutates the map.
+    for (const paneId of [...this.ptys.keys()]) {
       this.killPty(paneId)
     }
   }

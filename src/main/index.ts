@@ -730,6 +730,15 @@ function createWindow() {
     }
   })
 
+  // Any window.open / target=_blank / popup attempt → hand the URL to the system default
+  // browser (a normal tab in the active session) and NEVER spawn a chromeless Electron
+  // popup window. Without this, the terminal's link addon and any preview markup open
+  // their own bare window instead of the user's real browser.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
   // Save window bounds on resize/move
   mainWindow.on('resize', saveWindowBounds)
   mainWindow.on('move', saveWindowBounds)
@@ -1340,10 +1349,13 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+let isHardExiting = false
+app.on('before-quit', (e) => {
+  if (isHardExiting) return
+  isHardExiting = true
   logger.info('app', 'App is quitting')
   stopPerfMonitor()
-  // Save CWDs before killing PTYs (important when Cmd+Q is used)
+  // Save CWDs before killing PTYs (important when Cmd+Q is used) — synchronous.
   if (ptyManager && workspaceManager) {
     const cwds = ptyManager.getAllCwds()
     if (cwds.size > 0) {
@@ -1352,6 +1364,13 @@ app.on('before-quit', () => {
     }
   }
   ptyManager?.killAll()
+  // node-pty's read threads can fire a ThreadSafeFunction callback into a half-finalized
+  // V8 environment during Electron's graceful teardown → SIGABRT in pty.node (the recurring
+  // CrBrowserMain abort-on-quit). Bypass that teardown entirely: cancel the graceful quit,
+  // give the just-killed ptys a tick to release their native handles, then hard-exit so the
+  // OS reaps those threads instead of V8 racing them. State is already saved above.
+  e.preventDefault()
+  setTimeout(() => app.exit(0), 100)
 })
 
 // Catch uncaught exceptions

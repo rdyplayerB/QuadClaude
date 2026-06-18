@@ -521,7 +521,13 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       })
 
       const fitAddon = new FitAddon()
-      const webLinksAddon = new WebLinksAddon()
+      // Open a clicked link in the user's DEFAULT browser as a normal tab in their active
+      // session (via the main process → shell.openExternal). The default WebLinksAddon
+      // calls window.open(), which Electron turns into a chromeless popup window — not what
+      // anyone wants for a localhost preview.
+      const webLinksAddon = new WebLinksAddon((_event, uri) => {
+        void window.electronAPI.openExternal(uri)
+      })
 
       terminal.loadAddon(fitAddon)
       terminal.loadAddon(webLinksAddon)
