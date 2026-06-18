@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore } from '../store/workspace'
 import { launchAgent, resolvePaneProfile, sendToTerminal } from './TerminalPane'
+import { ClaudeAccount } from '../../shared/types'
 
 interface AgentBadgeProps {
   paneId: number
@@ -18,7 +19,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
   const agentProfiles = useWorkspaceStore((s) => s.preferences.agentProfiles)
   const defaultAgentId = useWorkspaceStore((s) => s.preferences.defaultAgentId)
-  const setPaneAgent = useWorkspaceStore((s) => s.setPaneAgent)
+  const updatePane = useWorkspaceStore((s) => s.updatePane)
   const pairPanes = useWorkspaceStore((s) => s.pairPanes)
   const unpairPane = useWorkspaceStore((s) => s.unpairPane)
   const swapPairRoles = useWorkspaceStore((s) => s.swapPairRoles)
@@ -28,6 +29,16 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   const [pairMode, setPairMode] = useState(false)
   const [pairTargets, setPairTargets] = useState<Array<{ id: number; label: string }>>([])
 
+  // Saved Claude accounts (per-pane multi-account). Loaded lazily when the menu opens; the
+  // list only changes via Settings, which the user would have closed before reaching here.
+  const [accounts, setAccounts] = useState<ClaudeAccount[]>([])
+  useEffect(() => {
+    if (!open) return
+    window.electronAPI.claudeAccountsList().then(setAccounts).catch(() => {})
+  }, [open])
+
+  // Bind this pane to a Claude account (or back to the global login) and respawn so the new
+  // account's token takes effect. Only re-launches Claude if Claude was the running agent.
   // Close on click outside
   useEffect(() => {
     if (!open) return
@@ -57,15 +68,19 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
     launchAgent(paneId, paneProfile, pane.workingDirectory)
   }, [pane, paneId, paneProfile])
 
-  const pick = useCallback(
-    (id: string) => {
+  // Launch an agent in this pane, optionally as a specific Claude account. One unified
+  // action: a Claude row carries an accountId (or undefined for the global login); a
+  // non-Claude agent always passes undefined. Sets both the agent and the account
+  // atomically, then respawns so the right token takes effect.
+  const launchAs = useCallback(
+    (profileId: string, accountId: string | undefined) => {
       if (!pane) return
-      setPaneAgent(paneId, id)
-      const profile = (agentProfiles ?? []).find((p) => p.id === id)
+      updatePane(paneId, { agentId: profileId, claudeAccountId: accountId })
+      const profile = (agentProfiles ?? []).find((p) => p.id === profileId)
       if (profile) launchAgent(paneId, profile, pane.workingDirectory)
       setOpen(false)
     },
-    [pane, paneId, agentProfiles, setPaneAgent],
+    [pane, paneId, agentProfiles, updatePane],
   )
 
   const enterPairMode = useCallback(() => {
@@ -150,26 +165,47 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           style={getPosition()}
         >
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
-            Launch agent
+            Launch
           </div>
-          <div className="max-h-[240px] overflow-y-auto">
-            {profiles.map((p) => {
-              const isCurrent = p.id === paneProfile.id
-              return (
+          <div className="max-h-[300px] overflow-y-auto">
+            {profiles.flatMap((p) => {
+              const isClaude = p.builtin === 'claude'
+              // A small row: agent + (for Claude) which account it runs as. Account is shown
+              // as a dimmed identity beside "Claude Code" so the menu reads as one list of
+              // launchable identities — "Claude Code as boshiro.one" — not two parallel lists.
+              const Row = (key: string, accountId: string | undefined, suffix: string | null, current: boolean, disabled: boolean, title: string) => (
                 <button
-                  key={p.id}
-                  onClick={() => pick(p.id)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 transition-colors"
-                  title={p.command}
+                  key={key}
+                  onClick={() => !disabled && launchAs(p.id, accountId)}
+                  disabled={disabled}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 transition-colors disabled:opacity-40"
+                  title={title}
                 >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full shrink-0"
-                    style={{ backgroundColor: isCurrent ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }}
-                  />
-                  <span className="truncate flex-1 text-[--ui-text-primary]">{p.name}</span>
-                  {isCurrent && <span className="text-[9px] text-[--ui-text-muted]">current</span>}
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: current ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }} />
+                  <span className="truncate text-[--ui-text-primary]">{p.name}</span>
+                  {suffix && <span className="truncate text-[--ui-text-dimmed]">· {suffix}</span>}
+                  <span className="flex-1" />
+                  {current && <span className="text-[9px] text-[--ui-text-muted] shrink-0">current</span>}
                 </button>
               )
+              // Non-Claude agent, or Claude with no saved accounts → a single plain row.
+              if (!isClaude || accounts.length === 0) {
+                return [Row(p.id, undefined, null, p.id === paneProfile.id, false, p.command)]
+              }
+              // Claude with accounts → "global login" row + one row per account, all launching Claude.
+              const claudeCurrent = p.id === paneProfile.id
+              const rows = [
+                Row(`${p.id}:global`, undefined, 'global login', claudeCurrent && !pane.claudeAccountId, false, 'Run Claude Code as the globally signed-in account (claude /login)'),
+              ]
+              for (const a of accounts) {
+                rows.push(Row(
+                  `${p.id}:${a.id}`, a.id, a.label,
+                  claudeCurrent && pane.claudeAccountId === a.id,
+                  !a.hasToken,
+                  a.hasToken ? `Run Claude Code as ${a.email || a.label}` : `${a.label} — no token yet (add it in Settings → Accounts)`,
+                ))
+              }
+              return rows
             })}
           </div>
 

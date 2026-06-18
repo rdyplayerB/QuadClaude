@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, ClaudeAccount } from '../shared/types'
 
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -142,6 +142,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.DELEGATION_EXPORT, save) as Promise<{ text: string; path: string | null; canceled: boolean }>,
   clipboardWriteText: (text: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, text) as Promise<boolean>,
+
+  // Per-pane Claude accounts (token is write-only from the renderer; never returned)
+  claudeAccountsList: () =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST) as Promise<ClaudeAccount[]>,
+  claudeAccountsSave: (input: { id?: string; label: string; email?: string; token?: string }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, input) as Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>,
+  claudeAccountsDelete: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, id) as Promise<ClaudeAccount[]>,
   onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
     const handler = (_: unknown, event: DelegationEvent) => callback(event)
     ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)
@@ -207,6 +215,9 @@ declare global {
       delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') => Promise<boolean>
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
       clipboardWriteText: (text: string) => Promise<boolean>
+      claudeAccountsList: () => Promise<ClaudeAccount[]>
+      claudeAccountsSave: (input: { id?: string; label: string; email?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
+      claudeAccountsDelete: (id: string) => Promise<ClaudeAccount[]>
       onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void

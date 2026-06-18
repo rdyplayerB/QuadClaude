@@ -54,6 +54,19 @@ export interface AgentProfile {
 
 export const CLAUDE_PROFILE_ID = 'claude'
 
+// A saved Claude subscription account the user can bind a pane to. Lets two panes run two
+// DIFFERENT Max subscriptions side-by-side by injecting each account's long-lived
+// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) into that pane's env at spawn — which
+// takes precedence over the shared macOS Keychain login. The TOKEN ITSELF is never stored
+// here (or in workspace.json); only this non-secret metadata is. The token lives encrypted
+// via Electron safeStorage (OS-Keychain-backed) in the main process — see accountStore.ts.
+export interface ClaudeAccount {
+  id: string
+  label: string // user-facing name, e.g. "Work" / "Personal"
+  email?: string // optional, for display/disambiguation only
+  hasToken?: boolean // whether an encrypted token is on file (set by main, never persisted with a value)
+}
+
 // Ring hues for paired panes. Each active pair claims the first free color, so
 // multiple pairs across the grid stay visually distinct. Sized for up to six
 // pairs (MAX_PANES / 2). Hex so the renderer can apply them directly
@@ -81,6 +94,7 @@ export interface PaneConfig {
   gitStatus?: GitStatus // Git status for pane header
   servers?: ServerInfo[] // Transient: detected listening servers (not persisted)
   agentId?: string // Which agent profile THIS pane runs; falls back to defaultAgentId
+  claudeAccountId?: string // Which saved Claude account THIS pane authenticates as; undefined = the global /login account
   // Pane pairing (orchestrator ⇄ worker). Both panes in a pair share pairId and
   // pairColor; pairRole distinguishes who drives vs who grinds. Persisted.
   pairId?: string
@@ -290,6 +304,10 @@ export const IPC_CHANNELS = {
   DELEGATION_EVENT: 'delegation:event',
   // Write text to the system clipboard from main (reliable regardless of window focus)
   CLIPBOARD_WRITE_TEXT: 'clipboard:write-text',
+  // Per-pane Claude accounts: manage the saved-account list + their encrypted tokens.
+  CLAUDE_ACCOUNTS_LIST: 'claude-accounts:list',
+  CLAUDE_ACCOUNTS_SAVE: 'claude-accounts:save', // upsert {id?,label,email,token?}
+  CLAUDE_ACCOUNTS_DELETE: 'claude-accounts:delete',
 } as const
 
 // --- Delegation telemetry ----------------------------------------------------

@@ -260,6 +260,10 @@ export function sendToTerminal(paneId: number, text: string) {
 // pane was spawned with. null = a plain shell (no injected env). Used to decide
 // when an agent launch must re-spawn the PTY to inject/clear env.
 const paneEnvProfile = new Map<number, string | null>()
+// Transient: the Claude account id the current PTY for each pane was spawned with
+// (null = the global /login account). Changing it must re-spawn so the new account's
+// token is injected. Tracked separately from the agent profile since they're orthogonal.
+const paneAccount = new Map<number, string | null>()
 // Panes with a launch in flight — guards against double-click / double-fire
 // sending the agent command twice (the env re-spawn path is async).
 const launchingPanes = new Set<number>()
@@ -313,16 +317,25 @@ export async function launchAgent(
   setTimeout(() => launchingPanes.delete(paneId), 600)
   const hasEnv = !!profile.env && Object.keys(profile.env).length > 0
   const currentEnvProfile = paneEnvProfile.get(paneId) ?? null
-  // Re-spawn when a directory is forced, this profile needs env, OR the pane's
-  // PTY still carries env from a DIFFERENT profile (don't leak prior secrets).
+  // The pane's bound Claude account (if any). Passed to main as a non-secret env HINT;
+  // main decrypts the matching token and injects CLAUDE_CODE_OAUTH_TOKEN (the token never
+  // reaches the renderer). A different account than the PTY was spawned with forces a
+  // re-spawn so the right token takes effect.
+  const accountId = useWorkspaceStore.getState().panes.find((p) => p.id === paneId)?.claudeAccountId ?? null
+  const accountChanged = (paneAccount.get(paneId) ?? null) !== accountId
+  // Re-spawn when a directory is forced, the account changed, this profile needs env, OR
+  // the pane's PTY still carries env from a DIFFERENT profile (don't leak prior secrets).
   const needsRespawn =
-    !!forceCwd || (hasEnv ? currentEnvProfile !== profile.id : currentEnvProfile !== null)
+    !!forceCwd || accountChanged || (hasEnv ? currentEnvProfile !== profile.id : currentEnvProfile !== null)
   if (needsRespawn) {
     // Use the forced dir, else the live tracked cwd (user may have cd'd).
     const cwd = forceCwd || (await window.electronAPI.getCwd(paneId)) || fallbackCwd
+    const spawnEnv: Record<string, string> | undefined =
+      accountId ? { ...(hasEnv ? profile.env : {}), QC_ACCOUNT_ID: accountId } : (hasEnv ? profile.env : undefined)
     resetTerminal(paneId) // fresh PTY → fully reset the terminal (clears any stuck modes)
-    await window.electronAPI.createPty(paneId, cwd, hasEnv ? profile.env : undefined)
+    await window.electronAPI.createPty(paneId, cwd, spawnEnv)
     paneEnvProfile.set(paneId, hasEnv ? profile.id : null)
+    paneAccount.set(paneId, accountId)
     refitPane(paneId) // size the new PTY to the full pane before the agent starts
   }
   let command = profile.command

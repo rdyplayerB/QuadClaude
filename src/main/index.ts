@@ -8,6 +8,7 @@ import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { RouterManager } from './router'
 import { delegationLog } from './delegationLog'
+import { accountStore } from './accountStore'
 import { logger } from './logger'
 import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv } from '../shared/types'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
@@ -251,6 +252,7 @@ if [ -f "$config_file" ]; then
   show_profile=$SHOW_PROFILE
   profile_name="$PROFILE_NAME"
   pace_marker_step_colors=$PACE_MARKER_STEP_COLORS
+  show_account=\${SHOW_ACCOUNT:-1}
 else
   show_model=1
   show_dir=1
@@ -270,6 +272,7 @@ else
   show_profile=0
   profile_name=""
   pace_marker_step_colors=1
+  show_account=1
 fi
 
 current_dir_path=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | sed 's/"current_dir":"//;s/"$//')
@@ -509,6 +512,31 @@ if [ "$show_usage" = "1" ]; then
   fi
 fi
 
+# --- Account (which Claude account is signed in — for juggling multiple accounts) ---
+account_text=""
+if [ "$show_account" = "1" ]; then
+  acct_email=""
+  # If THIS pane is bound to a specific Claude account (per-pane token injected by the app),
+  # QC_ACCOUNT_LABEL is set in the pane's env — trust it over the global file, because the
+  # pane authenticates as that account regardless of who the global /login is.
+  if [ -n "$QC_ACCOUNT_LABEL" ]; then
+    acct_short="$QC_ACCOUNT_LABEL"
+  else
+    # Otherwise read the LIVE global account so a /login switch shows on the next repaint;
+    # the app-written cache is only a fallback if ~/.claude.json can't be read.
+    if [ -f "$HOME/.claude.json" ]; then
+      acct_email=$(grep -oE '"emailAddress"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.claude.json" | head -1 | sed -E 's/^.*:[[:space:]]*"//;s/"$//')
+    fi
+    if [ -z "$acct_email" ] && [ -f "$HOME/.claude/.statusline-account" ]; then
+      acct_email=$(head -1 "$HOME/.claude/.statusline-account" 2>/dev/null)
+    fi
+    acct_short=\${acct_email%%@*}
+  fi
+  if [ -n "$acct_short" ]; then
+    account_text="\${MAGENTA}@\${acct_short}\${RESET}"
+  fi
+fi
+
 output=""
 separator="\${GRAY} │ \${RESET}"
 
@@ -520,6 +548,10 @@ fi
 if [ -n "$model_text" ]; then
   [ -n "$output" ] && output="\${output}\${separator}"
   output="\${output}\${model_text}"
+fi
+if [ -n "$account_text" ]; then
+  [ -n "$output" ] && output="\${output}\${separator}"
+  output="\${output}\${account_text}"
 fi
 if [ -n "$profile_text" ]; then
   [ -n "$output" ] && output="\${output}\${separator}"
@@ -556,6 +588,7 @@ COLOR_MODE=colored
 SINGLE_COLOR=#00BFFF
 SHOW_PROFILE=0
 PROFILE_NAME=""
+SHOW_ACCOUNT=1
 `
 
   try {
@@ -1013,7 +1046,27 @@ function setupIPC() {
       const delegationEnv = delegationOn
         ? { QC_DELEGATION: '1', QC_DELEGATION_MODEL: delegationModelRoute() }
         : { QC_DELEGATION: '' }
-      const mergedEnv = { ...(env || {}), ...iso, QC_PANE: String(paneId), ...delegationEnv }
+      // Per-pane Claude account: the renderer passes the bound account id as a non-secret
+      // env HINT (QC_ACCOUNT_ID). We decrypt that account's long-lived subscription token
+      // and inject it as CLAUDE_CODE_OAUTH_TOKEN so `claude` authenticates as that account,
+      // overriding the shared Keychain login. We also blank ANTHROPIC_API_KEY for this pane
+      // — it outranks the OAuth token in precedence, so a stray global API key would
+      // silently switch the pane to metered billing. QC_ACCOUNT_LABEL feeds the statusline.
+      // The hint itself is stripped so it never lingers in the pane env.
+      let accountEnv: Record<string, string> = {}
+      const accountId = env?.QC_ACCOUNT_ID
+      const baseEnv = { ...(env || {}) }
+      delete baseEnv.QC_ACCOUNT_ID
+      if (accountId) {
+        const token = accountStore.getToken(accountId)
+        const label = accountStore.getLabel(accountId)
+        if (token) {
+          accountEnv = { CLAUDE_CODE_OAUTH_TOKEN: token, ANTHROPIC_API_KEY: '', QC_ACCOUNT_LABEL: label || '' }
+        } else {
+          logger.warn('accounts', `Pane ${paneId} bound to account ${accountId} but no token available — using global login`)
+        }
+      }
+      const mergedEnv = { ...baseEnv, ...iso, QC_PANE: String(paneId), ...delegationEnv, ...accountEnv }
       const result = await ptyManager?.createPty(paneId, cwd, mergedEnv)
       if (result) {
         logger.info('pty', `PTY created successfully for pane ${paneId}`)
@@ -1155,6 +1208,18 @@ function setupIPC() {
     clipboard.writeText(text)
     return true
   })
+
+  // Per-pane Claude accounts. The renderer only ever receives metadata (label/email/hasToken)
+  // — the token is write-only from the renderer's side and never returned.
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST, async () => accountStore.list())
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, async (_, input: { id?: string; label: string; email?: string; token?: string }) => {
+    try {
+      return { ok: true, accounts: accountStore.save(input) }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error), accounts: accountStore.list() }
+    }
+  })
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, async (_, id: string) => accountStore.delete(id))
 
   // Build the shareable report; if `save` is requested, write it via a save dialog.
   // Always returns the report text so the renderer can also copy it to the clipboard.

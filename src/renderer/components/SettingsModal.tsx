@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, KeyboardEvent, memo, ReactNode } from 'rea
 import { useWorkspaceStore } from '../store/workspace'
 import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode, PortIsolation, LoopbackStatus } from '../../shared/types'
 import { AgentsSettings } from './AgentsSettings'
+import { ClaudeAccountsSettings } from './ClaudeAccountsSettings'
 import { ModelRouterSettings } from './ModelRouterSettings'
 
 interface SettingsModalProps {
@@ -10,7 +11,7 @@ interface SettingsModalProps {
 }
 
 type HotkeyField = keyof HotkeyBindings
-type TabId = 'general' | 'models' | 'agents' | 'background' | 'shortcuts' | 'about'
+type TabId = 'general' | 'models' | 'agents' | 'accounts' | 'background' | 'shortcuts' | 'about'
 
 // One toggle, defined once so every switch in Settings looks and behaves identically.
 function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
@@ -57,6 +58,11 @@ const TAB_ICONS: Record<TabId, ReactNode> = {
       <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><path d="M4 6l2 2-2 2M8 10h4" />
     </svg>
   ),
+  accounts: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="5.5" r="2.6" /><path d="M3 13.5c0-2.5 2.2-4 5-4s5 1.5 5 4" />
+    </svg>
+  ),
   background: (
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
       <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" /><circle cx="5.5" cy="6" r="1.2" /><path d="M2 11l3.5-3 3 2.5L11 7l3 3" />
@@ -78,6 +84,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'models', label: 'Models' },
   { id: 'agents', label: 'Agents' },
+  { id: 'accounts', label: 'Accounts' },
   { id: 'background', label: 'Background' },
   { id: 'shortcuts', label: 'Shortcuts' },
   { id: 'about', label: 'About' },
@@ -221,7 +228,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     >
       <div
         ref={modalRef}
-        className="glass-modal glass-border rounded-xl shadow-2xl w-full max-w-3xl mx-4 h-[34rem] max-h-[88vh] flex flex-col backdrop-blur-xl overflow-hidden"
+        className="glass-modal glass-border rounded-xl shadow-2xl w-[88vw] max-w-[1100px] mx-4 h-[86vh] max-h-[860px] flex flex-col backdrop-blur-xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -378,6 +385,8 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
             {tab === 'models' && <ModelRouterSettings />}
 
             {tab === 'agents' && <AgentsSettings />}
+
+            {tab === 'accounts' && <ClaudeAccountsSettings />}
 
             {tab === 'background' && (
               <div className="space-y-4">
