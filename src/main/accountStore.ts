@@ -20,7 +20,27 @@ interface StoredAccount {
   id: string
   label: string
   email?: string
+  model?: string // ANTHROPIC_MODEL to pin for this account's panes; 'default' = don't pin
   tokenCipher?: string // base64 of safeStorage-encrypted token; absent if no token set
+}
+
+// The identity fingerprint a bound pane's status line writes (from Claude Code's own
+// per-session usage). Read live — never polled from the API, so no rate limits.
+function readFingerprint(id: string): ClaudeAccount['verifiedUsage'] | undefined {
+  try {
+    const f = path.join(os.homedir(), '.quadclaude', `acct-usage-${id}.json`)
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'))
+    if (typeof j.weeklyResetEpoch === 'number') {
+      return { weeklyPct: j.weeklyPct ?? 0, weeklyResetEpoch: j.weeklyResetEpoch, fiveHourPct: j.fiveHourPct ?? 0, at: j.at ?? 0 }
+    }
+  } catch {
+    /* not captured yet */
+  }
+  return undefined
+}
+
+function fingerprintPath(id: string): string {
+  return path.join(os.homedir(), '.quadclaude', `acct-usage-${id}.json`)
 }
 
 function storePath(): string {
@@ -64,22 +84,54 @@ function encryptToken(token: string): string | undefined {
 class AccountStore {
   // Renderer-safe view: metadata + whether a token is on file. NEVER the token.
   list(): ClaudeAccount[] {
-    return readStore().map((a) => ({ id: a.id, label: a.label, email: a.email, hasToken: !!a.tokenCipher }))
+    return readStore().map((a) => ({ id: a.id, label: a.label, email: a.email, model: a.model, hasToken: !!a.tokenCipher, verifiedUsage: readFingerprint(a.id) }))
+  }
+
+  // Re-read the identity fingerprint (captured by a bound pane's status line). No API call.
+  // 'ok' = a fingerprint exists; 'needs_pane' = bind a pane to this account so its status
+  // line can capture it.
+  verify(id: string): { accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' } {
+    return { accounts: this.list(), status: readFingerprint(id) ? 'ok' : 'needs_pane' }
   }
 
   // Upsert an account. A token is only (re)written when a non-empty `token` is supplied —
   // editing a label leaves the existing token untouched.
-  save(input: { id?: string; label: string; email?: string; token?: string }): ClaudeAccount[] {
+  save(input: { id?: string; label: string; email?: string; model?: string; token?: string }): ClaudeAccount[] {
     const accounts = readStore()
     const id = input.id || newId()
     const existing = accounts.find((a) => a.id === id)
     const tokenCipher = input.token ? encryptToken(input.token) : existing?.tokenCipher
-    const next: StoredAccount = { id, label: input.label.trim() || 'Account', email: input.email?.trim() || undefined, tokenCipher }
+    const next: StoredAccount = {
+      id,
+      label: input.label.trim() || 'Account',
+      email: input.email?.trim() || undefined,
+      model: input.model ?? existing?.model,
+      tokenCipher,
+    }
     if (existing) Object.assign(existing, next)
     else accounts.push(next)
     writeStore(accounts)
+    // A new token may be a different account — drop the stale identity fingerprint so the UI
+    // doesn't show the old account until a bound pane re-captures it.
+    if (input.token) { try { fs.rmSync(fingerprintPath(id)) } catch { /* none */ } }
     logger.info('accounts', existing ? 'Updated Claude account' : 'Added Claude account', `${next.label}${input.token ? ' (token set)' : ''}`)
     return this.list()
+  }
+
+  // Every account that has a token, with its decrypted token — MAIN-PROCESS ONLY, for the
+  // usage poller to fetch per-account usage. Never exposed over IPC.
+  allWithTokens(): Array<{ id: string; label: string; token: string }> {
+    const out: Array<{ id: string; label: string; token: string }> = []
+    for (const a of readStore()) {
+      if (!a.tokenCipher) continue
+      const token = this.getToken(a.id)
+      if (token) out.push({ id: a.id, label: a.label, token })
+    }
+    return out
+  }
+
+  getModel(id: string): string | null {
+    return readStore().find((a) => a.id === id)?.model ?? null
   }
 
   delete(id: string): ClaudeAccount[] {

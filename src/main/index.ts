@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog, clipboa
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
+import os from 'os'
 import { execFile } from 'child_process'
 import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
@@ -10,7 +11,7 @@ import { RouterManager } from './router'
 import { delegationLog } from './delegationLog'
 import { accountStore } from './accountStore'
 import { logger } from './logger'
-import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv } from '../shared/types'
+import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv, DEFAULT_ACCOUNT_MODEL } from '../shared/types'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
 import {
   startPerfMonitor,
@@ -387,35 +388,58 @@ fi
 
 usage_text=""
 if [ "$show_usage" = "1" ]; then
-  cache_file="$HOME/.claude/.statusline-usage-cache"
+  utilization=""; reset_epoch=""; weekly_util=""; weekly_reset_epoch=""; weekly_reset=""; resets_at=""
+  # PREFER Claude Code's own per-session rate_limits, passed in THIS statusline's JSON input.
+  # It reflects the pane's actual account (each pane's claude reports its own usage), is
+  # always current, and needs NO API call — so no rate limits and it's per-account by
+  # construction. The app-written cache is only a fallback for older Claude Code.
+  rl_fh=$(printf '%s' "$input" | tr -d '\\n' | grep -oE '"five_hour"[[:space:]]*:[[:space:]]*\\{[^}]*\\}')
+  if [ -n "$rl_fh" ]; then
+    fh_pct=$(printf '%s' "$rl_fh" | grep -oE '"used_percentage"[[:space:]]*:[[:space:]]*[0-9.]+' | grep -oE '[0-9.]+' | head -1)
+    utilization=\${fh_pct%%.*}
+    reset_epoch=$(printf '%s' "$rl_fh" | grep -oE '"resets_at"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+  fi
+  rl_sd=$(printf '%s' "$input" | tr -d '\\n' | grep -oE '"seven_day"[[:space:]]*:[[:space:]]*\\{[^}]*\\}')
+  if [ -n "$rl_sd" ]; then
+    sd_pct=$(printf '%s' "$rl_sd" | grep -oE '"used_percentage"[[:space:]]*:[[:space:]]*[0-9.]+' | grep -oE '[0-9.]+' | head -1)
+    weekly_util=\${sd_pct%%.*}
+    weekly_reset_epoch=$(printf '%s' "$rl_sd" | grep -oE '"resets_at"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1)
+  fi
+
   swift_result=""
-  if [ -f "$cache_file" ]; then
-    cache_ts=$(grep "^TIMESTAMP=" "$cache_file" 2>/dev/null | cut -d= -f2)
-    now_ts=$(date +%s)
-    if [ -n "$cache_ts" ]; then
-      cache_age=$((now_ts - cache_ts))
-      if [ "$cache_age" -lt 600 ]; then
-        cache_util=$(grep "^UTILIZATION=" "$cache_file" | cut -d= -f2)
-        cache_reset=$(grep "^RESETS_AT=" "$cache_file" | cut -d= -f2)
-        if [ -n "$cache_util" ]; then
-          swift_result="\${cache_util}|\${cache_reset}"
-        fi
+  if [ -n "$utilization" ]; then
+    swift_result="have" # got it from the JSON; reset_epoch/weekly already set
+  else
+    # FALLBACK: app-written cache (per-account QC_USAGE_CACHE, else global).
+    cache_file="\${QC_USAGE_CACHE:-$HOME/.claude/.statusline-usage-cache}"
+    if [ -f "$cache_file" ]; then
+      cache_ts=$(grep "^TIMESTAMP=" "$cache_file" 2>/dev/null | cut -d= -f2)
+      now_ts=$(date +%s)
+      if [ -n "$cache_ts" ] && [ "$((now_ts - cache_ts))" -lt 600 ]; then
+        utilization=$(grep "^UTILIZATION=" "$cache_file" | cut -d= -f2)
+        resets_at=$(grep "^RESETS_AT=" "$cache_file" | cut -d= -f2)
+        weekly_util=$(grep "^WEEKLY=" "$cache_file" | cut -d= -f2)
+        weekly_reset=$(grep "^WEEKLY_RESETS_AT=" "$cache_file" | cut -d= -f2)
+        [ -n "$utilization" ] && swift_result="have"
       fi
     fi
   fi
 
-  if [ -z "$swift_result" ] && [ -x "$HOME/.claude/fetch-claude-usage.swift" ]; then
-    swift_result=$(swift "$HOME/.claude/fetch-claude-usage.swift" 2>/dev/null)
-  fi
-
   if [ -n "$swift_result" ]; then
-    utilization=$(echo "$swift_result" | cut -d'|' -f1)
-    resets_at=$(echo "$swift_result" | cut -d'|' -f2)
-
-    reset_epoch=""
-    if [ -n "$resets_at" ] && [ "$resets_at" != "null" ]; then
+    # JSON path already set reset_epoch; cache path needs ISO → epoch.
+    if [ -z "$reset_epoch" ] && [ -n "$resets_at" ] && [ "$resets_at" != "null" ]; then
       iso_time=$(echo "$resets_at" | sed 's/\\.[0-9]*Z$//')
       reset_epoch=$(date -ju -f "%Y-%m-%dT%H:%M:%S" "$iso_time" "+%s" 2>/dev/null)
+    fi
+
+    # Per-account identity fingerprint: when this pane is bound to a Claude account, record
+    # the account's REAL usage (weekly reset is its unique id) so the app can verify which
+    # account a token actually reaches — WITHOUT polling the rate-limited usage API itself.
+    if [ -n "$QC_ACCOUNT_ID" ] && [ -n "$utilization" ] && [ "$utilization" != "ERROR" ]; then
+      mkdir -p "$HOME/.quadclaude" 2>/dev/null
+      printf '{"fiveHourPct":%s,"weeklyPct":%s,"weeklyResetEpoch":%s,"at":%s}\n' \
+        "\${utilization:-0}" "\${weekly_util:-0}" "\${weekly_reset_epoch:-0}" "$(date +%s)" \
+        > "$HOME/.quadclaude/acct-usage-$QC_ACCOUNT_ID.json" 2>/dev/null
     fi
 
     if [ -n "$utilization" ] && [ "$utilization" != "ERROR" ]; then
@@ -500,6 +524,28 @@ if [ "$show_usage" = "1" ]; then
       else
         usage_text="\${usage_color}\${utilization}%\${progress_bar}\${reset_time_display}\${RESET}"
       fi
+
+      # Weekly (total) window — appended after the 5-hour session so the bar shows both
+      # "session remaining" and "total remaining" at a glance, with a day/hour countdown.
+      if [ -n "$weekly_util" ]; then
+        wk_disp=""
+        wk_epoch="$weekly_reset_epoch"
+        if [ -z "$wk_epoch" ] && [ -n "$weekly_reset" ] && [ "$weekly_reset" != "null" ]; then
+          wk_iso=$(echo "$weekly_reset" | sed 's/\\.[0-9]*Z$//')
+          wk_epoch=$(date -ju -f "%Y-%m-%dT%H:%M:%S" "$wk_iso" "+%s" 2>/dev/null)
+        fi
+        if [ -n "$wk_epoch" ]; then
+          wk_rem=$((wk_epoch - $(date +%s)))
+          if [ "$wk_rem" -gt 0 ]; then
+            wk_days=$((wk_rem / 86400))
+            wk_hours=$(((wk_rem % 86400) / 3600))
+            if [ "$wk_days" -gt 0 ]; then wk_disp=" \${wk_days}d \${wk_hours}h left"
+            else wk_disp=" \${wk_hours}h left"
+            fi
+          fi
+        fi
+        usage_text="\${usage_text}\${GRAY} · \${RESET}\${CYAN}Wk: \${weekly_util}%\${wk_disp}\${RESET}"
+      fi
     else
       if [ "$show_usage_label" = "1" ]; then usage_text="\${YELLOW}Usage: ~\${RESET}"
       else usage_text="\${YELLOW}~\${RESET}"
@@ -537,36 +583,35 @@ if [ "$show_account" = "1" ]; then
   fi
 fi
 
-output=""
 separator="\${GRAY} │ \${RESET}"
 
-[ -n "$dir_text" ] && output="\${dir_text}"
-if [ -n "$branch_text" ]; then
+# Identity row = everything except usage, in order.
+output=""
+for seg in "$dir_text" "$branch_text" "$model_text" "$account_text" "$profile_text" "$context_text"; do
+  [ -n "$seg" ] || continue
   [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${branch_text}"
-fi
-if [ -n "$model_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${model_text}"
-fi
-if [ -n "$account_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${account_text}"
-fi
-if [ -n "$profile_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${profile_text}"
-fi
-if [ -n "$context_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${context_text}"
-fi
-if [ -n "$usage_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${usage_text}"
+  output="\${output}\${seg}"
+done
+id_line="$output"
+if [ -n "$usage_text" ]; then full_line="\${id_line}\${separator}\${usage_text}"; else full_line="$id_line"; fi
+
+# Adaptive layout: keep it to ONE row when the whole thing fits the pane width (COLUMNS, set
+# by Claude Code). If it would overflow — common in narrow/split panes, where the usage+weekly
+# text alone runs ~100 chars — drop usage to its OWN second row so it's never clipped. Width
+# is measured on the color-stripped text.
+fits=1
+if [ -n "$COLUMNS" ] && [ "$COLUMNS" -gt 12 ] && [ -n "$usage_text" ]; then
+  esc="\${RESET%%[*}"
+  vis=$(printf '%s' "$full_line" | sed "s/\${esc}\\[[0-9;]*m//g")
+  [ "\${#vis}" -gt "$COLUMNS" ] && fits=0
 fi
 
-printf "%s\\n" "$output"
+if [ "$fits" = "1" ]; then
+  printf "%s\\n" "$full_line"
+else
+  printf "%s\\n" "$id_line"
+  printf "%s\\n" "$usage_text"
+fi
 `
 
   // Default config for the statusline display
@@ -902,6 +947,27 @@ function createApplicationMenu() {
           accelerator: 'CmdOrCtrl+3',
           click: () => sendMenuAction('layout-focus-right')
         },
+        {
+          label: 'Duo Layout',
+          accelerator: 'CmdOrCtrl+4',
+          click: () => sendMenuAction('layout-duo')
+        },
+        {
+          label: 'Solo Layout',
+          accelerator: 'CmdOrCtrl+5',
+          click: () => sendMenuAction('layout-solo')
+        },
+        { type: 'separator' },
+        {
+          label: 'Toggle PiP Strip',
+          accelerator: 'CmdOrCtrl+B',
+          click: () => sendMenuAction('toggle-pip')
+        },
+        {
+          label: 'Cycle Pane Into View',
+          accelerator: 'Ctrl+Tab',
+          click: () => sendMenuAction('cycle-pane')
+        },
         { type: 'separator' },
         {
           label: 'Increase Font Size',
@@ -988,6 +1054,11 @@ function createApplicationMenu() {
             addMarker('manual-marker')
           }
         },
+        {
+          label: 'Dump Pane Diagnostics',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => sendMenuAction('dump-diagnostics')
+        },
         { type: 'separator' },
         {
           label: 'Reveal Performance Logs',
@@ -1054,14 +1125,33 @@ function setupIPC() {
       // silently switch the pane to metered billing. QC_ACCOUNT_LABEL feeds the statusline.
       // The hint itself is stripped so it never lingers in the pane env.
       let accountEnv: Record<string, string> = {}
-      const accountId = env?.QC_ACCOUNT_ID
+      // Prefer the env HINT from launchAgent (timing-safe right after picking an account,
+      // before the debounced workspace save lands). On a COLD pane spawn (e.g. app restart)
+      // there's no hint, so fall back to the pane's PERSISTED binding — the workspace is
+      // already loaded then, so it's safe. This is what makes the binding survive a restart
+      // instead of silently falling back to the global /login.
+      const accountId = env?.QC_ACCOUNT_ID || workspaceManager?.load().panes.find((p) => p.id === paneId)?.claudeAccountId
       const baseEnv = { ...(env || {}) }
       delete baseEnv.QC_ACCOUNT_ID
       if (accountId) {
         const token = accountStore.getToken(accountId)
         const label = accountStore.getLabel(accountId)
         if (token) {
-          accountEnv = { CLAUDE_CODE_OAUTH_TOKEN: token, ANTHROPIC_API_KEY: '', QC_ACCOUNT_LABEL: label || '' }
+          accountEnv = {
+            CLAUDE_CODE_OAUTH_TOKEN: token,
+            ANTHROPIC_API_KEY: '',
+            QC_ACCOUNT_LABEL: label || '',
+            // Keep the account id in the pane's env so the status line can stamp this
+            // account's identity fingerprint (acct-usage-<id>.json) as it renders.
+            QC_ACCOUNT_ID: accountId,
+            // Point the statusline at THIS account's usage cache (per-account session +
+            // weekly numbers) instead of the global login's.
+            QC_USAGE_CACHE: path.join(app.getPath('home'), '.claude', `.statusline-usage-${accountId}`),
+          }
+          // Pin the model for this account (a fresh token session otherwise starts on
+          // Sonnet). Default to Opus 4.8 1M; the sentinel 'default' opts out of pinning.
+          const model = accountStore.getModel(accountId) ?? DEFAULT_ACCOUNT_MODEL
+          if (model && model !== 'default') accountEnv.ANTHROPIC_MODEL = model
         } else {
           logger.warn('accounts', `Pane ${paneId} bound to account ${accountId} but no token available — using global login`)
         }
@@ -1212,14 +1302,22 @@ function setupIPC() {
   // Per-pane Claude accounts. The renderer only ever receives metadata (label/email/hasToken)
   // — the token is write-only from the renderer's side and never returned.
   ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST, async () => accountStore.list())
-  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, async (_, input: { id?: string; label: string; email?: string; token?: string }) => {
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, async (_, input: { id?: string; label: string; email?: string; model?: string; token?: string }) => {
     try {
-      return { ok: true, accounts: accountStore.save(input) }
+      const accounts = accountStore.save(input)
+      // When a token was provided, resolve which account it REALLY is so the UI can flag a
+      // wrong/swapped token immediately. Find the (possibly new) record by matching input.
+      if (input.token) {
+        const saved = accounts.find((a) => a.id === input.id) || accounts.find((a) => a.label === input.label.trim())
+        if (saved) { const v = await accountStore.verify(saved.id); return { ok: true, accounts: v.accounts } }
+      }
+      return { ok: true, accounts }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), accounts: accountStore.list() }
     }
   })
   ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, async (_, id: string) => accountStore.delete(id))
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_VERIFY, async (_, id: string) => accountStore.verify(id))
 
   // Build the shareable report; if `save` is requested, write it via a save dialog.
   // Always returns the report text so the renderer can also copy it to the clipboard.
@@ -1302,6 +1400,61 @@ function setupIPC() {
       return true
     } catch (error) {
       logger.error('app', 'Failed to open external URL', error instanceof Error ? error.message : String(error))
+      return false
+    }
+  })
+
+  // Diagnostics bridge: let the renderer write structured entries into the same
+  // app.log the rest of the app uses (and the Error Log viewer reads). Used for
+  // pane-init lifecycle tracking + the blank-pane watchdog. Fire-and-forget
+  // (ipcMain.on, not handle) so the renderer never blocks on disk I/O. Inputs
+  // are length-capped since they cross the process boundary from the UI.
+  ipcMain.on(IPC_CHANNELS.APP_LOG, (_, level: string, category: string, message: string, details?: string) => {
+    const cat = typeof category === 'string' ? category.slice(0, 64) : 'renderer'
+    const msg = typeof message === 'string' ? message.slice(0, 512) : String(message)
+    const det = typeof details === 'string' ? details.slice(0, 2048) : undefined
+    if (level === 'error') logger.error(cat, msg, det)
+    else if (level === 'warn') logger.warn(cat, msg, det)
+    else logger.info(cat, msg, det)
+  })
+
+  // Open a markdown file referenced in a pane's output in TextEdit (macOS) / default
+  // editor elsewhere. The renderer passes the raw text it matched (e.g. "EO14411/SEO-RUBRIC.md");
+  // we resolve it against that pane's live cwd and refuse anything that isn't an existing .md file.
+  ipcMain.handle(IPC_CHANNELS.APP_OPEN_IN_EDITOR, async (_, paneId: number, rawPath: string) => {
+    if (typeof rawPath !== 'string' || !/\.(md|markdown)$/i.test(rawPath.trim())) return false
+    try {
+      let candidate = rawPath.trim()
+      // Expand a leading ~ to the home directory.
+      if (candidate === '~' || candidate.startsWith('~/')) {
+        candidate = path.join(os.homedir(), candidate.slice(1))
+      }
+      // Resolve relative paths against the pane's live cwd (the user may have cd'd).
+      if (!path.isAbsolute(candidate)) {
+        const cwd = ptyManager?.getCwd(paneId)
+        if (!cwd) return false
+        candidate = path.resolve(cwd, candidate)
+      }
+      // Must be an existing regular file ending in .md/.markdown — no dirs, no other types.
+      let stat: fs.Stats
+      try {
+        stat = fs.statSync(candidate)
+      } catch {
+        return false
+      }
+      if (!stat.isFile() || !/\.(md|markdown)$/i.test(candidate)) return false
+
+      if (process.platform === 'darwin') {
+        await new Promise<void>((resolve, reject) => {
+          execFile('/usr/bin/open', ['-a', 'TextEdit', candidate], (err) => (err ? reject(err) : resolve()))
+        })
+      } else {
+        const errMsg = await shell.openPath(candidate)
+        if (errMsg) throw new Error(errMsg)
+      }
+      return true
+    } catch (error) {
+      logger.error('app', 'Failed to open file in editor', error instanceof Error ? error.message : String(error))
       return false
     }
   })

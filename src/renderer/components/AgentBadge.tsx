@@ -113,10 +113,14 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
     setPairMode(false)
   }, [])
 
+  const MENU_W = 230
   const getPosition = () => {
     if (!buttonRef.current) return { top: 0, left: 0 }
     const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 200 }
+    // Right-align under the badge, but clamp into the viewport so a pane near either edge
+    // (common with 4–5 panes) never pushes the menu off-screen.
+    const left = Math.min(Math.max(8, rect.right - MENU_W), window.innerWidth - MENU_W - 8)
+    return { top: rect.bottom + 4, left }
   }
 
   if (!pane) return null
@@ -142,7 +146,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           className={`w-1.5 h-1.5 rounded-full shrink-0 ${claudeRunning ? 'animate-pulse' : ''}`}
           style={{ backgroundColor: claudeRunning ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }}
         />
-        <span className="text-[10px] leading-none max-w-[110px] truncate">
+        <span className="pane-ctl-label text-[10px] leading-none max-w-[110px] truncate">
           {claudeRunning ? 'Running' : paneProfile.name}
         </span>
       </button>
@@ -161,7 +165,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
       {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
+          className="fixed z-50 w-[230px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
           style={getPosition()}
         >
           <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
@@ -182,10 +186,8 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   title={title}
                 >
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: current ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }} />
-                  <span className="truncate text-[--ui-text-primary]">{p.name}</span>
+                  <span className="shrink-0 text-[--ui-text-primary]">{p.name}</span>
                   {suffix && <span className="truncate text-[--ui-text-dimmed]">· {suffix}</span>}
-                  <span className="flex-1" />
-                  {current && <span className="text-[9px] text-[--ui-text-muted] shrink-0">current</span>}
                 </button>
               )
               // Non-Claude agent, or Claude with no saved accounts → a single plain row.

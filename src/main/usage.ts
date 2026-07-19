@@ -6,12 +6,16 @@ import { app, BrowserWindow } from 'electron'
 import { logger } from './logger'
 import { timeOp } from './perfMonitor'
 import { IPC_CHANNELS, UsageData } from '../shared/types'
+import { accountStore } from './accountStore'
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials'
 const USAGE_URL = '/api/oauth/usage'
 const USAGE_HOST = 'api.anthropic.com'
-const BASE_POLL_INTERVAL = 5 * 60_000 // 5 minutes
-const MAX_POLL_INTERVAL = 30 * 60_000 // 30 minutes max backoff
+// Per-account usage now comes FREE from each pane's own statusline JSON (Claude Code passes
+// rate_limits per session), so we no longer poll the API per account — that just burned the
+// shared per-IP rate-limit budget. This poller only refreshes the GLOBAL fallback cache (for
+// older Claude Code that doesn't pass rate_limits) on the original slow cadence.
+const ROTATION_TICK = 5 * 60_000 // 5 minutes
 
 let cachedToken: string | null = null
 let tokenFetchedAt = 0
@@ -162,31 +166,44 @@ function loadCachedUsage(): UsageData | null {
   }
 }
 
+// Write the bash-statusline cache for one usage payload. Carries BOTH the 5-hour session
+// and the weekly window (each with its reset time) so the statusline can show session +
+// total remaining. `filePath` is the global cache for unbound panes, or a per-account file
+// (.statusline-usage-<id>) so an account-bound pane shows ITS account's real numbers.
+function writeStatuslineCache(filePath: string, data: UsageData): void {
+  try {
+    const content =
+      `UTILIZATION=${Math.round(data.fiveHour.utilization)}\n` +
+      `RESETS_AT=${data.fiveHour.resetsAt || ''}\n` +
+      `WEEKLY=${Math.round(data.weekly.utilization)}\n` +
+      `WEEKLY_RESETS_AT=${data.weekly.resetsAt || ''}\n` +
+      `TIMESTAMP=${Math.floor(Date.now() / 1000)}\n`
+    fs.writeFileSync(filePath, content, 'utf-8')
+  } catch {
+    // Ignore
+  }
+}
+
+function statuslineCachePath(accountId?: string): string {
+  const claudeDir = path.join(app.getPath('home'), '.claude')
+  return path.join(claudeDir, accountId ? `.statusline-usage-${accountId}` : '.statusline-usage-cache')
+}
+
 function saveCachedUsage(data: UsageData, account: string | null): void {
   try {
     fs.writeFileSync(getCachePath(), JSON.stringify({ ...data, _account: account }), 'utf-8')
   } catch {
     // Ignore write errors
   }
-
-  // Also write to ~/.claude/.statusline-usage-cache for the bash statusline script
-  try {
-    const claudeDir = path.join(app.getPath('home'), '.claude')
-    const cachePath = path.join(claudeDir, '.statusline-usage-cache')
-    const resetsAt = data.fiveHour.resetsAt || ''
-    const content = `UTILIZATION=${Math.round(data.fiveHour.utilization)}\nRESETS_AT=${resetsAt}\nTIMESTAMP=${Math.floor(Date.now() / 1000)}\n`
-    fs.writeFileSync(cachePath, content, 'utf-8')
-  } catch {
-    // Ignore
-  }
+  // Global statusline cache (used by panes on the default /login account).
+  writeStatuslineCache(statuslineCachePath(), data)
 }
 
 export class UsagePoller {
   private timeout: ReturnType<typeof setTimeout> | null = null
   private window: BrowserWindow | null = null
   private latestData: UsageData | null = null
-  private currentInterval = BASE_POLL_INTERVAL
-  private consecutiveFailures = 0
+  private rotationIndex = 0
   private lastAccountEmail: string | null = null
   private polling = false
   private watching = false
@@ -218,8 +235,9 @@ export class UsagePoller {
     } catch {
       // watch unsupported — poll-time detection still covers it
     }
-    // Delay first API poll to avoid competing with startup IPC traffic
-    this.timeout = setTimeout(() => this.poll(), 3000)
+    // First tick soon after startup (targets[0] = global, so the global cache + switch
+    // detection refresh fast); accounts then follow on the rotation.
+    this.timeout = setTimeout(() => this.tick(), 3000)
   }
 
   stop() {
@@ -233,70 +251,92 @@ export class UsagePoller {
     }
   }
 
-  // Cancel the pending scheduled poll and run one now (used on account switch).
+  // Cancel the pending tick and poll the GLOBAL account now (used on account switch — the
+  // global login is what just changed). Resets rotation so the next tick targets global.
   private forcePoll() {
     if (this.timeout) { clearTimeout(this.timeout); this.timeout = null }
-    void this.poll()
+    this.rotationIndex = 0
+    void this.tick()
   }
 
   getLatest(): UsageData | null {
     return this.latestData
   }
 
-  private scheduleNext() {
-    this.timeout = setTimeout(() => this.poll(), this.currentInterval)
+  // ROTATION: the usage endpoint rate-limits a BURST of requests from one IP (calls 6–42s
+  // apart all 429'd; only the ~5-min-spaced global polls ever succeeded). So instead of
+  // polling the global account + every account back-to-back, ONE target is polled per tick
+  // and targets rotate: [global, account A, account B, …]. Every API call is therefore
+  // ROTATION_TICK apart — wide enough that the limiter's bucket refills between calls.
+  private scheduleNext(delay = ROTATION_TICK) {
+    this.timeout = setTimeout(() => this.tick(), delay)
   }
 
-  private async poll() {
-    if (this.polling) return // a forced poll can overlap the scheduled one — skip the dup
+  // Only the global account is polled now — per-account usage is read directly from each
+  // pane's statusline JSON (no API call), so polling accounts here would only waste the
+  // shared per-IP rate-limit budget.
+  private targets(): string[] {
+    return ['global']
+  }
+
+  private async tick() {
+    if (this.polling) return // a forced poll can overlap the scheduled tick — skip the dup
     this.polling = true
     try {
-      // Detect a Claude account switch (re-login). Both the Keychain token and the account
-      // in ~/.claude.json change; if we kept the cached token + usage we'd report the
-      // PREVIOUS account. On a change, drop the cached token and stale usage, then fetch
-      // fresh for the new account.
-      const account = getCurrentAccountEmail()
-      if (account && this.lastAccountEmail && account !== this.lastAccountEmail) {
-        logger.info('usage', 'Account changed — clearing cached token + usage', `${this.lastAccountEmail} → ${account}`)
-        cachedToken = null
-        tokenFetchedAt = 0
-        this.latestData = null
-      }
-      if (account) this.lastAccountEmail = account
-      writeStatuslineAccount(account) // keep the per-pane indicator current
-
-      // Keychain read spawns /usr/bin/security and parses its output — a prime
-      // suspect for periodic main-thread cost.
-      const token = await timeOp('usage:keychain-token', () => getOAuthToken())
-      if (!token) {
-        this.currentInterval = BASE_POLL_INTERVAL
-        this.scheduleNext()
-        return
-      }
-
-      const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
-
-      if (result.rateLimited) {
-        // Exponential backoff: double interval on each 429, up to max
-        this.consecutiveFailures++
-        this.currentInterval = Math.min(
-          BASE_POLL_INTERVAL * Math.pow(2, this.consecutiveFailures),
-          MAX_POLL_INTERVAL
-        )
-        logger.info('usage', `Backing off to ${Math.round(this.currentInterval / 1000)}s`)
-      } else if (result.data) {
-        this.latestData = result.data
-        saveCachedUsage(result.data, account)
-        this.window?.webContents.send(IPC_CHANNELS.USAGE_UPDATE, result.data)
-        // Reset to base interval on success
-        this.consecutiveFailures = 0
-        this.currentInterval = BASE_POLL_INTERVAL
-      }
-      // If null but not rate limited (other error), keep current interval
-
-      this.scheduleNext()
+      const targets = this.targets()
+      const target = targets[this.rotationIndex % targets.length]
+      this.rotationIndex = (this.rotationIndex + 1) % Math.max(1, targets.length)
+      if (target === 'global') await this.pollGlobal()
+      else await this.pollAccount(target)
     } finally {
       this.polling = false
+      this.scheduleNext()
+    }
+  }
+
+  // Poll the globally signed-in account (Keychain token). Updates the global statusline
+  // cache (for unbound panes), the in-memory latest, and detects account switches.
+  private async pollGlobal() {
+    // Detect a Claude account switch (re-login): the Keychain token + ~/.claude.json change.
+    const account = getCurrentAccountEmail()
+    if (account && this.lastAccountEmail && account !== this.lastAccountEmail) {
+      logger.info('usage', 'Account changed — clearing cached token + usage', `${this.lastAccountEmail} → ${account}`)
+      cachedToken = null
+      tokenFetchedAt = 0
+      this.latestData = null
+    }
+    if (account) this.lastAccountEmail = account
+    writeStatuslineAccount(account) // keep the per-pane indicator current
+
+    const token = await timeOp('usage:keychain-token', () => getOAuthToken())
+    if (!token) return
+    const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
+    if (result.data) {
+      this.latestData = result.data
+      saveCachedUsage(result.data, account)
+      this.window?.webContents.send(IPC_CHANNELS.USAGE_UPDATE, result.data)
+    }
+    // On 429/other error: skip this cycle; the next global tick is a full rotation away.
+  }
+
+  // Poll one saved account's usage (its own token) → its own statusline cache, so a pane
+  // bound to it shows ITS real session + weekly numbers. The endpoint is metadata-only and
+  // does NOT consume inference quota, so this can't eat into the limits it reports.
+  private async pollAccount(id: string) {
+    let token: string | null = null
+    try {
+      token = accountStore.getToken(id)
+    } catch {
+      return
+    }
+    if (!token) return
+    try {
+      const res = await fetchUsage(token)
+      if (res.data) writeStatuslineCache(statuslineCachePath(id), res.data)
+      // 429/no data → leave the prior cache so the pane keeps its last value (not "~");
+      // it retries on the next rotation.
+    } catch {
+      // ignore one account's failure
     }
   }
 }

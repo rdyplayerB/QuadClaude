@@ -4,8 +4,7 @@ import { SettingsModal } from './components/SettingsModal'
 import { DelegationDashboard } from './components/DelegationDashboard'
 import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
-import { UsageIndicator } from './components/UsageIndicator'
-import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals } from './components/TerminalPane'
+import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals, dumpPaneDiagnostics, checkPaneHealth } from './components/TerminalPane'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
@@ -129,6 +128,15 @@ function App() {
   // Shared logic for focusing a terminal (used by both menu actions and hotkeys)
   const handleTerminalFocus = useCallback(
     (paneId: number) => {
+      if (layout === 'duo' || layout === 'solo') {
+        // The pane may be hidden in the PiP strip — promote it onto the stage
+        // (no-op past activating it if already visible).
+        const store = useWorkspaceStore.getState()
+        if (store.promotePane(paneId) === null) return
+        requestAnimationFrame(() => requestAnimationFrame(() => focusTerminal(paneId)))
+        return
+      }
+
       setActivePaneId(paneId)
 
       if (layout === 'focus' || layout === 'focus-right') {
@@ -155,6 +163,22 @@ function App() {
         case 'layout-focus-right':
           store.setLayout('focus-right')
           break
+        case 'layout-duo':
+          store.setLayout('duo')
+          break
+        case 'layout-solo':
+          store.setLayout('solo')
+          break
+        case 'toggle-pip':
+          store.togglePipVisible()
+          break
+        case 'cycle-pane': {
+          const promoted = store.cyclePane()
+          if (promoted !== null) {
+            requestAnimationFrame(() => requestAnimationFrame(() => focusTerminal(promoted)))
+          }
+          break
+        }
         case 'focus-pane-1':
           handleTerminalFocus(0)
           break
@@ -188,11 +212,26 @@ function App() {
         case 'toggle-prompt-bar':
           store.updatePreferences({ showPromptBar: store.preferences.showPromptBar === false })
           break
+        case 'dump-diagnostics':
+          dumpPaneDiagnostics()
+          break
       }
     })
 
     return unsubscribe
   }, [handleTerminalFocus])
+
+  // Lightweight, anomaly-gated pane health sweep. Every 15s (skipped while the
+  // window is hidden) it logs ONLY panes that are sized + have content but whose
+  // canvas isn't painting — the blank-pane signature. Near-zero cost; a healthy
+  // app logs nothing. This is what captures the intermittent blank-pane bug in
+  // the wild without needing a repro.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) checkPaneHealth()
+    }, 15000)
+    return () => clearInterval(id)
+  }, [])
 
   // Scroll all terminals to bottom when system resumes from sleep
   useEffect(() => {
@@ -231,7 +270,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.27.2</span>
+          <span className="text-[10px] text-[--ui-text-faint]">v1.30.4</span>
         </div>
 
         {/* Center - layout selector + add pane */}
@@ -240,10 +279,8 @@ function App() {
           <AddPaneButton />
         </div>
 
-        {/* Right side - usage + utility buttons */}
+        {/* Right side - utility buttons (per-account usage now lives in each pane's status line) */}
         <div className="flex items-center gap-0.5">
-          <UsageIndicator />
-          <span className="text-[--ui-text-faint] text-xs px-1">│</span>
           {/* Delegation dashboard */}
           <button
             onClick={() => setIsDashboardOpen(true)}

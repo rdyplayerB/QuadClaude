@@ -1,6 +1,14 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, ClaudeAccount } from '../shared/types'
 
+// Every pane registers its OWN terminal:output + pty:exit listener (each filters
+// by paneId), so with up to MAX_PANES (12) panes — plus brief overlap while a
+// pane remounts — the count legitimately exceeds Node's default 10-listener
+// warning threshold. These aren't leaks (each is removed on unmount), so raise
+// the cap to a comfortable ceiling instead of letting the false "possible memory
+// leak" warning spam the console.
+ipcRenderer.setMaxListeners(64)
+
 // Expose protected methods to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', {
   // PTY operations
@@ -105,6 +113,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_EXTERNAL, url) as Promise<boolean>,
 
+  // Open a markdown file (resolved against the pane's cwd) in TextEdit
+  openInEditor: (paneId: number, filePath: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_IN_EDITOR, paneId, filePath) as Promise<boolean>,
+
+  // Write a structured diagnostic entry into the main app.log (fire-and-forget)
+  logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) =>
+    ipcRenderer.send(IPC_CHANNELS.APP_LOG, level, category, message, details),
+
   // Model router (run any model as the real Claude Code TUI)
   routerStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_STATUS) as Promise<RouterStatus>,
@@ -146,10 +162,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Per-pane Claude accounts (token is write-only from the renderer; never returned)
   claudeAccountsList: () =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST) as Promise<ClaudeAccount[]>,
-  claudeAccountsSave: (input: { id?: string; label: string; email?: string; token?: string }) =>
+  claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, input) as Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>,
   claudeAccountsDelete: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, id) as Promise<ClaudeAccount[]>,
+  claudeAccountsVerify: (id: string) =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_VERIFY, id) as Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>,
   onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
     const handler = (_: unknown, event: DelegationEvent) => callback(event)
     ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)
@@ -197,6 +215,8 @@ declare global {
       pasteImage: (paneId: number, filePath: string) => Promise<boolean>
       openImageDialog: () => Promise<string | null>
       openExternal: (url: string) => Promise<boolean>
+      openInEditor: (paneId: number, filePath: string) => Promise<boolean>
+      logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) => void
       routerStatus: () => Promise<RouterStatus>
       routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
       routerDeleteProvider: (name: string) => Promise<void>
@@ -216,8 +236,9 @@ declare global {
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
       clipboardWriteText: (text: string) => Promise<boolean>
       claudeAccountsList: () => Promise<ClaudeAccount[]>
-      claudeAccountsSave: (input: { id?: string; label: string; email?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
+      claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
       claudeAccountsDelete: (id: string) => Promise<ClaudeAccount[]>
+      claudeAccountsVerify: (id: string) => Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>
       onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void

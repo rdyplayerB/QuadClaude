@@ -1,7 +1,7 @@
 import Store from 'electron-store'
 import os from 'os'
 import fs from 'fs'
-import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode, MIN_PANES, MAX_PANES, FOCUS_SMALL_RATIO_DEFAULT } from '../shared/types'
+import { WorkspaceState, PaneConfig, WindowBounds, DEFAULT_HOTKEYS, LayoutMode, MIN_PANES, MAX_PANES, FOCUS_SMALL_RATIO_DEFAULT, DUO_RATIO_DEFAULT } from '../shared/types'
 import { logger } from './logger'
 
 const DEFAULT_PREFERENCES = {
@@ -26,6 +26,10 @@ function createDefaultWorkspace(): WorkspaceState {
     focusPaneId: 0,
     activePaneId: 0,
     focusSmallRatio: FOCUS_SMALL_RATIO_DEFAULT,
+    duoRatio: DUO_RATIO_DEFAULT,
+    pipCorner: 'bottom-right',
+    pipCollapsed: false,
+    pipVisible: true,
     panes: [
       createDefaultPaneConfig(0),
       createDefaultPaneConfig(1),
@@ -94,7 +98,7 @@ export class WorkspaceManager {
       }
 
       // Migrate removed layouts to 'grid' (horizontal, vertical, fullscreen, split removed)
-      const validLayouts: LayoutMode[] = ['grid', 'focus', 'focus-right']
+      const validLayouts: LayoutMode[] = ['grid', 'focus', 'focus-right', 'duo', 'solo']
       if (!validLayouts.includes(workspace.layout as LayoutMode)) {
         logger.info('workspace', `Migrating removed layout '${workspace.layout}' to 'grid'`)
         workspace.layout = 'grid'

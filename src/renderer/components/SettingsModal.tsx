@@ -197,6 +197,10 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
     layoutGrid: 'Grid',
     layoutFocus: 'Focus left',
     layoutFocusRight: 'Focus right',
+    layoutDuo: 'Duo',
+    layoutSolo: 'Solo',
+    togglePip: 'Toggle PiP strip',
+    cyclePane: 'Cycle pane into view',
   }
 
   if (!isOpen) return null

@@ -103,7 +103,7 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
           <rect x="1" y="3.5" width="7.5" height="7.5" rx="1" />
           <path d="M5 3.5V2.5a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1h-1" strokeLinecap="round" />
         </svg>
-        <span className="text-[10px] leading-none">Fork</span>
+        <span className="pane-ctl-label text-[10px] leading-none">Fork</span>
       </button>
 
       {pickerOpen && createPortal(

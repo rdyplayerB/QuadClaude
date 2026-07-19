@@ -1,5 +1,12 @@
-// Layout types - all show 4 terminals (true to "QuadClaude" name)
-export type LayoutMode = 'grid' | 'focus' | 'focus-right'
+// Layout modes. grid/focus/focus-right show every pane; duo shows two panes
+// side-by-side and solo shows one fullscreen — in those two, the remaining
+// panes live in the floating PiP strip. NOTE: 'split' and 'fullscreen' are
+// dead names from removed layouts (migrations coerce them to 'grid') — never
+// reuse them for new modes.
+export type LayoutMode = 'grid' | 'focus' | 'focus-right' | 'duo' | 'solo'
+
+// Corner the PiP strip is snapped to (drag the strip header to move it).
+export type PipCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 
 // Git status for pane header
 export interface GitStatus {
@@ -34,6 +41,18 @@ export const FOCUS_SMALL_RATIO_DEFAULT = 0.25
 export const FOCUS_SMALL_RATIO_MIN = 0.25
 export const FOCUS_SMALL_RATIO_MAX = 0.45
 
+// Duo-layout divider: fraction of the width given to the LEFT pane.
+export const DUO_RATIO_DEFAULT = 0.5
+export const DUO_RATIO_MIN = 0.2
+export const DUO_RATIO_MAX = 0.8
+
+// Virtual layout width of a hidden pane rendered as a PiP tile. The pane is
+// laid out at this real width (so its PTY keeps ~76-80 cols and output doesn't
+// reflow badly on promote) and then transform:scale'd down to tile size.
+// offsetWidth ignores transforms, so every fit path sees a nonzero size — the
+// beta CanvasAddon's 0×0 blank-render bug can never trigger for PiP tiles.
+export const PIP_VW = 640
+
 // A local server (listening TCP port) running in a pane's process tree
 export interface ServerInfo {
   pid: number
@@ -65,7 +84,24 @@ export interface ClaudeAccount {
   label: string // user-facing name, e.g. "Work" / "Personal"
   email?: string // optional, for display/disambiguation only
   hasToken?: boolean // whether an encrypted token is on file (set by main, never persisted with a value)
+  // Model to pin for panes using this account (injected as ANTHROPIC_MODEL). A fresh
+  // token-auth session otherwise starts on Claude Code's default (Sonnet). Defaults to
+  // Opus 4.8 1M-context; the sentinel 'default' means "don't pin — use Claude Code's default".
+  model?: string
+  // A usage fingerprint of the account a bound pane's token ACTUALLY reaches — captured by
+  // the status line from Claude Code's own per-session data (no API poll, no rate limit).
+  // The weekly reset is the stable per-account id; two accounts sharing it = same underlying
+  // subscription (a wrong/swapped token). Absent until a pane bound to this account renders.
+  verifiedUsage?: {
+    weeklyPct: number
+    weeklyResetEpoch: number // unix seconds; the stable per-account identifier
+    fiveHourPct: number
+    at: number // unix seconds when captured
+  }
 }
+
+// The model a pane gets when no per-account model is set. Opus 4.8, 1M-context variant.
+export const DEFAULT_ACCOUNT_MODEL = 'claude-opus-4-8[1m]'
 
 // Ring hues for paired panes. Each active pair claims the first free color, so
 // multiple pairs across the grid stay visually distinct. Sized for up to six
@@ -120,6 +156,13 @@ export interface WorkspaceState {
   // Splitter position for focus / focus-right layouts (width fraction of the
   // small-panes column). Persisted so it survives layout switches.
   focusSmallRatio?: number
+  // Duo-layout divider position (width fraction of the left pane).
+  duoRatio?: number
+  // Floating PiP strip (duo/solo layouts): snapped corner, collapsed-to-pill
+  // state, and whether it's shown at all (Cmd+B toggles).
+  pipCorner?: PipCorner
+  pipCollapsed?: boolean
+  pipVisible?: boolean
 }
 
 export interface HotkeyBindings {
@@ -130,6 +173,10 @@ export interface HotkeyBindings {
   layoutGrid: string
   layoutFocus: string
   layoutFocusRight: string
+  layoutDuo: string
+  layoutSolo: string
+  togglePip: string
+  cyclePane: string
 }
 
 // Use Cmd on Mac, Win on Windows for layout hotkeys
@@ -145,6 +192,10 @@ export const DEFAULT_HOTKEYS: HotkeyBindings = {
   layoutGrid: `${metaKey}+1`,
   layoutFocus: `${metaKey}+2`,
   layoutFocusRight: `${metaKey}+3`,
+  layoutDuo: `${metaKey}+4`,
+  layoutSolo: `${metaKey}+5`,
+  togglePip: `${metaKey}+B`,
+  cyclePane: 'Ctrl+Tab',
 }
 
 // Background configuration
@@ -270,6 +321,10 @@ export const IPC_CHANNELS = {
 
   // Shell — open a URL in the system default browser
   APP_OPEN_EXTERNAL: 'app:open-external',
+  // Shell — open a markdown file (resolved against a pane's cwd) in TextEdit
+  APP_OPEN_IN_EDITOR: 'app:open-in-editor',
+  // Diagnostics — renderer writes a structured entry into the main app.log
+  APP_LOG: 'app:log',
 
   // Usage tracking
   USAGE_UPDATE: 'usage:update',
@@ -308,6 +363,7 @@ export const IPC_CHANNELS = {
   CLAUDE_ACCOUNTS_LIST: 'claude-accounts:list',
   CLAUDE_ACCOUNTS_SAVE: 'claude-accounts:save', // upsert {id?,label,email,token?}
   CLAUDE_ACCOUNTS_DELETE: 'claude-accounts:delete',
+  CLAUDE_ACCOUNTS_VERIFY: 'claude-accounts:verify', // fetch a token's real account (id)
 } as const
 
 // --- Delegation telemetry ----------------------------------------------------
@@ -506,6 +562,10 @@ export type MenuAction =
   | 'layout-grid'
   | 'layout-focus'
   | 'layout-focus-right'
+  | 'layout-duo'
+  | 'layout-solo'
+  | 'toggle-pip'
+  | 'cycle-pane'
   | 'focus-pane-1'
   | 'focus-pane-2'
   | 'focus-pane-3'
@@ -515,3 +575,4 @@ export type MenuAction =
   | 'decrease-font'
   | 'open-settings'
   | 'toggle-prompt-bar'
+  | 'dump-diagnostics'

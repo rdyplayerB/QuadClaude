@@ -95,6 +95,23 @@ body {
   min-height: 32px;
   max-height: 32px;
   flex: 0 0 32px;
+  /* Establish a query container so the header's controls can respond to the
+     PANE's width (panes resize dynamically; viewport media queries can't see
+     that). Below the threshold, button text labels collapse to icon-only so the
+     controls — including the Close (X) — never overflow and get clipped.
+     inline-size containment only constrains the inline axis; the header keeps
+     its own glass tint and does not gate the terminal's wallpaper passthrough
+     (that's a sibling element, not a descendant). */
+  container-type: inline-size;
+}
+
+/* Narrow pane: hide control text labels, keep icons (tooltips still describe
+   each action). Tuned so the full control set fits above ~640px-wide panes —
+   the 3-column grid case where labels were getting clipped. */
+@container (max-width: 680px) {
+  .pane-ctl-label {
+    display: none;
+  }
 }
 
 /* Terminal container */
@@ -173,6 +190,21 @@ body {
 .pane-transition {
   transition: opacity 0.15s ease-out;
   isolation: isolate;
+}
+
+/* PiP wrappers: hidden panes in duo/solo, rendered as floating live tiles.
+   pointer-events off so the scaled-down xterm can never take clicks or
+   keyboard focus — the strip chrome's capture overlays (PipStrip.tsx) own all
+   interaction. The pane's own header is hidden; the tile mini-header replaces
+   it. NEVER display:none these wrappers: every fit path bails at
+   offsetWidth === 0 and the beta canvas addon renders blank at 0×0 — the
+   collapsed state uses visibility:hidden, which keeps geometry. */
+.pip-wrapper {
+  pointer-events: none;
+  isolation: isolate;
+}
+.pip-wrapper .pane-header {
+  display: none;
 }
 
 /* Claude is waiting on a yes/no decision - pulsing amber glow. Inset so it isn't

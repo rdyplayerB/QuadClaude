@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ILink } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { CanvasAddon } from '@xterm/addon-canvas'
@@ -7,9 +7,15 @@ import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
 import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, WorkspacePreferences } from '../../shared/types'
+import { visiblePaneCount } from '../layouts'
+import { paneLog, armBlankWatchdog, notePaneOutput, clearBlankWatchdog } from '../paneDiag'
 
 // Module-level tracking to persist across component remounts
 const initializedPtys = new Set<number>()
+// Diagnostics: last createPty result + cumulative fit attempts per pane, fed
+// into the blank-pane watchdog snapshot (see paneDiag.ts).
+const ptyCreateResult = new Map<number, boolean>()
+const fitAttempts = new Map<number, number>()
 const terminals = new Map<number, { terminal: Terminal; fitAddon: FitAddon }>()
 // Track focus listeners for proper cleanup
 const focusListeners = new Map<number, () => void>()
@@ -40,6 +46,17 @@ const promptScanTimers = new Map<number, ReturnType<typeof setTimeout>>()
 // background toggles (the canvas addon bakes in transparency at load time
 // and won't honor a later theme-background alpha change reliably).
 const canvasAddons = new Map<number, CanvasAddon>()
+// Cumulative bytes this pane's terminal has RECEIVED (renderer side). Bumped
+// once per output batch — cheap. Lets diagnostics tell "no output ever arrived"
+// apart from "output arrived but never painted" (the two blank-pane causes).
+const paneReceivedBytes = new Map<number, number>()
+// Panes the periodic health sweep has already flagged as blank, so each is
+// reported once (not every tick) until it recovers.
+const healthAnomalyReported = new Set<number>()
+// Panes seen without a live terminal on the PREVIOUS sweep — used to require two
+// consecutive sightings before flagging, so the brief window at creation (pane
+// in the store, terminal not yet built) doesn't false-positive.
+const missingTerminalSeen = new Set<number>()
 
 // xterm theme with a fully-transparent background lets the wallpaper show
 // through. Used both at terminal creation and on background toggle.
@@ -228,6 +245,118 @@ const DARK_THEME = {
 }
 
 
+// Cheap render-state snapshot of one pane, for diagnostics. Reads only already-
+// computed xterm buffer fields + a couple of DOM measurements — no layout thrash
+// in steady state (called on-demand or on a slow interval).
+function snapshotPane(paneId: number, terminal: Terminal) {
+  const el = terminal.element as HTMLElement | null
+  const rect = el?.getBoundingClientRect()
+  const canvases = el ? Array.from(el.querySelectorAll('canvas')) : []
+  const canvasPainted = canvases.some((c) => c.width > 0 && c.height > 0)
+  const buf = terminal.buffer.active
+  return {
+    paneId,
+    pos: useWorkspaceStore.getState().panes.findIndex((p) => p.id === paneId),
+    cols: terminal.cols,
+    rows: terminal.rows,
+    bufferLines: buf.length,
+    baseY: buf.baseY,
+    viewportY: buf.viewportY,
+    cursorY: buf.cursorY,
+    atBottom: buf.baseY + terminal.rows >= buf.length - 1,
+    userScrolledUp: userScrolledUp.get(paneId) ?? false,
+    hasCanvasAddon: canvasAddons.has(paneId),
+    canvasCount: canvases.length,
+    canvasPainted,
+    elW: rect ? Math.round(rect.width) : -1,
+    elH: rect ? Math.round(rect.height) : -1,
+    connected: !!el?.isConnected,
+    receivedBytes: paneReceivedBytes.get(paneId) ?? 0,
+  }
+}
+
+// On-demand: dump every live pane's render state to app.log (hotkey
+// Cmd+Shift+D). Fire it the instant a pane looks blank — the snapshot
+// distinguishes the causes: bufferLines<=1 → no output reached the terminal;
+// non-empty + !atBottom → content scrolled out of view; non-empty + atBottom +
+// canvas not painted → the canvas renderer failed to paint.
+export function dumpPaneDiagnostics() {
+  terminals.forEach((entry, paneId) => {
+    // Per-pane guard: a disposed/broken terminal in the map (accessing its
+    // buffer throws) must not abort the whole dump — otherwise a single bad
+    // pane produces NO output at all, which is exactly what happened before.
+    try {
+      paneLog('info', 'pane-diag-dump', snapshotPane(paneId, entry.terminal))
+    } catch (e) {
+      paneLog('warn', 'pane-diag-dump-failed', { paneId, error: String(e) })
+    }
+  })
+}
+
+// Always-on but anomaly-gated: called on a slow interval. Logs ONLY panes that
+// look wrong, each once until it recovers, so a healthy app produces zero output
+// and there's no steady-state cost. Two signatures:
+//  - pane-no-terminal: a pane exists in the store but has NO live terminal in the
+//    module map. This is the close+reopen bug — the pane is bound to a terminal
+//    that was disposed (or never created), so nothing renders and you can't type.
+//    Requires two consecutive sweeps to skip the brief init window.
+//  - pane-render-anomaly: a pane HAS a terminal, real size, and buffered content,
+//    but its canvas renderer isn't painting.
+export function checkPaneHealth() {
+  const panes = useWorkspaceStore.getState().panes
+  const liveIds = new Set(terminals.keys())
+  const activeIds = new Set(panes.map((p) => p.id))
+
+  panes.forEach((p, pos) => {
+    if (!liveIds.has(p.id)) {
+      // No terminal object for this store pane.
+      if (missingTerminalSeen.has(p.id)) {
+        if (!healthAnomalyReported.has(p.id)) {
+          healthAnomalyReported.add(p.id)
+          paneLog('warn', 'pane-no-terminal', {
+            paneId: p.id,
+            pos,
+            cwd: p.workingDirectory,
+            liveTerminals: [...liveIds],
+          })
+        }
+      } else {
+        missingTerminalSeen.add(p.id)
+      }
+      return
+    }
+    missingTerminalSeen.delete(p.id)
+
+    const entry = terminals.get(p.id)!
+    // Guard the snapshot: a broken terminal in the map must not throw out of the
+    // whole sweep (which would stop every later pane from being checked).
+    let s: ReturnType<typeof snapshotPane>
+    try {
+      s = snapshotPane(p.id, entry.terminal)
+    } catch (e) {
+      if (!healthAnomalyReported.has(p.id)) {
+        healthAnomalyReported.add(p.id)
+        paneLog('warn', 'pane-snapshot-failed', { paneId: p.id, pos, error: String(e) })
+      }
+      return
+    }
+    const canvasBroken = s.hasCanvasAddon && (s.canvasCount === 0 || !s.canvasPainted)
+    const blank = s.connected && s.elW > 0 && s.elH > 0 && s.bufferLines > 1 && canvasBroken
+    if (blank) {
+      if (!healthAnomalyReported.has(p.id)) {
+        healthAnomalyReported.add(p.id)
+        paneLog('warn', 'pane-render-anomaly', s)
+      }
+    } else {
+      healthAnomalyReported.delete(p.id)
+    }
+  })
+
+  // Drop bookkeeping for panes that no longer exist (closed for real).
+  missingTerminalSeen.forEach((id) => { if (!activeIds.has(id)) missingTerminalSeen.delete(id) })
+  healthAnomalyReported.forEach((id) => { if (!activeIds.has(id)) healthAnomalyReported.delete(id) })
+}
+
 // Exported functions to control terminals from outside
 export function clearTerminal(paneId: number) {
   const entry = terminals.get(paneId)
@@ -390,6 +519,7 @@ export function getTerminalStats() {
 function disposeTerminal(paneId: number) {
   const entry = terminals.get(paneId)
   if (entry) {
+    paneLog('info', 'terminal-disposed', { paneId })
     // Remove focus listener if exists
     const focusListener = focusListeners.get(paneId)
     if (focusListener && entry.terminal.textarea) {
@@ -411,10 +541,42 @@ function disposeTerminal(paneId: number) {
     if (scanTimer) clearTimeout(scanTimer)
     promptScanTimers.delete(paneId)
     paneEnvProfile.delete(paneId)
-    canvasAddons.delete(paneId) // addon is disposed with terminal.dispose()
+    paneReceivedBytes.delete(paneId)
+    healthAnomalyReported.delete(paneId)
 
-    // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
-    entry.terminal.dispose()
+    // Dispose the beta CanvasAddon EXPLICITLY and FIRST, while the terminal's
+    // core services still exist. Its LinkRenderLayer subscribes to the core
+    // linkifier's onShowLinkUnderline; if the addon is torn down by
+    // terminal.dispose() AFTER the core is gone, that access hits `undefined`
+    // and throws (confirmed: it threw on every close, "Cannot read properties
+    // of undefined (reading 'onShowLinkUnderline')"). Disposing it here, in
+    // order, both prevents the throw and releases the heavy GPU/canvas layers
+    // (the real leak). Guarded regardless.
+    const canvasAddon = canvasAddons.get(paneId)
+    if (canvasAddon) {
+      try {
+        canvasAddon.dispose()
+      } catch (e) {
+        paneLog('warn', 'canvas-dispose-threw', { paneId, error: String(e) })
+      }
+    }
+    canvasAddons.delete(paneId)
+    // Cancel the blank-pane watchdog so a deliberately-closed pane never logs a
+    // false "blank-detected".
+    clearBlankWatchdog(paneId)
+    ptyCreateResult.delete(paneId)
+    fitAttempts.delete(paneId)
+
+    // Dispose the terminal (releases remaining xterm.js resources, DOM, event
+    // listeners). Still guarded belt-and-suspenders: if anything here throws,
+    // the map cleanup below MUST run anyway — otherwise a reused pane id would
+    // reattach to this disposed terminal (dead PTY) → a blank, unscrollable
+    // pane. terminals.delete guarantees a reused id always builds fresh.
+    try {
+      entry.terminal.dispose()
+    } catch (e) {
+      paneLog('warn', 'terminal-dispose-threw', { paneId, error: String(e) })
+    }
     terminals.delete(paneId)
     initializedPtys.delete(paneId)
   }
@@ -443,6 +605,88 @@ function isTerminalAtBottom(terminal: Terminal): boolean {
   const buffer = terminal.buffer.active
   // Add small tolerance (1 row) to account for edge cases
   return buffer.baseY + terminal.rows >= buffer.length - 1
+}
+
+// Load the GPU Canvas renderer for a pane, exactly once (idempotent). Must be
+// called AFTER terminal.open() and while the theme background is already
+// transparent — the canvas addon bakes transparency in at load time. Returns
+// true only if it actually loaded the addon on this call (for diagnostics).
+//
+// Deferred until the container has real dimensions: the beta canvas addon
+// renders a PERMANENTLY blank pane if it bakes at 0×0, which is exactly what
+// happens to a pane added into a re-flowing grid (2×2 → 3×2) whose cell is
+// still 0×0 for the first frames. The shell and buffer are fine underneath;
+// nothing ever paints, and only close+reopen recovers it.
+function ensureCanvasAddon(paneId: number, terminal: Terminal): boolean {
+  if (canvasAddons.has(paneId)) return false
+  try {
+    const canvasAddon = new CanvasAddon()
+    terminal.loadAddon(canvasAddon)
+    canvasAddons.set(paneId, canvasAddon)
+    return true
+  } catch (e) {
+    // Canvas context unavailable — xterm falls back to the DOM renderer.
+    return false
+  }
+}
+
+// Fit a freshly-opened terminal once its container actually has dimensions.
+// A new pane mounts INTO the `pane-transition` CSS animation, so its container
+// can report offsetWidth === 0 for the first few frames. The old one-shot RAF
+// fit simply gave up in that window and relied entirely on the ResizeObserver —
+// which intermittently left the pane blank (terminal opened at 0×0 onto the
+// canvas renderer, never repainted, PTY never told its real size). This polls a
+// bounded number of frames until the container is sized, then fits ONCE, syncs
+// the PTY dimensions, scrolls to bottom, and forces a repaint of the buffer.
+function fitWhenSized(
+  paneId: number,
+  terminal: Terminal,
+  fitAddon: FitAddon,
+  getContainer: () => HTMLElement | null,
+  framesLeft = 180 // ~3s at 60fps — well past any layout transition
+): void {
+  fitAttempts.set(paneId, (fitAttempts.get(paneId) ?? 0) + 1)
+  const el = getContainer()
+  if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+    try {
+      fitAddon.fit()
+      // Load the canvas renderer AFTER the fit so it bakes at the pane's real
+      // size. When the canvas was deferred at creation (cell was 0×0), this is
+      // where it finally loads — baking here instead of at 0×0 is what prevents
+      // the permanently-blank added pane. No-op if it already loaded.
+      const canvasDeferredLoaded = ensureCanvasAddon(paneId, terminal)
+      const { cols, rows } = terminal
+      window.electronAPI.resizeTerminal(paneId, cols, rows)
+      terminal.scrollToBottom()
+      // Force the renderer to paint whatever the PTY already emitted while the
+      // pane was 0-sized; without this the pane can stay blank.
+      terminal.refresh(0, terminal.rows - 1)
+      paneLog('info', 'fit-ok', {
+        paneId,
+        cols,
+        rows,
+        attempts: fitAttempts.get(paneId),
+        canvasDeferredLoaded,
+      })
+    } catch (e) {
+      paneLog('warn', 'fit-error', { paneId, error: String(e) })
+    }
+    return
+  }
+  if (framesLeft <= 0) {
+    // Container never got real dimensions within the budget — a strong signal
+    // for a stuck/blank pane.
+    paneLog('warn', 'fit-retry-exhausted', {
+      paneId,
+      attempts: fitAttempts.get(paneId),
+      containerW: el?.offsetWidth ?? -1,
+      containerH: el?.offsetHeight ?? -1,
+    })
+    return
+  }
+  requestAnimationFrame(() =>
+    fitWhenSized(paneId, terminal, fitAddon, getContainer, framesLeft - 1)
+  )
 }
 
 // Helper to safely fit terminal while preserving scroll position
@@ -485,11 +729,23 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   // Initialize terminal
   useEffect(() => {
-    if (!terminalRef.current || !pane) return
+    if (!terminalRef.current || !pane) {
+      // The effect bailed before creating anything. It re-runs when `pane`
+      // becomes defined (see deps below), so this is usually transient — but
+      // log it so a pane that stays blank because the retry never happened is
+      // traceable.
+      paneLog('warn', 'init-bail', {
+        paneId,
+        hasContainer: !!terminalRef.current,
+        hasPane: !!pane,
+      })
+      return
+    }
 
     // Check if we already have a terminal for this pane (persisted across remounts)
     const existing = terminals.get(paneId)
     if (existing) {
+      paneLog('info', 'terminal-reattached', { paneId })
       // Reattach existing terminal to new DOM element
       xtermRef.current = existing.terminal
       fitAddonRef.current = existing.fitAddon
@@ -545,6 +801,40 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       terminal.loadAddon(fitAddon)
       terminal.loadAddon(webLinksAddon)
 
+      // Make markdown file paths in the output clickable — clicking opens the file in
+      // TextEdit. The main process resolves the matched text against this pane's live cwd
+      // and refuses anything that isn't an existing .md file, so over-matching here is safe.
+      // Match a run of path-like characters that ends in .md / .markdown.
+      const MD_PATH_RE = /[^\s'"`()[\]<>|]+\.(?:md|markdown)\b/gi
+      terminal.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          const line = terminal.buffer.active.getLine(bufferLineNumber - 1)
+          if (!line) {
+            callback(undefined)
+            return
+          }
+          const text = line.translateToString(false)
+          const links: ILink[] = []
+          let match: RegExpExecArray | null
+          MD_PATH_RE.lastIndex = 0
+          while ((match = MD_PATH_RE.exec(text)) !== null) {
+            const matched = match[0]
+            const startX = match.index + 1 // xterm ranges are 1-based, inclusive
+            links.push({
+              text: matched,
+              range: {
+                start: { x: startX, y: bufferLineNumber },
+                end: { x: startX + matched.length - 1, y: bufferLineNumber },
+              },
+              activate: () => {
+                void window.electronAPI.openInEditor(paneId, matched)
+              },
+            })
+          }
+          callback(links.length ? links : undefined)
+        },
+      })
+
       terminal.open(terminalRef.current)
 
       // GPU-accelerated Canvas renderer, used in ALL cases (wallpaper or
@@ -553,13 +843,22 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // addon bakes transparency in at load time. Canvas honors
       // allowTransparency (WebGL does not), so the wallpaper shows through
       // while still getting the GPU CPU win under heavy log output.
-      try {
-        const canvasAddon = new CanvasAddon()
-        terminal.loadAddon(canvasAddon)
-        canvasAddons.set(paneId, canvasAddon)
-      } catch (e) {
-        // If the canvas context can't be created, xterm falls back to DOM
+      //
+      // BUT only bake it now if the cell already has real dimensions. A pane
+      // added into a re-flowing grid is 0×0 for the first frames, and a canvas
+      // baked at 0×0 paints a permanently-blank pane. When 0-sized, defer the
+      // load to fitWhenSized (below), which fires once the cell is sized.
+      const containerSized =
+        terminalRef.current.offsetWidth > 0 && terminalRef.current.offsetHeight > 0
+      if (containerSized) {
+        ensureCanvasAddon(paneId, terminal)
       }
+      paneLog('info', 'canvas-init', {
+        paneId,
+        deferred: !containerSized,
+        w: terminalRef.current.offsetWidth,
+        h: terminalRef.current.offsetHeight,
+      })
 
       xtermRef.current = terminal
       fitAddonRef.current = fitAddon
@@ -567,17 +866,27 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // Store in module-level map
       terminals.set(paneId, { terminal, fitAddon })
 
-      // Delay fit to ensure container has dimensions
-      requestAnimationFrame(() => {
-        if (terminalRef.current && terminalRef.current.offsetWidth > 0) {
-          try {
-            fitAddon.fit()
-            terminal.scrollToBottom()
-          } catch (e) {
-            // Ignore fit errors
-          }
-        }
-      })
+      fitAttempts.set(paneId, 0)
+      ptyCreateResult.set(paneId, false)
+      paneLog('info', 'terminal-created', { paneId, cwd: pane.workingDirectory })
+
+      // Arm the blank-pane watchdog: if no PTY output ever arrives, log an ERROR
+      // with a full snapshot of why (container unsized, PTY never spawned, etc.).
+      armBlankWatchdog(paneId, () => ({
+        containerW: terminalRef.current?.offsetWidth ?? -1,
+        containerH: terminalRef.current?.offsetHeight ?? -1,
+        cols: xtermRef.current?.cols ?? -1,
+        rows: xtermRef.current?.rows ?? -1,
+        ptyCreateOk: ptyCreateResult.get(paneId) ?? null,
+        fitAttempts: fitAttempts.get(paneId) ?? 0,
+        attached: !!xtermRef.current?.element?.isConnected,
+      }))
+
+      // Fit once the container is actually sized (it can be 0×0 for the first
+      // frames while the new pane animates in via `pane-transition`). Retries
+      // until sized, then fits + syncs PTY size + repaints, so the pane never
+      // gets stuck blank when it happens to open at 0×0.
+      fitWhenSized(paneId, terminal, fitAddon, () => terminalRef.current)
 
       // Create PTY for this pane (only once globally)
       const initPty = async () => {
@@ -588,6 +897,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           paneId,
           pane.workingDirectory
         )
+        ptyCreateResult.set(paneId, success)
+        if (!success) {
+          paneLog('error', 'pty-create-failed', { paneId, cwd: pane.workingDirectory })
+        }
         if (success && xtermRef.current) {
           const { cols, rows } = xtermRef.current
           window.electronAPI.resizeTerminal(paneId, cols, rows)
@@ -652,13 +965,19 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         // Only Cmd on Mac to avoid conflict with Ctrl+1-4 terminal focus
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
         if (isMac && e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', 'p'].includes(key)) {
+          if (['1', '2', '3', '4', '5', 'p', 'b'].includes(key)) {
             return false
           }
         } else if (!isMac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', 'p'].includes(key)) {
+          if (['1', '2', '3', '4', '5', 'p', 'b'].includes(key)) {
             return false
           }
+        }
+
+        // Ctrl+Tab cycles the next pane into view (app-menu accelerator owns
+        // the action) — make sure xterm never feeds it to the shell as a tab.
+        if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'tab') {
+          return false
         }
 
         // Let xterm handle all other keys
@@ -689,7 +1008,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       resizeObserver.disconnect()
       // Don't dispose terminal or kill PTY - they persist in module-level storage
     }
-  }, [paneId]) // Remove pane.workingDirectory from deps to prevent re-init
+    // Deps are [paneId, paneExists] only. paneId is the identity; paneExists
+    // (!!pane) makes the effect RE-RUN when the pane appears in the store after
+    // an initial render where it was still undefined. Without it, a new pane's
+    // first render (where the store selector transiently returns undefined →
+    // the component renders null, so terminalRef.current is null) makes the
+    // guard below bail, and because paneId never changes the effect never runs
+    // again → a permanently blank pane with no terminal/PTY. Re-running is safe:
+    // the terminals.get(paneId) and initializedPtys guards make creation
+    // idempotent. We deliberately do NOT depend on pane.workingDirectory/state
+    // (those change often) to avoid re-initializing the terminal on every update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneId, !!pane])
 
   // Update font size when preference changes - preserve scroll position
   // Debounced to handle rapid Cmd+/- presses and notify PTY of new dimensions
@@ -793,7 +1123,17 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTerminalOutput(
       (outputPaneId, data) => {
-        if (outputPaneId === paneId && xtermRef.current) {
+        if (outputPaneId !== paneId) return
+        if (!xtermRef.current) {
+          // Output arrived but there's no terminal to write it to — it is
+          // dropped. This is one way a pane ends up blank; record it.
+          paneLog('warn', 'output-before-terminal', { paneId, bytes: data.length })
+          return
+        }
+        {
+          // Healthy output → cancel the blank-pane watchdog (logs first-byte latency).
+          notePaneOutput(paneId)
+          paneReceivedBytes.set(paneId, (paneReceivedBytes.get(paneId) ?? 0) + data.length)
           const terminal = xtermRef.current
 
           // Accumulate, then schedule one drain per pane (RAF + setTimeout
@@ -870,10 +1210,25 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           const paneConfig = store.panes.find((p) => p.id === paneId)
           initializedPtys.add(paneId)
           paneEnvProfile.set(paneId, null)
-          await window.electronAPI.createPty(
+          // Re-arm the blank-pane watchdog: the respawned shell must also print a
+          // prompt — if it never does, the pane goes blank and we want that logged.
+          armBlankWatchdog(paneId, () => ({
+            containerW: terminalRef.current?.offsetWidth ?? -1,
+            containerH: terminalRef.current?.offsetHeight ?? -1,
+            cols: xtermRef.current?.cols ?? -1,
+            rows: xtermRef.current?.rows ?? -1,
+            ptyCreateOk: ptyCreateResult.get(paneId) ?? null,
+            fitAttempts: fitAttempts.get(paneId) ?? 0,
+            attached: !!xtermRef.current?.element?.isConnected,
+          }))
+          const respawnOk = await window.electronAPI.createPty(
             paneId,
             paneConfig?.workingDirectory
           )
+          ptyCreateResult.set(paneId, respawnOk)
+          if (!respawnOk) {
+            paneLog('error', 'pty-respawn-failed', { paneId, cwd: paneConfig?.workingDirectory })
+          }
 
           // Clear and resize terminal - scroll to bottom since we cleared
           if (xtermRef.current && fitAddonRef.current && terminalRef.current) {
@@ -1024,8 +1379,20 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     if (draggedPaneId) {
       const sourcePaneId = parseInt(draggedPaneId, 10)
       if (sourcePaneId !== paneId) {
+        const store = useWorkspaceStore.getState()
+        const wasHidden =
+          store.panes.findIndex((p) => p.id === sourcePaneId) >=
+          visiblePaneCount(store.layout, store.panes.length)
         // Swap pane positions - this visually swaps them since grid uses array position
         swapPanes(sourcePaneId, paneId)
+        // Dragging a PiP tile onto a visible pane promotes it — make it active
+        // and focused, matching click-promote in the strip.
+        if (wasHidden) {
+          setActivePaneId(sourcePaneId)
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => focusTerminal(sourcePaneId))
+          })
+        }
       }
       return
     }

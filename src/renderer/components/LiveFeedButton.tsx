@@ -98,7 +98,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         title={`Live delegation feed (${scopeLabel}) — click to stop`}
       >
         <span aria-hidden>📡</span>
-        <span className="max-w-[90px] truncate">Live feed · {scopeLabel}</span>
+        <span className="pane-ctl-label max-w-[90px] truncate">Live feed · {scopeLabel}</span>
         <span className="opacity-60">×</span>
       </button>
     )
@@ -122,7 +122,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         title="Open the live delegation feed here — keep/delegate decisions + worker output. Pick which Claude session to follow, or all."
       >
         <span aria-hidden className="text-[11px] leading-none">📡</span>
-        <span className="text-[10px] leading-none">Live feed</span>
+        <span className="pane-ctl-label text-[10px] leading-none">Live feed</span>
         {candidates.length > 0 && (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M2 3.5L5 6.5L8 3.5" strokeLinecap="round" strokeLinejoin="round" />
