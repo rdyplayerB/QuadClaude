@@ -144,10 +144,10 @@ export const AgentsSettings = memo(function AgentsSettings() {
 
   return (
     <div role="group" aria-labelledby="agents-heading" className="mb-6">
-      <h3 id="agents-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">
+      <h3 id="agents-heading" className="text-body font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">
         Agents
       </h3>
-      <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
+      <p className="text-body text-[--ui-text-dimmed] mb-3">
         Launch any CLI agent in a pane — QuadClaude runs the command with these env vars and the tool
         (opencode, aider, …) handles the API. For a non-Claude model that still looks like Claude Code,
         use <span className="text-[--ui-text-muted]">Models</span> instead.
@@ -179,16 +179,16 @@ export const AgentsSettings = memo(function AgentsSettings() {
                 </svg>
               </button>
               <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm text-[--ui-text-primary] truncate">
+                <span className="text-body text-[--ui-text-primary] truncate">
                   {p.name}
-                  {isBuiltin && <span className="ml-1.5 text-[10px] text-[--ui-text-dimmed]">built-in</span>}
+                  {isBuiltin && <span className="ml-1.5 text-meta text-[--ui-text-dimmed]">built-in</span>}
                 </span>
-                <span className="text-[11px] text-[--ui-text-dimmed] truncate font-mono">{p.command}</span>
+                <span className="text-body text-[--ui-text-dimmed] truncate font-mono">{p.command}</span>
               </div>
               {!isBuiltin && (
                 <button
                   onClick={() => startEdit(p)}
-                  className="shrink-0 text-[11px] text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1.5 py-0.5"
+                  className="shrink-0 text-body text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1.5 py-0.5"
                 >
                   Edit
                 </button>
@@ -196,7 +196,7 @@ export const AgentsSettings = memo(function AgentsSettings() {
               {!isBuiltin && (
                 <button
                   onClick={() => remove(p.id)}
-                  className="shrink-0 text-[11px] text-[--ui-text-dimmed] hover:text-red-400 px-1.5 py-0.5"
+                  className="shrink-0 text-body text-[--ui-text-dimmed] hover:text-[--danger] px-1.5 py-0.5"
                 >
                   Delete
                 </button>
@@ -210,7 +210,7 @@ export const AgentsSettings = memo(function AgentsSettings() {
       {!editor && !choosingPreset && (
         <button
           onClick={() => setChoosingPreset(true)}
-          className="text-xs text-[--accent] hover:underline"
+          className="text-body text-[--accent] hover:underline"
         >
           + Add agent
         </button>
@@ -218,50 +218,50 @@ export const AgentsSettings = memo(function AgentsSettings() {
 
       {choosingPreset && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-[--ui-text-dimmed]">Start from:</span>
+          <span className="text-body text-[--ui-text-dimmed]">Start from:</span>
           {AGENT_PRESETS.map((preset) => (
             <button
               key={preset.label}
               onClick={() => startAdd(preset)}
-              className="text-xs px-2 py-1 rounded glass-control text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50"
+              className="text-body px-2 py-1 rounded glass-control text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50"
             >
               {preset.label}
             </button>
           ))}
-          <button onClick={cancel} className="text-[11px] text-[--ui-text-dimmed] hover:text-[--ui-text-primary]">
+          <button onClick={cancel} className="text-body text-[--ui-text-dimmed] hover:text-[--ui-text-primary]">
             Cancel
           </button>
         </div>
       )}
 
       {editor && (
-        <div className="rounded-md border border-[#444] p-3 space-y-3">
+        <div className="rounded-md border border-[--border] p-3 space-y-3">
           {editor.note && (
-            <p className="text-[11px] text-[--ui-text-primary] bg-[--accent]/10 border border-[--accent]/30 rounded px-2 py-1.5">
+            <p className="text-body text-[--ui-text-primary] bg-[--accent]/10 border border-[--accent]/30 rounded px-2 py-1.5">
               {editor.note}
             </p>
           )}
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">Name</label>
+            <label className="text-body text-[--ui-text-dimmed]">Name</label>
             <input
               value={editor.name}
               onChange={(e) => setEditor({ ...editor, name: e.target.value })}
               placeholder="Qwen Coder"
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body text-[--ui-text-primary] outline-none focus:border-[--accent]"
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">Command</label>
+            <label className="text-body text-[--ui-text-dimmed]">Command</label>
             <input
               value={editor.command}
               onChange={(e) => setEditor({ ...editor, command: e.target.value })}
               placeholder="opencode"
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-[11px] text-[--ui-text-dimmed]">
+            <label className="text-body text-[--ui-text-dimmed]">
               Environment variables (injected at launch, never echoed)
             </label>
             {editor.env.map((row, i) => {
@@ -273,19 +273,19 @@ export const AgentsSettings = memo(function AgentsSettings() {
                     value={row.key}
                     onChange={(e) => updateEnvRow(i, { key: e.target.value })}
                     placeholder="OPENAI_BASE_URL"
-                    className="w-[42%] bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-xs font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+                    className="w-[42%] bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
                   />
                   <input
                     type={secret && !show ? 'password' : 'text'}
                     value={row.value}
                     onChange={(e) => updateEnvRow(i, { value: e.target.value })}
                     placeholder="value"
-                    className="flex-1 bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-xs font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+                    className="flex-1 bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
                   />
                   {secret && (
                     <button
                       onClick={() => setRevealed((r) => ({ ...r, [i]: !r[i] }))}
-                      className="shrink-0 text-[10px] text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1"
+                      className="shrink-0 text-meta text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1"
                       title={show ? 'Hide' : 'Reveal'}
                     >
                       {show ? 'Hide' : 'Show'}
@@ -293,7 +293,7 @@ export const AgentsSettings = memo(function AgentsSettings() {
                   )}
                   <button
                     onClick={() => removeEnvRow(i)}
-                    className="shrink-0 text-[--ui-text-dimmed] hover:text-red-400 px-1"
+                    className="shrink-0 text-[--ui-text-dimmed] hover:text-[--danger] px-1"
                     title="Remove"
                   >
                     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -303,10 +303,10 @@ export const AgentsSettings = memo(function AgentsSettings() {
                 </div>
               )
             })}
-            <button onClick={addEnvRow} className="self-start text-[11px] text-[--accent] hover:underline">
+            <button onClick={addEnvRow} className="self-start text-body text-[--accent] hover:underline">
               + Add variable
             </button>
-            <p className="text-[10px] text-[--ui-text-dimmed]">
+            <p className="text-meta text-[--ui-text-dimmed]">
               Verify the exact env vars / config your tool needs (e.g. opencode may use its own config file).
             </p>
           </div>
@@ -315,11 +315,11 @@ export const AgentsSettings = memo(function AgentsSettings() {
             <button
               onClick={save}
               disabled={!editor.name.trim() || !editor.command.trim()}
-              className="text-xs px-3 py-1 rounded bg-[--accent] text-white disabled:opacity-40"
+              className="text-body px-3 py-1 rounded bg-[--accent] text-white disabled:opacity-40"
             >
               Save
             </button>
-            <button onClick={cancel} className="text-xs px-3 py-1 rounded glass-control text-[--ui-text-primary]">
+            <button onClick={cancel} className="text-body px-3 py-1 rounded glass-control text-[--ui-text-primary]">
               Cancel
             </button>
           </div>

@@ -80,20 +80,20 @@ export const LayoutSelector = memo(function LayoutSelector() {
 
         return (
           <div key={layoutMode} className="flex items-center">
-            {i > 0 && <span className="text-[--ui-text-faint] text-xs px-1">│</span>}
+            {i > 0 && <span className="text-[--ui-text-dimmed] text-body px-1">│</span>}
             <button
               onClick={() => setLayout(layoutMode)}
               className={`flex items-center gap-1.5 px-2 py-1 transition-colors titlebar-no-drag ${
                 isActive
                   ? 'text-[--ui-text-primary]'
-                  : 'text-[--ui-text-dimmed] hover:text-[--ui-text-secondary]'
+                  : 'text-[--ui-text-secondary] hover:text-[--ui-text-primary]'
               }`}
               title={layoutTitles[layoutMode]}
               aria-label={`Switch to ${layoutMode} layout`}
               aria-pressed={isActive}
             >
               {layoutIcons[layoutMode]}
-              <span className="text-[11px] leading-none">{layoutLabels[layoutMode]}</span>
+              <span className="text-body leading-none">{layoutLabels[layoutMode]}</span>
             </button>
           </div>
         )

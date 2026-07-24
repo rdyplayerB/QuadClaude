@@ -103,27 +103,27 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
           <rect x="1" y="3.5" width="7.5" height="7.5" rx="1" />
           <path d="M5 3.5V2.5a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1h-1" strokeLinecap="round" />
         </svg>
-        <span className="pane-ctl-label text-[10px] leading-none">Fork</span>
+        <span className="pane-ctl-label text-meta leading-none">Fork</span>
       </button>
 
       {pickerOpen && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
+          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
           style={getPosition()}
         >
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-dimmed] border-b border-[#444]">
+          <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-dimmed] border-b border-[--border]">
             No free pane — override:
           </div>
           {others.map((p) => (
             <button
               key={p.id}
-              className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 flex items-center justify-between gap-2"
+              className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 flex items-center justify-between gap-2"
               onClick={() => launchIn(p.id)}
               title={`Open here and start Claude (replaces what's running)`}
             >
               <span className="text-[--ui-text-primary] truncate">{p.label}</span>
-              <span className="text-[10px] text-[--ui-text-dimmed] shrink-0">
+              <span className="text-meta text-[--ui-text-dimmed] shrink-0">
                 {paneStatus(p.state, p.servers?.length ?? 0)}
               </span>
             </button>

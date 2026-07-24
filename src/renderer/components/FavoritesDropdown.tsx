@@ -80,30 +80,30 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
         <svg width="15" height="15" viewBox="0 0 14 14" fill={isCwdStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.2">
           <path d="M7 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L7 10.5l-3.52 1.85.67-3.93L1.3 5.64l3.94-.57L7 1.5z"/>
         </svg>
-        <span className="pane-ctl-label text-[10px] font-mono leading-none">Favorites</span>
+        <span className="pane-ctl-label text-meta font-mono leading-none">Favorites</span>
       </button>
 
       {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-50 w-[220px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
+          className="fixed z-50 w-[220px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
           style={getPosition()}
         >
           {/* Favorite list */}
           {favorites.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-[--ui-text-muted]">No favorites yet</div>
+            <div className="px-3 py-2 text-body text-[--ui-text-muted]">No favorites yet</div>
           ) : (
             <div className="max-h-[200px] overflow-y-auto">
               {favorites.map((path) => (
                 <div
                   key={path}
-                  className="group/fav flex items-center gap-1 px-3 py-1.5 hover:bg-[--ui-bg-active]/50 cursor-pointer text-xs"
+                  className="group/fav flex items-center gap-1 px-3 py-1.5 hover:bg-[--ui-bg-active]/50 cursor-pointer text-body"
                   onClick={() => navigateTo(path)}
                   title={path}
                 >
                   <span className="truncate flex-1 text-[--ui-text-primary]">{getFolderName(path)}</span>
                   <button
-                    className="shrink-0 p-0.5 text-[--ui-text-muted] hover:text-red-400 opacity-0 group-hover/fav:opacity-100 transition-opacity"
+                    className="shrink-0 p-0.5 text-[--ui-text-muted] hover:text-[--danger] opacity-0 group-hover/fav:opacity-100 transition-opacity"
                     onClick={(e) => {
                       e.stopPropagation()
                       removeFavorite(path)
@@ -120,11 +120,11 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
           )}
 
           {/* Divider */}
-          <div className="border-t border-[#444]" />
+          <div className="border-t border-[--border]" />
 
           {/* Star/Unstar current directory */}
           <button
-            className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 flex items-center gap-2"
             onClick={() => {
               if (isCwdStarred) {
                 removeFavorite(currentDirectory)

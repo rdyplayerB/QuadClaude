@@ -41,13 +41,13 @@ function PromptModal({ prompt, onSave, onClose }: {
     >
       <div className="bg-[--ui-bg-elevated] border border-[--ui-border] rounded-xl shadow-2xl w-[480px] max-w-[90vw]">
         <div className="px-5 pt-4 pb-3 border-b border-white/[0.06]">
-          <h2 className="text-sm font-medium text-[--ui-text-primary]">
+          <h2 className="text-body font-medium text-[--ui-text-primary]">
             {prompt ? 'Edit Prompt' : 'New Prompt'}
           </h2>
         </div>
         <div className="p-5 space-y-4">
           <div>
-            <label className="block text-xs text-[--ui-text-muted] mb-1.5">Name</label>
+            <label className="block text-body text-[--ui-text-muted] mb-1.5">Name</label>
             <input
               ref={nameRef}
               type="text"
@@ -56,12 +56,12 @@ function PromptModal({ prompt, onSave, onClose }: {
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Escape') onClose() }}
               maxLength={MAX_PROMPT_NAME_LENGTH}
-              className="w-full px-3 py-2 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-faint] rounded-lg focus:border-[--accent] focus:outline-none"
+              className="w-full px-3 py-2 text-body bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-faint] rounded-lg focus:border-[--accent] focus:outline-none"
             />
-            <div className="text-[10px] text-[--ui-text-faint] mt-1 text-right">{name.length}/{MAX_PROMPT_NAME_LENGTH}</div>
+            <div className="text-meta text-[--ui-text-faint] mt-1 text-right">{name.length}/{MAX_PROMPT_NAME_LENGTH}</div>
           </div>
           <div>
-            <label className="block text-xs text-[--ui-text-muted] mb-1.5">Prompt Text</label>
+            <label className="block text-body text-[--ui-text-muted] mb-1.5">Prompt Text</label>
             <textarea
               placeholder="The text that will be injected into the active terminal..."
               value={text}
@@ -71,14 +71,14 @@ function PromptModal({ prompt, onSave, onClose }: {
                 if (e.key === 'Escape') onClose()
               }}
               rows={8}
-              className="w-full px-3 py-2 text-sm bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-faint] rounded-lg focus:border-[--accent] focus:outline-none resize-y font-mono"
+              className="w-full px-3 py-2 text-body bg-[--ui-bg-primary] border border-[--ui-border] text-[--ui-text-primary] placeholder-[--ui-text-faint] rounded-lg focus:border-[--accent] focus:outline-none resize-y font-mono"
               style={{ minHeight: '120px', maxHeight: '50vh' }}
             />
           </div>
         </div>
         <div className="px-5 pb-4 flex gap-2 justify-end">
-          <button onClick={onClose} className="px-4 py-2 text-xs bg-[--ui-bg-active] text-[--ui-text-secondary] rounded-lg hover:bg-[--ui-border] transition-all">Cancel</button>
-          <button onClick={handleSave} disabled={!name.trim() || !text.trim()} className="px-4 py-2 text-xs bg-[--accent] text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-all">
+          <button onClick={onClose} className="px-4 py-2 text-body bg-[--ui-bg-active] text-[--ui-text-secondary] rounded-lg hover:bg-[--ui-border] transition-all">Cancel</button>
+          <button onClick={handleSave} disabled={!name.trim() || !text.trim()} className="px-4 py-2 text-body bg-[--accent] text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition-all">
             {prompt ? 'Save Changes' : 'Create Prompt'}
           </button>
         </div>
@@ -177,8 +177,8 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
       onClick={() => { onSelectPrompt(prompt); setShowOverflow(false) }}
       onContextMenu={(e) => handleContextMenu(e, prompt)}
       className={inDropdown
-        ? "flex items-center gap-2.5 w-full px-3 py-2 text-[13px] text-[--ui-text-primary] hover:bg-white/[0.06] text-left transition-colors"
-        : "flex items-center gap-1.5 px-2.5 py-0.5 text-[12px] text-white/80 hover:text-white bg-white/[0.08] hover:bg-white/[0.14] rounded-[4px] transition-all shrink-0"
+        ? "flex items-center gap-2.5 w-full px-3 py-2 text-heading text-[--ui-text-primary] hover:bg-white/[0.06] text-left transition-colors"
+        : "flex items-center gap-1.5 px-2.5 py-0.5 text-body text-white/80 hover:text-white bg-white/[0.08] hover:bg-white/[0.14] rounded-md transition-all shrink-0"
       }
       title={prompt.text}
     >
@@ -219,7 +219,7 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
         {/* Add button */}
         <button
           onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-1 px-2 py-1 text-[12px] text-white/60 hover:text-white hover:bg-white/[0.08] rounded transition-colors shrink-0"
+          className="flex items-center gap-1 px-2 py-1 text-body text-white/60 hover:text-white hover:bg-white/[0.08] rounded transition-colors shrink-0"
           title="Add prompt"
         >
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
@@ -239,7 +239,7 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
         >
           <button
             onClick={() => { setShowCreateModal(true); setContextMenu(null) }}
-            className="w-full px-3 py-1.5 text-xs text-[--ui-text-primary] hover:bg-white/[0.08] text-left transition-colors"
+            className="w-full px-3 py-1.5 text-body text-[--ui-text-primary] hover:bg-white/[0.08] text-left transition-colors"
           >
             Add Prompt...
           </button>
@@ -248,14 +248,14 @@ export const PromptToolbar = memo(function PromptToolbar({ onSelectPrompt }: Pro
               const p = savedPrompts.find(p => p.id === contextMenu.promptId)
               if (p) { setEditingPrompt(p); setContextMenu(null) }
             }}
-            className="w-full px-3 py-1.5 text-xs text-[--ui-text-primary] hover:bg-white/[0.08] text-left transition-colors"
+            className="w-full px-3 py-1.5 text-body text-[--ui-text-primary] hover:bg-white/[0.08] text-left transition-colors"
           >
             Edit...
           </button>
           <div className="my-1 border-t border-white/[0.06]" />
           <button
             onClick={() => handleDelete(contextMenu.promptId)}
-            className="w-full px-3 py-1.5 text-xs text-red-400 hover:bg-white/[0.08] text-left transition-colors"
+            className="w-full px-3 py-1.5 text-body text-[--danger] hover:bg-white/[0.08] text-left transition-colors"
           >
             Delete
           </button>

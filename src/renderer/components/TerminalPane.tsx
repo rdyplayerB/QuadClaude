@@ -1522,12 +1522,12 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       </div>
       {isDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
-          <div className="text-[--accent] text-sm font-medium">Drop file here</div>
+          <div className="text-[--accent] text-body font-medium">Drop file here</div>
         </div>
       )}
       {isPaneDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
-          <div className="text-[--accent] text-sm font-medium">Swap terminals</div>
+          <div className="text-[--accent] text-body font-medium">Swap terminals</div>
         </div>
       )}
     </div>

@@ -87,7 +87,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
 
   return (
     <div
-      className="pane-header glass-pane-header overflow-hidden flex items-center font-mono text-[12px] titlebar-no-drag transition-colors h-8"
+      className="pane-header glass-pane-header overflow-hidden flex items-center font-mono text-body titlebar-no-drag transition-colors h-8"
       style={{
         borderBottom: `1px solid ${isActive ? paneColor + '40' : 'rgba(255,255,255,0.06)'}`,
       }}
@@ -116,7 +116,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         draggable={false}
       >
         {servers.length > 0 && (
-          <div className="flex items-center gap-1.5 font-mono text-[10px] leading-none">
+          <div className="flex items-center gap-1.5 font-mono text-meta leading-none">
             {servers.map((s) => (
               <div
                 key={s.pid}
@@ -152,7 +152,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
 
         {/* Git status - compact inline */}
         {pane.gitStatus?.isGitRepo && (
-          <div className="flex items-center gap-1.5 font-mono text-[10px] mr-1">
+          <div className="flex items-center gap-1.5 font-mono text-meta mr-1">
             <span className="flex items-center gap-1">
               <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-green]">
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
@@ -174,7 +174,7 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         <OpenInPaneButton paneId={paneId} />
         {pane.pairId && (
           <span
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-none capitalize shrink-0"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-meta leading-none capitalize shrink-0"
             style={{ color: pane.pairColor, backgroundColor: `${pane.pairColor}1a` }}
             title={`Paired (${pane.pairRole}) — manage in the agent menu`}
           >
@@ -188,13 +188,13 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
         <AgentBadge paneId={paneId} />
         <button
           onClick={() => restartShell(paneId, pane.workingDirectory)}
-          className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-red-400 transition-colors rounded"
+          className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--danger] transition-colors rounded"
           title="Stop — kill the running process and reset the shell (recovers a locked pane)"
         >
           <svg width="11" height="11" viewBox="0 0 14 14" fill="currentColor">
             <rect x="3" y="3" width="8" height="8" rx="1.5" />
           </svg>
-          <span className="pane-ctl-label text-[10px] leading-none">Stop</span>
+          <span className="pane-ctl-label text-meta leading-none">Stop</span>
         </button>
         <button
           onClick={() => clearTerminal(paneId)}
@@ -207,14 +207,14 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
             <path d="M2.5 13.5h7" />
             <path d="M9.5 13.5 13.5 9.5a1.3 1.3 0 0 0 0-1.8L9.8 4a1.3 1.3 0 0 0-1.8 0l-5 5a1.3 1.3 0 0 0 0 1.8l2.7 2.7H9.5Z" />
           </svg>
-          <span className="pane-ctl-label text-[10px] leading-none">Clear</span>
+          <span className="pane-ctl-label text-meta leading-none">Clear</span>
         </button>
         {/* Close button — only on extra panes (slot 5+); the original four
             are permanent. */}
         {canClose && (
           <button
             onClick={closePane}
-            className="flex items-center px-1 py-0.5 text-[--ui-text-dimmed] hover:text-red-400 transition-colors rounded"
+            className="flex items-center px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--danger] transition-colors rounded"
             title="Close terminal"
             aria-label="Close terminal"
           >

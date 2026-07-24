@@ -94,7 +94,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
     return (
       <button
         onClick={stop}
-        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] leading-none shrink-0 text-[--git-cyan] bg-[--git-cyan]/10 hover:bg-[--git-cyan]/20 transition-colors"
+        className="flex items-center gap-1 px-1.5 py-0.5 rounded text-meta leading-none shrink-0 text-[--git-cyan] bg-[--git-cyan]/10 hover:bg-[--git-cyan]/20 transition-colors"
         title={`Live delegation feed (${scopeLabel}) — click to stop`}
       >
         <span aria-hidden>📡</span>
@@ -121,8 +121,8 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--git-cyan] transition-colors rounded"
         title="Open the live delegation feed here — keep/delegate decisions + worker output. Pick which Claude session to follow, or all."
       >
-        <span aria-hidden className="text-[11px] leading-none">📡</span>
-        <span className="pane-ctl-label text-[10px] leading-none">Live feed</span>
+        <span aria-hidden className="text-body leading-none">📡</span>
+        <span className="pane-ctl-label text-meta leading-none">Live feed</span>
         {candidates.length > 0 && (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M2 3.5L5 6.5L8 3.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -133,30 +133,30 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
       {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
+          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
           style={getPosition()}
         >
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+          <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-muted]">
             Follow which session?
           </div>
           <button
             onClick={() => start(undefined)}
-            className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
           >
             <span aria-hidden>🌐</span> All delegations
           </button>
-          <div className="border-t border-[#444]" />
+          <div className="border-t border-[--border]" />
           <div className="max-h-[180px] overflow-y-auto">
             {candidates.map((c) => (
               <button
                 key={c.id}
                 onClick={() => start(c.id)}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
               >
                 <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[--git-green] animate-pulse" />
                 <span className="truncate flex-1">{c.name || c.term}</span>
                 {c.name && (
-                  <span className="text-[9px] text-[--ui-text-muted] shrink-0">{c.term}</span>
+                  <span className="text-meta text-[--ui-text-muted] shrink-0">{c.term}</span>
                 )}
               </button>
             ))}

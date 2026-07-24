@@ -117,7 +117,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
 
   if (!isInitialized || paneIds.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-[--ui-text-dimmed] font-mono text-sm bg-[--ui-bg-base]">
+      <div className="h-full flex items-center justify-center text-[--ui-text-dimmed] font-mono text-body bg-[--ui-bg-base]">
         Loading...
       </div>
     )
@@ -203,7 +203,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M12 5v14M5 12h14" strokeLinecap="round" />
           </svg>
-          <span className="text-[11px] font-mono">Add terminal</span>
+          <span className="text-body font-mono">Add terminal</span>
         </button>
       )}
       {isFocus && (

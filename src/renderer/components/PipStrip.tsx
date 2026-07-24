@@ -199,11 +199,11 @@ export const PipStripChrome = memo(function PipStripChrome({
       <button
         style={pillStyle}
         onClick={() => setPipCollapsed(false)}
-        className="glass-modal flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/15 shadow-xl font-mono text-[11px] text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:border-white/30 transition-colors"
+        className="glass-modal flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-white/15 shadow-xl font-mono text-body text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:border-white/30 transition-colors"
         title={`Show ${hiddenPaneIds.length} hidden pane${hiddenPaneIds.length === 1 ? '' : 's'}`}
         aria-label="Expand PiP strip"
       >
-        {anyWaiting && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />}
+        {anyWaiting && <span className="w-2 h-2 rounded-full bg-[--warning] animate-pulse shrink-0" />}
         <span>◫ {hiddenPaneIds.length}</span>
       </button>
     )
@@ -226,7 +226,7 @@ export const PipStripChrome = memo(function PipStripChrome({
       {/* Strip header: drag handle + count + collapse (z-31, above tiles). */}
       <div
         onMouseDown={startMove}
-        className="absolute flex items-center gap-1.5 px-2 cursor-grab active:cursor-grabbing font-mono text-[10px] text-[--ui-text-dimmed] select-none"
+        className="absolute flex items-center gap-1.5 px-2 cursor-grab active:cursor-grabbing font-mono text-meta text-[--ui-text-dimmed] select-none"
         style={{
           left: geometry.strip.left,
           top: geometry.strip.top,
@@ -280,14 +280,14 @@ export const PipStripChrome = memo(function PipStripChrome({
             aria-label={`Bring ${label} into view`}
           >
             <div
-              className="flex items-center gap-1.5 px-1.5 font-mono text-[10px] overflow-hidden"
+              className="flex items-center gap-1.5 px-1.5 font-mono text-meta overflow-hidden"
               style={{ height: TILE_HEADER_H }}
             >
               <span
                 className={`w-2 h-2 rounded-full shrink-0 ${waiting ? 'animate-pulse' : ''}`}
                 style={{ backgroundColor: waiting ? '#fbbf24' : color }}
               />
-              <span className={`truncate ${waiting ? 'text-amber-300' : 'text-[--ui-text-secondary]'}`}>
+              <span className={`truncate ${waiting ? 'text-[--warning]' : 'text-[--ui-text-secondary]'}`}>
                 {label}
               </span>
               {pane.pairColor && (

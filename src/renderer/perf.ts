@@ -100,7 +100,3 @@ export function startPerfReporter() {
   // First report shortly after startup once terminals have mounted.
   setTimeout(sendReport, 1500)
 }
-
-export function stopFrameTracking() {
-  if (rafHandle) cancelAnimationFrame(rafHandle)
-}

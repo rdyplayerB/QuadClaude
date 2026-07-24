@@ -146,7 +146,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           className={`w-1.5 h-1.5 rounded-full shrink-0 ${claudeRunning ? 'animate-pulse' : ''}`}
           style={{ backgroundColor: claudeRunning ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }}
         />
-        <span className="pane-ctl-label text-[10px] leading-none max-w-[110px] truncate">
+        <span className="pane-ctl-label text-meta leading-none max-w-[110px] truncate">
           {claudeRunning ? 'Running' : paneProfile.name}
         </span>
       </button>
@@ -165,10 +165,10 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
       {open && createPortal(
         <div
           ref={panelRef}
-          className="fixed z-50 w-[230px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
+          className="fixed z-50 w-[230px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
           style={getPosition()}
         >
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+          <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-muted]">
             Launch
           </div>
           <div className="max-h-[300px] overflow-y-auto">
@@ -182,7 +182,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   key={key}
                   onClick={() => !disabled && launchAs(p.id, accountId)}
                   disabled={disabled}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 transition-colors disabled:opacity-40"
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 transition-colors disabled:opacity-40"
                   title={title}
                 >
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: current ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }} />
@@ -212,17 +212,17 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           </div>
 
           {/* Pairing */}
-          <div className="border-t border-[#444]" />
+          <div className="border-t border-[--border]" />
           {pane.pairId ? (
             <div className="py-1">
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+              <div className="px-3 py-1 text-meta uppercase tracking-wide text-[--ui-text-muted]">
                 Paired · {pane.pairRole}
               </div>
               <button
                 onClick={() => {
                   swapPairRoles(paneId)
                 }}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
               >
                 Swap roles
               </button>
@@ -231,24 +231,24 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   unpairPane(paneId)
                   closeMenu()
                 }}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
               >
                 Unpair
               </button>
             </div>
           ) : pairMode ? (
             <div className="py-1 max-h-[160px] overflow-y-auto">
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+              <div className="px-3 py-1 text-meta uppercase tracking-wide text-[--ui-text-muted]">
                 Pair as orchestrator with…
               </div>
               {pairTargets.length === 0 ? (
-                <div className="px-3 py-1.5 text-xs text-[--ui-text-dimmed]">No other panes</div>
+                <div className="px-3 py-1.5 text-body text-[--ui-text-dimmed]">No other panes</div>
               ) : (
                 pairTargets.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => doPair(t.id)}
-                    className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] truncate"
+                    className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] truncate"
                   >
                     {t.label}
                   </button>
@@ -258,7 +258,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           ) : (
             <button
               onClick={enterPairMode}
-              className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+              className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
             >
               <span aria-hidden>🔗</span> Pair with…
             </button>

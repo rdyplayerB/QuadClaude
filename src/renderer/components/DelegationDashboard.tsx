@@ -290,21 +290,21 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
   // The expanded body of a Call — verdict recording + metadata + prompt/output. Shared by
   // delegate-decision rows and orphan-call rows so Issues review & verdicts never get lost.
   const CallDetail = ({ e }: { e: DelegationEvent }) => (
-    <div className="px-4 pb-4 pt-1 space-y-2 text-[11px] border-t glass-border">
+    <div className="px-4 pb-4 pt-1 space-y-2 text-body border-t glass-border">
       {(e.exit !== 0 || (e.check && e.check.exit !== 0)) && (
-        <div className="text-[10px] text-amber-300/90 flex items-start gap-1.5">
+        <div className="text-meta text-[--warning]/90 flex items-start gap-1.5">
           <span aria-hidden>⚠</span>
           <span>{e.check && e.check.exit !== 0 ? "This check failed — the delegated code didn't pass." : 'The worker errored.'} Nothing to fix here — just record what you ultimately did with it, so the evaluator learns whether the check was right.</span>
         </div>
       )}
       <div className="flex items-center flex-wrap gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted]">Your outcome</span>
+        <span className="text-meta uppercase tracking-wide text-[--ui-text-muted]">Your outcome</span>
         {([['ship', 'Shipped ✓', 'Shipped — you kept it in your codebase as-is'], ['revert', 'Reverted ↩', "Reverted — you threw it away / didn't use it"], ['edit', 'Edited ✎', 'Edited — you kept it but had to fix it yourself']] as const).map(([v, label, help]) => (
           <button key={v} onClick={(ev) => { ev.stopPropagation(); recordVerdict(e.task, v) }} disabled={e.task === 'untagged'}
-            className={`px-2 py-0.5 rounded text-[10px] transition-all disabled:opacity-40 ${e.humanVerdict === v ? 'bg-[--accent] text-white' : 'glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]'}`}
+            className={`px-2 py-0.5 rounded text-meta transition-all disabled:opacity-40 ${e.humanVerdict === v ? 'bg-[--accent] text-white' : 'glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]'}`}
             title={e.task === 'untagged' ? 'No QC_TASK tag to record against' : help}>{label}</button>
         ))}
-        <span className="text-[10px] text-[--ui-text-dimmed]">— did the delegated change stick?</span>
+        <span className="text-meta text-[--ui-text-dimmed]">— did the delegated change stick?</span>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[--ui-text-dimmed]">
         <span>project: <span className="text-[--ui-text-secondary]">{e.project}</span></span>
@@ -318,16 +318,16 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
       {e.promptPreview && (
         <div>
           <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[10px] uppercase tracking-wide text-[--ui-text-muted]">Prompt <span className="normal-case text-[--ui-text-dimmed]">(preview)</span></span>
-            <button onClick={(ev) => { ev.stopPropagation(); openFullPrompt(e.ts, e.task, e.task) }} className="text-[10px] text-[--accent] hover:underline">View full ↗</button>
+            <span className="text-meta uppercase tracking-wide text-[--ui-text-muted]">Prompt <span className="normal-case text-[--ui-text-dimmed]">(preview)</span></span>
+            <button onClick={(ev) => { ev.stopPropagation(); openFullPrompt(e.ts, e.task, e.task) }} className="text-meta text-[--accent] hover:underline">View full ↗</button>
           </div>
-          <pre className="whitespace-pre-wrap font-mono text-[10px] text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-32 overflow-y-auto">{e.promptPreview}</pre>
+          <pre className="whitespace-pre-wrap font-mono text-meta text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-32 overflow-y-auto">{e.promptPreview}</pre>
         </div>
       )}
       {e.outputPreview && (
         <div>
-          <div className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] mb-0.5">Worker output (tail)</div>
-          <pre className="whitespace-pre-wrap font-mono text-[10px] text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-40 overflow-y-auto">{e.outputPreview}</pre>
+          <div className="text-meta uppercase tracking-wide text-[--ui-text-muted] mb-0.5">Worker output (tail)</div>
+          <pre className="whitespace-pre-wrap font-mono text-meta text-[--ui-text-secondary] bg-black/20 rounded p-2 max-h-40 overflow-y-auto">{e.outputPreview}</pre>
         </div>
       )}
     </div>
@@ -336,48 +336,50 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
   // The inline shadow band shown under a shadow-tested KEEP decision.
   const ShadowBand = ({ s }: { s: ShadowVerdict }) => {
     const c = shadowChrome(s)
-    const color = c.tone === 'over' ? 'text-amber-300' : c.tone === 'earned' ? 'text-emerald-300' : 'text-[--ui-text-dimmed]'
+    const color = c.tone === 'over' ? 'text-[--warning]' : c.tone === 'earned' ? 'text-[--success]' : 'text-[--ui-text-dimmed]'
     return (
-      <div className="mt-2 inline-flex items-center gap-2.5 text-[12px] bg-white/[0.035] border glass-border rounded-lg px-2.5 py-1.5">
-        <span className="text-[9px] font-mono uppercase tracking-[0.1em] text-[--ui-text-dimmed]">shadow</span>
+      <div className="mt-2 inline-flex items-center gap-2.5 text-body bg-[--surface-2] border glass-border rounded-lg px-2.5 py-1.5">
+        <span className="text-meta font-mono uppercase tracking-[0.1em] text-[--ui-text-dimmed]">shadow</span>
         <span className={`font-semibold ${color}`}>{c.text}</span>
         <span className="text-[--ui-text-dimmed]">— {c.note}</span>
       </div>
     )
   }
 
+  // --ui-scale is pinned to 1 on the backdrop: the dashboard carries its own
+  // zoom (further down), so the chrome zoom must not compound with it.
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`glass-modal glass-border rounded-2xl shadow-2xl w-[95vw] max-w-[1760px] ${view === 'decisions' ? 'h-[90vh]' : 'h-auto max-h-[90vh]'} flex flex-col overflow-hidden backdrop-blur-xl`} role="dialog" aria-modal="true" aria-label="Delegation dashboard">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6" style={{ '--ui-scale': 1 } as React.CSSProperties} role="presentation" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className={`glass-modal glass-border rounded-xl shadow-2xl w-[95vw] max-w-[1760px] ${view === 'decisions' ? 'h-[90vh]' : 'h-auto max-h-[90vh]'} flex flex-col overflow-hidden backdrop-blur-xl`} role="dialog" aria-modal="true" aria-label="Delegation dashboard">
         {/* Header */}
         <div className="flex items-start justify-between px-6 py-3.5 border-b glass-border shrink-0 gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h2 className="text-[15px] font-semibold text-[--ui-text-primary] tracking-tight">Delegation</h2>
+              <h2 className="text-title font-semibold text-[--ui-text-primary] tracking-tight">Delegation</h2>
               <button
                 onClick={() => updatePreferences({ delegation: { ...preferences.delegation, enabled: !enabled } })}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] transition-all ${enabled ? 'bg-emerald-400/15 text-emerald-300' : 'glass-control text-[--ui-text-muted]'}`}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-body transition-all ${enabled ? 'bg-[--success-soft] text-[--success]' : 'glass-control text-[--ui-text-muted]'}`}
                 title="Toggle delegation">
-                <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-[--ui-text-dimmed]'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${enabled ? 'bg-[--success]' : 'bg-[--ui-text-dimmed]'}`} />
                 {enabled ? 'Enabled' : 'Disabled'}
               </button>
               {enabled && (capable
-                ? <span className="text-[11px] text-[--ui-text-dimmed] truncate">→ <span className="font-mono text-[--ui-text-secondary]">{shortRoute(status!.route)}</span></span>
-                : <span className="text-[11px] text-amber-300 truncate">No model set — configure one in Settings → Models</span>)}
+                ? <span className="text-body text-[--ui-text-dimmed] truncate">→ <span className="font-mono text-[--ui-text-secondary]">{shortRoute(status!.route)}</span></span>
+                : <span className="text-body text-[--warning] truncate">No model set — configure one in Settings → Models</span>)}
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {/* Zoom — also bound to Cmd +/- while the dashboard is open. */}
             {onScaleChange && (
               <div className="flex items-center glass-control rounded-lg overflow-hidden mr-0.5" title="Dashboard zoom (Cmd +/−). Click % to reset.">
-                <button onClick={() => onScaleChange(scale - 0.1)} className="px-2 py-1.5 text-sm text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/40" aria-label="Zoom out">−</button>
-                <button onClick={() => onScaleChange(1)} className="px-1.5 py-1.5 text-[11px] tabular-nums text-[--ui-text-dimmed] hover:text-[--ui-text-primary] min-w-[40px]">{Math.round(scale * 100)}%</button>
-                <button onClick={() => onScaleChange(scale + 0.1)} className="px-2 py-1.5 text-sm text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/40" aria-label="Zoom in">+</button>
+                <button onClick={() => onScaleChange(scale - 0.1)} className="px-2 py-1.5 text-body text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/40" aria-label="Zoom out">−</button>
+                <button onClick={() => onScaleChange(1)} className="px-1.5 py-1.5 text-body tabular-nums text-[--ui-text-dimmed] hover:text-[--ui-text-primary] min-w-[40px]">{Math.round(scale * 100)}%</button>
+                <button onClick={() => onScaleChange(scale + 0.1)} className="px-2 py-1.5 text-body text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/40" aria-label="Zoom in">+</button>
               </div>
             )}
-            <button onClick={refresh} className="px-2.5 py-1.5 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]" title="Refresh">Refresh</button>
-            <button onClick={copyLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary] disabled:opacity-40" title="Copy the full log to clipboard">Copy log</button>
-            <button onClick={saveLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-xs rounded-lg bg-[--accent] text-white hover:opacity-90 disabled:opacity-40" title="Save the full log to a file">Export</button>
+            <button onClick={refresh} className="px-2.5 py-1.5 text-body rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]" title="Refresh">Refresh</button>
+            <button onClick={copyLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-body rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary] disabled:opacity-40" title="Copy the full log to clipboard">Copy log</button>
+            <button onClick={saveLog} disabled={busy || !events.length} className="px-2.5 py-1.5 text-body rounded-lg bg-[--accent] text-white hover:opacity-90 disabled:opacity-40" title="Save the full log to a file">Export</button>
             <button onClick={onClose} className="ml-1 p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] rounded-lg" aria-label="Close">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
             </button>
@@ -391,26 +393,26 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
             here, not on the card, so the header chrome and popups stay at native size. */}
         <div className={view === 'decisions' ? 'flex-1 min-h-0 flex flex-col' : 'flex flex-col'} style={{ zoom: scale }}>
           {!loaded ? (
-            <div className="text-center text-[--ui-text-dimmed] py-20 text-sm">Loading…</div>
+            <div className="text-center text-[--ui-text-dimmed] py-20 text-body">Loading…</div>
           ) : events.length === 0 && decisions.length === 0 ? (
             <div className="text-center text-[--ui-text-dimmed] py-20 px-8">
-              <p className="text-sm mb-1">No delegations recorded yet.</p>
-              <p className="text-[12px]">When Claude runs <span className="font-mono">qcdelegate</span> or logs a <span className="font-mono">qcdecide</span> decision in a pane, it lands here — what was delegated, what changed, and whether qwen could match what you kept.</p>
+              <p className="text-body mb-1">No delegations recorded yet.</p>
+              <p className="text-body">When Claude runs <span className="font-mono">qcdelegate</span> or logs a <span className="font-mono">qcdecide</span> decision in a pane, it lands here — what was delegated, what changed, and whether qwen could match what you kept.</p>
             </div>
           ) : view === 'briefing' ? (
             /* ============================ BRIEFING ============================ */
             // Natural height (modal sizes to it) but cap + scroll on short windows.
             <div className="overflow-y-auto px-14 py-12 max-h-[calc(90vh-58px)]">
               <div className="max-w-[1480px] w-full mx-auto">
-                <div className="font-mono text-[10.5px] tracking-[0.16em] uppercase text-[--ui-text-dimmed] mb-4">
+                <div className="font-mono text-body tracking-[0.16em] uppercase text-[--ui-text-dimmed] mb-4">
                   Delegation · analyst view{enabled && capable ? ` · ${shortRoute(status!.route)}` : ''}{decisions.length ? ` · updated ${rel(decisions[0].ts)}` : ''}
                 </div>
 
-                <h3 className="font-serif text-[31px] leading-[1.45] font-medium tracking-tight text-[--ui-text-primary]">
+                <h3 className="font-mono text-display leading-[1.45] font-medium tracking-tight text-[--ui-text-primary]">
                   <Verdict />
                 </h3>
-                <div className="text-[12.5px] text-[--ui-text-dimmed] mt-3">
-                  Based on {decisions.length} decision{decisions.length === 1 ? '' : 's'} · {delegateN} delegated · {shadowTestedN} shadow-tested{issueCount ? <> · <button onClick={() => goAllDecisions('issues')} className="text-red-300/90 hover:underline">{issueCount} issue{issueCount === 1 ? '' : 's'}</button></> : ''}
+                <div className="text-body text-[--ui-text-dimmed] mt-3">
+                  Based on {decisions.length} decision{decisions.length === 1 ? '' : 's'} · {delegateN} delegated · {shadowTestedN} shadow-tested{issueCount ? <> · <button onClick={() => goAllDecisions('issues')} className="text-[--danger]/90 hover:underline">{issueCount} issue{issueCount === 1 ? '' : 's'}</button></> : ''}
                 </div>
 
                 {/* demoted stat strip */}
@@ -422,9 +424,9 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
                     { k: 'Avg time', v: `${totals.n ? Math.round(totals.dur / totals.n) : 0}s`, s: 'per call' },
                   ].map((m) => (
                     <div key={m.k} className="glass-control rounded-xl px-4 py-2.5 min-w-[130px] flex-1">
-                      <div className={`text-[22px] font-semibold tabular-nums tracking-tight ${m.tone === 'good' ? 'text-emerald-400' : m.tone === 'warn' ? 'text-amber-300' : m.tone === 'bad' ? 'text-red-400' : 'text-[--ui-text-primary]'}`}>{m.v}</div>
-                      <div className="text-[10px] uppercase tracking-wide text-[--ui-text-muted] mt-0.5">{m.k}</div>
-                      <div className="text-[10px] text-[--ui-text-dimmed]">{m.s}</div>
+                      <div className={`text-display font-semibold tabular-nums tracking-tight ${m.tone === 'good' ? 'text-[--success]' : m.tone === 'warn' ? 'text-[--warning]' : m.tone === 'bad' ? 'text-[--danger]' : 'text-[--ui-text-primary]'}`}>{m.v}</div>
+                      <div className="text-meta uppercase tracking-wide text-[--ui-text-muted] mt-0.5">{m.k}</div>
+                      <div className="text-meta text-[--ui-text-dimmed]">{m.s}</div>
                     </div>
                   ))}
                 </div>
@@ -432,9 +434,9 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
                 {/* evidence — per class */}
                 {evidence.length > 0 && (
                   <div className="mt-8">
-                    <div className="font-mono text-[10.5px] tracking-[0.14em] uppercase text-[--ui-text-dimmed] flex items-center gap-3 mb-3">
+                    <div className="font-mono text-body tracking-[0.14em] uppercase text-[--ui-text-dimmed] flex items-center gap-3 mb-3">
                       evidence — by task class
-                      <span className="h-px flex-1 bg-white/10" />
+                      <span className="h-px flex-1 bg-[--border]" />
                       <span className="normal-case tracking-normal text-[--ui-text-dimmed] cursor-help" title={"Per task class (every delegation/shadow is auto-classified by its files):\n• Shadow X/Y — of kept units you re-tested with qcshadow, how many qwen could have matched.\n• Pass-rate — of delegations that ran a ground-truth check, how many passed.\nThe recommendation blends both: a class where qwen matches your kept work is one to delegate more; a class where it falls short is one to keep."}>ⓘ</span>
                     </div>
                     <div className="space-y-px">
@@ -442,16 +444,16 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
                         const hasShadow = c.tested > 0
                         const over = hasShadow && c.matched > 0
                         const rec = over ? '→ try delegating these' : hasShadow ? '→ keep (qwen fell short)' : c.recommendation ? `→ ${c.recommendation.toLowerCase()}` : '→ no signal yet'
-                        const recColor = over ? 'text-emerald-300' : hasShadow ? 'text-[--ui-text-muted]' : c.tone === 'good' ? 'text-emerald-300' : c.tone === 'bad' ? 'text-[--ui-text-muted]' : 'text-[--ui-text-dimmed]'
+                        const recColor = over ? 'text-[--success]' : hasShadow ? 'text-[--ui-text-muted]' : c.tone === 'good' ? 'text-[--success]' : c.tone === 'bad' ? 'text-[--ui-text-muted]' : 'text-[--ui-text-dimmed]'
                         return (
                           <div key={c.taskClass} className="grid grid-cols-[160px_260px_1fr] gap-6 items-center py-3 border-b border-white/[0.05]">
-                            <span className="text-[15px] font-medium capitalize text-[--ui-text-primary]">{c.taskClass}</span>
-                            <span className="font-mono text-[12.5px] text-[--ui-text-dimmed]">
+                            <span className="text-title font-medium capitalize text-[--ui-text-primary]">{c.taskClass}</span>
+                            <span className="font-mono text-body text-[--ui-text-dimmed]">
                               {hasShadow
-                                ? <>shadow <span className="text-emerald-300">{c.matched}</span>/{c.tested} matched</>
+                                ? <>shadow <span className="text-[--success]">{c.matched}</span>/{c.tested} matched</>
                                 : c.passRate != null ? <>{pct(c.passRate)} pass · n={c.n}</> : <>n={c.n} · no check</>}
                             </span>
-                            <span className={`text-[13.5px] ${recColor}`}>{rec}</span>
+                            <span className={`text-heading ${recColor}`}>{rec}</span>
                           </div>
                         )
                       })}
@@ -461,15 +463,15 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
 
                 {/* over-cautious callout (only when shadow proves it) */}
                 {shadow && shadow.matched > 0 && (
-                  <button onClick={() => goAllDecisions('shadow')} className="mt-6 w-full text-left rounded-xl border border-amber-400/25 bg-amber-400/[0.06] px-4 py-3 hover:bg-amber-400/[0.1] transition-colors">
-                    <div className="text-[13px] text-amber-200">
+                  <button onClick={() => goAllDecisions('shadow')} className="mt-6 w-full text-left rounded-xl border border-[--warning-line] bg-[--warning-soft] px-4 py-3 hover:bg-[--warning-soft] transition-colors">
+                    <div className="text-heading text-[--warning]">
                       <span className="font-semibold">{shadow.matched} kept unit{shadow.matched === 1 ? '' : 's'}</span> could have been delegated — qwen matched {shadow.matched === 1 ? 'it' : 'them'} on the same check.
                     </div>
-                    <div className="text-[11px] text-amber-200/70 mt-0.5">Review the shadow-tested decisions →</div>
+                    <div className="text-body text-[--warning]/70 mt-0.5">Review the shadow-tested decisions →</div>
                   </button>
                 )}
 
-                <div className="mt-8 flex items-center gap-4 text-[13px]">
+                <div className="mt-8 flex items-center gap-4 text-heading">
                   <button onClick={() => goAllDecisions('all')} className="text-[--accent] hover:underline font-medium">See all {decisions.length} decisions →</button>
                   <span className="text-[--ui-text-dimmed]">{totals.ins.toLocaleString()} lines · {totals.files} files touched{insights ? ` · ${insights.totalOutcomes} in eval memory` : ''}</span>
                 </div>
@@ -479,28 +481,28 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
             /* ========================= ALL DECISIONS ========================= */
             <div className="flex-1 min-h-0 flex flex-col px-6 py-4">
               <div className="flex items-baseline gap-3 shrink-0">
-                <button onClick={() => setView('briefing')} className="text-[12.5px] text-[--accent] hover:underline">‹ briefing</button>
-                <h3 className="font-serif text-[20px] font-medium tracking-tight text-[--ui-text-primary]">All decisions</h3>
-                <span className="text-[12px] text-[--ui-text-dimmed]">{decisions.length} decisions · {delegateN} delegated · {shadowTestedN} shadow-tested</span>
+                <button onClick={() => setView('briefing')} className="text-body text-[--accent] hover:underline">‹ briefing</button>
+                <h3 className="font-mono text-title font-medium tracking-tight text-[--ui-text-primary]">All decisions</h3>
+                <span className="text-body text-[--ui-text-dimmed]">{decisions.length} decisions · {delegateN} delegated · {shadowTestedN} shadow-tested</span>
               </div>
 
               {/* filter chips */}
               <div className="flex items-center gap-1.5 mt-3 mb-3 shrink-0 flex-wrap">
                 {([['all', 'All'], ['kept', 'Kept'], ['delegated', 'Delegated'], ['shadow', 'Shadow-tested'], ['issues', 'Issues']] as const).map(([f, label]) => (
                   <button key={f} onClick={() => setDecFilter(f)}
-                    className={`font-mono text-[11px] px-2.5 py-1 rounded-full border transition-all ${decFilter === f ? 'border-[--accent]/50 bg-[--accent]/10 text-[--ui-text-primary]' : 'glass-border text-[--ui-text-dimmed] hover:text-[--ui-text-secondary]'} ${f === 'issues' && filterCounts.issues > 0 ? 'text-red-300/90' : ''}`}>
+                    className={`font-mono text-body px-2.5 py-1 rounded-full border transition-all ${decFilter === f ? 'border-[--accent]/50 bg-[--accent]/10 text-[--ui-text-primary]' : 'glass-border text-[--ui-text-dimmed] hover:text-[--ui-text-secondary]'} ${f === 'issues' && filterCounts.issues > 0 ? 'text-[--danger]/90' : ''}`}>
                     {label} <span className="text-[--ui-text-dimmed]">{filterCounts[f]}</span>
                   </button>
                 ))}
                 <div className="ml-auto flex items-center gap-3">
                   {confirmClear ? (
-                    <span className="flex items-center gap-2 text-[11px]">
+                    <span className="flex items-center gap-2 text-body">
                       <span className="text-[--ui-text-dimmed]">Clear all telemetry?</span>
-                      <button onClick={clearAll} className="text-red-400 hover:underline">Yes</button>
+                      <button onClick={clearAll} className="text-[--danger] hover:underline">Yes</button>
                       <button onClick={() => setConfirmClear(false)} className="text-[--ui-text-muted] hover:underline">No</button>
                     </span>
                   ) : (
-                    <button onClick={() => setConfirmClear(true)} className="text-[11px] text-[--ui-text-muted] hover:text-red-400">Clear telemetry</button>
+                    <button onClick={() => setConfirmClear(true)} className="text-body text-[--ui-text-muted] hover:text-[--danger]">Clear telemetry</button>
                   )}
                 </div>
               </div>
@@ -508,20 +510,20 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
               <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[210px_1fr] gap-5 overflow-hidden">
                 {/* projects rail */}
                 <div className="min-h-0 min-w-0 hidden lg:flex flex-col border-r glass-border pr-4">
-                  <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-[--ui-text-dimmed] mb-2 shrink-0">Projects</div>
+                  <div className="font-mono text-meta tracking-[0.14em] uppercase text-[--ui-text-dimmed] mb-2 shrink-0">Projects</div>
                   <div className="flex-1 min-h-0 overflow-y-auto space-y-0.5 pr-1">
-                    <button onClick={() => setFilterProject(null)} className={`w-full text-left px-2.5 py-1.5 rounded-lg text-[12.5px] transition-colors ${!filterProject ? 'bg-[--accent]/15 text-[--ui-text-primary]' : 'text-[--ui-text-dimmed] hover:bg-white/[0.04]'}`}>All projects</button>
+                    <button onClick={() => setFilterProject(null)} className={`w-full text-left px-2.5 py-1.5 rounded-lg text-body transition-colors ${!filterProject ? 'bg-[--accent]/15 text-[--ui-text-primary]' : 'text-[--ui-text-dimmed] hover:bg-white/[0.04]'}`}>All projects</button>
                     {projectList.map((p) => {
                       const active = filterProject === p.project
                       return (
                         <button key={p.project} onClick={() => setFilterProject(active ? null : p.project)} title={p.project}
                           className={`w-full text-left px-2.5 py-1.5 rounded-lg transition-colors ${active ? 'bg-[--accent]/15' : 'hover:bg-white/[0.04]'}`}>
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[13px] text-[--ui-text-primary] font-medium truncate">{p.name}</span>
-                            <span className="text-[10px] text-[--ui-text-dimmed] shrink-0">{p.lastAt ? rel(new Date(p.lastAt).toISOString()) : ''}</span>
+                            <span className="text-heading text-[--ui-text-primary] font-medium truncate">{p.name}</span>
+                            <span className="text-meta text-[--ui-text-dimmed] shrink-0">{p.lastAt ? rel(new Date(p.lastAt).toISOString()) : ''}</span>
                           </div>
-                          <div className="text-[11px] text-[--ui-text-dimmed] mt-0.5">{p.decisions} decision{p.decisions === 1 ? '' : 's'}{p.delegated > 0 ? ` · ${p.delegated} delegated` : ''}</div>
-                          {p.overCautious > 0 && <span className="inline-block mt-1 text-[10px] text-amber-300 border border-amber-400/30 rounded px-1.5 py-px">{p.overCautious} over-cautious</span>}
+                          <div className="text-body text-[--ui-text-dimmed] mt-0.5">{p.decisions} decision{p.decisions === 1 ? '' : 's'}{p.delegated > 0 ? ` · ${p.delegated} delegated` : ''}</div>
+                          {p.overCautious > 0 && <span className="inline-block mt-1 text-meta text-[--warning] border border-[--warning-line] rounded px-1.5 py-px">{p.overCautious} over-cautious</span>}
                         </button>
                       )
                     })}
@@ -531,7 +533,7 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
                 {/* ledger */}
                 <div className="min-h-0 min-w-0 overflow-y-auto pr-1">
                   {shownRows.length === 0 && (
-                    <div className="text-[12px] text-[--ui-text-dimmed] py-10 text-center">
+                    <div className="text-body text-[--ui-text-dimmed] py-10 text-center">
                       {decFilter === 'issues' ? 'No issues — every delegation here succeeded ✓' : decFilter === 'shadow' ? 'No shadow-tested decisions yet. Run qcshadow on a kept unit to grade it.' : 'Nothing for this filter.'}
                     </div>
                   )}
@@ -545,31 +547,31 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
                     return (
                       <div key={r.key} className="border-b border-white/[0.05]">
                         <div className={`grid grid-cols-[48px_70px_1fr] gap-3.5 py-3 ${expandable ? 'cursor-pointer' : ''}`} onClick={() => expandable && setExpanded(open ? null : r.key)}>
-                          <span className="font-mono text-[11px] text-[--ui-text-dimmed] pt-0.5" title={new Date(r.ts).toLocaleString()}>{rel(r.ts)}</span>
-                          <span className={`self-start font-mono text-[10px] tracking-wide px-2 py-0.5 rounded text-center ${isDelegate ? 'bg-[#79b8ff]/12 text-[#79b8ff] border border-[#79b8ff]/25' : 'bg-white/[0.06] text-[--ui-text-muted] border border-white/10'}`}>{isDelegate ? 'DELEGATE' : 'KEEP'}</span>
+                          <span className="font-mono text-body text-[--ui-text-dimmed] pt-0.5" title={new Date(r.ts).toLocaleString()}>{rel(r.ts)}</span>
+                          <span className={`self-start font-mono text-meta tracking-wide px-2 py-0.5 rounded text-center ${isDelegate ? 'bg-[--accent-soft] text-[--accent] border border-[--accent-line]' : 'bg-white/[0.06] text-[--ui-text-muted] border border-white/10'}`}>{isDelegate ? 'DELEGATE' : 'KEEP'}</span>
                           <div className="min-w-0">
-                            <div className="text-[14px] text-[--ui-text-primary] font-medium tracking-tight">{title}</div>
-                            {d && d.reason && <div className="text-[13px] text-[#b6b6bd] leading-relaxed mt-1 max-w-[1100px]">{d.reason}</div>}
+                            <div className="text-body text-[--ui-text-primary] font-medium tracking-tight">{title}</div>
+                            {d && d.reason && <div className="text-heading text-[--text-2] leading-relaxed mt-1 max-w-[1100px]">{d.reason}</div>}
                             {/* delegate metadata line */}
                             {call && (
-                              <div className="flex flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono text-[11px] text-[--ui-text-dimmed]">
+                              <div className="flex flex-wrap gap-x-3.5 gap-y-1 mt-2 font-mono text-body text-[--ui-text-dimmed]">
                                 <span>{shortRoute(call.route)}</span>
                                 <span>{call.durationSec}s</span>
-                                <span><span className="text-emerald-300/80">+{call.insertions}</span>/<span className="text-red-300/80">-{call.deletions}</span></span>
+                                <span><span className="text-[--success]/80">+{call.insertions}</span>/<span className="text-[--danger]/80">-{call.deletions}</span></span>
                                 {call.check
-                                  ? <span className={call.check.exit === 0 ? 'text-emerald-300' : 'text-red-300'}>{call.check.exit === 0 ? '✓ check passed' : '✕ check failed'}</span>
-                                  : call.exit !== 0 ? <span className="text-red-300">exit {call.exit}</span> : null}
+                                  ? <span className={call.check.exit === 0 ? 'text-[--success]' : 'text-[--danger]'}>{call.check.exit === 0 ? '✓ check passed' : '✕ check failed'}</span>
+                                  : call.exit !== 0 ? <span className="text-[--danger]">exit {call.exit}</span> : null}
                                 {call.humanVerdict && <span className="text-[--ui-text-secondary]">eval: {call.humanVerdict}</span>}
                               </div>
                             )}
-                            {d && d.verdict === 'delegate' && !call && <div className="mt-1.5 text-[11px] text-[--ui-text-dimmed]">Call not linked yet — ran outside a pane or hasn't completed.</div>}
+                            {d && d.verdict === 'delegate' && !call && <div className="mt-1.5 text-body text-[--ui-text-dimmed]">Call not linked yet — ran outside a pane or hasn't completed.</div>}
                             {/* shadow verdict band on a KEEP */}
                             {d && d.shadow && <ShadowBand s={d.shadow} />}
                           </div>
                         </div>
                         {open && call && <CallDetail e={call} />}
                         {open && !call && d && (
-                          <div className="px-4 pb-4 pt-0 text-[11px] text-[--ui-text-dimmed] space-y-1">
+                          <div className="px-4 pb-4 pt-0 text-body text-[--ui-text-dimmed] space-y-1">
                             <div>when: {new Date(d.ts).toLocaleString()} · project: <span className="text-[--ui-text-secondary]">{d.project}</span>{d.pane ? ` · pane: ${d.pane}` : ''}</div>
                             {d.check && <div>gate: <span className="font-mono text-[--ui-text-secondary]">{d.check}</span></div>}
                           </div>
@@ -584,24 +586,24 @@ export function DelegationDashboard({ isOpen, onClose, scale = 1, onScaleChange 
         </div>
 
         {toast && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-2 rounded-lg bg-[--ui-bg-elevated] border border-[#444] text-xs text-[--ui-text-primary] shadow-lg max-w-[80%] truncate">{toast}</div>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-2 rounded-lg bg-[--ui-bg-elevated] border border-[--border] text-body text-[--ui-text-primary] shadow-lg max-w-[80%] truncate">{toast}</div>
         )}
 
         {/* Full-prompt popup */}
         {fullPrompt && (
           <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6" role="presentation" onClick={(e) => e.target === e.currentTarget && setFullPrompt(null)}>
-            <div className="glass-modal glass-border rounded-2xl shadow-2xl w-[80vw] max-w-[1100px] max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
+            <div className="glass-modal glass-border rounded-xl shadow-2xl w-[80vw] max-w-[1100px] max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-modal="true">
               <div className="flex items-center justify-between gap-3 px-4 py-3 border-b glass-border shrink-0">
-                <span className="text-sm font-medium text-[--ui-text-primary] truncate">Full prompt · <span className="font-mono text-[--ui-text-secondary]">{fullPrompt.title}</span></span>
+                <span className="text-body font-medium text-[--ui-text-primary] truncate">Full prompt · <span className="font-mono text-[--ui-text-secondary]">{fullPrompt.title}</span></span>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <span className="text-[10px] text-[--ui-text-dimmed] mr-1">{fullPrompt.text.length.toLocaleString()} chars</span>
-                  <button onClick={() => { window.electronAPI.clipboardWriteText(fullPrompt.text); flash('Prompt copied') }} className="px-2.5 py-1 text-xs rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]">Copy</button>
+                  <span className="text-meta text-[--ui-text-dimmed] mr-1">{fullPrompt.text.length.toLocaleString()} chars</span>
+                  <button onClick={() => { window.electronAPI.clipboardWriteText(fullPrompt.text); flash('Prompt copied') }} className="px-2.5 py-1 text-body rounded-lg glass-control text-[--ui-text-secondary] hover:text-[--ui-text-primary]">Copy</button>
                   <button onClick={() => setFullPrompt(null)} className="p-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] rounded-lg" aria-label="Close">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round" /></svg>
                   </button>
                 </div>
               </div>
-              <pre className="flex-1 min-h-0 overflow-auto p-4 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-[--ui-text-secondary]">{fullPrompt.text}</pre>
+              <pre className="flex-1 min-h-0 overflow-auto p-4 whitespace-pre-wrap font-mono text-body leading-relaxed text-[--ui-text-secondary]">{fullPrompt.text}</pre>
             </div>
           </div>
         )}
