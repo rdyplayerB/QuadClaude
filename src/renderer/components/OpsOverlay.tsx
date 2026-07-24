@@ -67,6 +67,9 @@ export function OpsOverlay() {
         onMove: (m: unknown) => window.electronAPI.opsReportMove?.(m),
         onRecord: (on: boolean) => window.electronAPI.opsSetRecord?.(on),
         onClose: () => { setShow(false); window.electronAPI.opsClose?.() },
+        // Hand the console to its own window. Main clears this overlay via the
+        // show channel, so don't setShow(false) here and race it.
+        onPopOut: () => window.electronAPI.opsPopOut?.(),
         initialScale: readOpsScale(),
         onScale: (n: number) => setScale(clampOpsScale(n)),
       })

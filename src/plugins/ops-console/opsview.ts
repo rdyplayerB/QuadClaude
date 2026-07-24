@@ -18,7 +18,7 @@ const CSS = `
   --accent:#22d3ee;
   --green:#4ade80;--red:#f87171;--teal:#22d3ee;
   --g-green:#4ade80;--g-cyan:#22d3ee;--g-yellow:#fbbf24;--g-orange:#fb923c;--amber:#fbbf24;
-  --mono:ui-monospace,"SF Mono",Menlo,Monaco,"Courier New",monospace;--r:3px;--rp:5px; display:block; height:100%;
+  --mono:ui-monospace,"SF Mono",Menlo,Monaco,"Courier New",monospace;--r:2px;--rp:2px; display:block; height:100%;
   /* Type comes from the app's shared scale (index.css) — custom properties
      inherit straight through the shadow boundary, so the console sizes with
      the rest of the app instead of drifting on its own hardcoded px.
@@ -165,6 +165,7 @@ const HTML = `
         <button id="zoomIn" aria-label="Zoom in">+</button>
       </div>
       <button class="recbtn" id="recBtn">REC</button>
+      <button class="recbtn" id="popBtn">⇱ pop out</button>
       <button class="recbtn" id="closeBtn">✕ close</button>
       <div class="clock" id="clock">--:--:--<span class="cur"></span></div>
     </div>
@@ -382,16 +383,42 @@ export function createOpsView(root, handlers) {
     setTimeout(function(){ cur.style.opacity="0"; setTimeout(()=>cur.remove(),220) }, 760)
   }
   function fmtAge(sec){ sec=Math.max(0,Math.round(sec)); if(sec<3) return "now"; if(sec<90) return sec+"s"; const m=Math.round(sec/60); if(m<90) return m+"m"; return Math.round(m/60)+"h" }
+  // Incremental, in-place feed render. The old version rebuilt the list every
+  // tick (detach each row into a fragment, re-append) — and re-inserting a node
+  // RESTARTS its CSS animations, so `.fi.new`'s entry animation replayed on
+  // every row on every tick and the whole feed appeared to blink forever.
+  // Here a row that's already in the right slot is only touched to refresh its
+  // age, so it animates exactly once, when it first arrives.
   function renderFeed(s){
-    const host=gid("feed"); const frag=document.createDocumentFragment()
+    const host=gid("feed")
+    const seen={}
+    let ref=host.firstElementChild
     s.feed.forEach(function(f){
-      const a=agentFor(f.paneId); const ex=host.querySelector('[data-fid="'+f.id+'"]')
-      if(ex){ ex.querySelector(".ftime").textContent=fmtAge(f.ageSec); frag.appendChild(ex); return }
+      seen[f.id]=1
+      // Already in the correct position → update the age only. No re-parenting.
+      if(ref && ref.getAttribute("data-fid")===f.id){
+        const t=ref.querySelector(".ftime"); if(t) t.textContent=fmtAge(f.ageSec)
+        ref=ref.nextElementSibling
+        return
+      }
+      const existing=host.querySelector('[data-fid="'+f.id+'"]')
+      if(existing){
+        const t=existing.querySelector(".ftime"); if(t) t.textContent=fmtAge(f.ageSec)
+        host.insertBefore(existing, ref)
+        return
+      }
+      const a=agentFor(f.paneId)
       const row=document.createElement("div"); row.className="fi new"+(f.incident?" incident":""); row.setAttribute("data-fid",f.id)
       row.innerHTML='<span class="fd" style="background:'+ac(a.pos)+'"></span><div><div class="fmain">'+f.main+'</div>'+(f.sub?'<div class="fsub">'+esc(f.sub)+'</div>':'')+'<div class="ftime">'+fmtAge(f.ageSec)+'</div></div>'
-      frag.appendChild(row)
+      host.insertBefore(row, ref)
+      // Drop the entry class once it has played, so the row can never re-animate
+      // even if a later reorder does move it.
+      setTimeout(function(){ row.classList.remove("new") }, 600)
     })
-    host.innerHTML=""; host.appendChild(frag)
+    // Drop rows that aged out of the snapshot.
+    Array.prototype.slice.call(host.children).forEach(function(el){
+      if(!seen[el.getAttribute("data-fid")]) el.remove()
+    })
   }
   function tickNumbers(){
     const since=snap?(Date.now()-lastSnapAt):0
@@ -436,6 +463,20 @@ export function createOpsView(root, handlers) {
   let recOn=false
   gid("recBtn").onclick=function(){ recOn=!recOn; this.classList.toggle("on",recOn); if(handlers&&handlers.onRecord) handlers.onRecord(recOn) }
   gid("closeBtn").onclick=function(){ if(handlers&&handlers.onClose) handlers.onClose() }
+  // Pop out / pop in. The same button flips meaning depending on which surface
+  // is hosting the view: the in-app overlay offers "pop out", the standalone
+  // window offers "pop in" (which destroys that window so its memory is freed).
+  var popped=!!(handlers&&handlers.popped)
+  var popBtn=gid("popBtn")
+  popBtn.textContent = popped ? "⇲ pop in" : "⇱ pop out"
+  popBtn.title = popped
+    ? "Put the console back inside the QuadClaude window and close this one"
+    : "Move the console into its own window"
+  popBtn.onclick=function(){
+    if(!handlers) return
+    if(popped){ if(handlers.onPopIn) handlers.onPopIn() }
+    else if(handlers.onPopOut) handlers.onPopOut()
+  }
 
   // Zoom. The host (OpsOverlay) owns the value and persists it; the view only
   // reports intent and reflects what it's told, so Cmd +/− and these buttons

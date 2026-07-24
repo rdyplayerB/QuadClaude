@@ -78,6 +78,8 @@ declare global {
       opsReportMove: (m: unknown) => void
       opsClose: () => void
       opsRequestState: () => void
+      opsPopOut: () => void
+      opsPopIn: () => void
       onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void

@@ -196,6 +196,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   opsReportMove: (m: unknown) => ipcRenderer.send('ops:verify-move', m),
   opsClose: () => ipcRenderer.send(IPC_CHANNELS.OPS_CLOSE),
   opsRequestState: () => ipcRenderer.send('ops:request-state'),
+  opsPopOut: () => ipcRenderer.send(IPC_CHANNELS.OPS_POPOUT),
+  opsPopIn: () => ipcRenderer.send(IPC_CHANNELS.OPS_POPIN),
   onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
     const handler = (_: unknown, event: DelegationEvent) => callback(event)
     ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)

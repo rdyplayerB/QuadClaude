@@ -385,6 +385,8 @@ export const IPC_CHANNELS = {
   OPS_INAPP_VERIFY: 'ops:inapp-verify',      // main → main renderer: VerifyOverlay
   OPS_INAPP_SHOW: 'ops:inapp-show',          // main → main renderer: boolean
   OPS_CLOSE: 'ops:close',                     // main renderer → main: close console
+  OPS_POPOUT: 'ops:popout',                   // main renderer → main: move console to its own window
+  OPS_POPIN: 'ops:popin',                     // ops window → main: hand console back, destroy that window
 } as const
 
 // --- Delegation telemetry ----------------------------------------------------
