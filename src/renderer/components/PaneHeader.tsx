@@ -172,7 +172,9 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
             style={{ color: pane.pairColor, backgroundColor: `${pane.pairColor}1a` }}
             title={`Paired (${pane.pairRole}) — manage in the agent menu`}
           >
-            <span aria-hidden>🔗</span>
+            <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="shrink-0">
+              <path d="M5.8 8.2l2.4-2.4M5.9 3.9l.8-.8a2.3 2.3 0 013.2 3.2l-.8.8M8.1 10.1l-.8.8a2.3 2.3 0 01-3.2-3.2l.8-.8" />
+            </svg>
             {pane.pairRole}
           </span>
         )}

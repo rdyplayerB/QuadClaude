@@ -258,6 +258,27 @@ body {
 .chrome-legible * { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .chrome-legible svg { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55)); }
 
+/* Keyboard focus: a visible cyan ring on interactive chrome (accessibility +
+   pro-user keyboard speed). :focus-visible fires only for keyboard focus, so
+   mouse clicks stay ring-free. Terminals manage their own focus — the xterm
+   hidden textarea and anything inside a terminal are explicitly excluded so a
+   focused pane never sprouts a ring. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.xterm-helper-textarea:focus-visible,
+.terminal-container :focus-visible {
+  outline: none;
+}
+
 /* Glass control surfaces - theme-aware for settings/modals */
 .glass-control {
   background: rgba(255, 255, 255, 0.06);

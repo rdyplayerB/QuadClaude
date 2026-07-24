@@ -228,7 +228,9 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
               onClick={enterPairMode}
               className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
             >
-              <span aria-hidden>🔗</span> Pair with…
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="shrink-0">
+                <path d="M5.8 8.2l2.4-2.4M5.9 3.9l.8-.8a2.3 2.3 0 013.2 3.2l-.8.8M8.1 10.1l-.8.8a2.3 2.3 0 01-3.2-3.2l.8-.8" />
+              </svg> Pair with…
             </button>
           )}
       </PortalMenu>

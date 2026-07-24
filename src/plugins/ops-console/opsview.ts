@@ -92,6 +92,11 @@ const CSS = `
 .colhead .cdot{width:7px;height:7px;border-radius:1px}
 .colhead .lft{display:flex;align-items:center;gap:6px;font-weight:600}
 .colhead .cn{color:var(--fg3)}
+.board-empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:9px;pointer-events:none;color:var(--faint);text-align:center}
+.board.quiet .board-empty{display:flex}
+.board-empty svg{width:26px;height:26px;opacity:.5;stroke:var(--fg3)}
+.board-empty .bq-t{font-size:var(--fs-body);color:var(--fg2);letter-spacing:.01em}
+.board-empty .bq-s{font-size:var(--fs-meta);color:var(--faint);max-width:260px;line-height:1.5}
 .colbody{display:flex;flex-direction:column;gap:7px;min-height:20px}
 .card{background:var(--term);border:1px solid var(--line);border-radius:var(--r);padding:8px 9px;will-change:transform}
 .card.dim{opacity:.3}
@@ -213,6 +218,11 @@ export function createOpsView(root, handlers) {
       const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
       col.appendChild(body); board.appendChild(col); colBodies[c.k]=body
     })
+    const empty=document.createElement("div"); empty.className="board-empty"
+    empty.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'+
+      '<div class="bq-t">All quiet</div>'+
+      '<div class="bq-s">No agents are working right now. Delegations and Claude sessions will appear here as they move.</div>'
+    board.appendChild(empty)
     boardBuilt=true
   }
   function computeKpis(s){
@@ -342,6 +352,7 @@ export function createOpsView(root, handlers) {
     })
     for(const cid in cardEls){ if(!present[cid]){ const r=cardEls[cid]; r.el.classList.add("leaving"); (function(el){setTimeout(()=>el.remove(),250)})(r.el); delete cardEls[cid] } }
     COLS.forEach(function(c){ const n=s.cards.filter(x=>x.col===c.k).length; const e=gid("cn-"+c.k); if(e) e.textContent=n })
+    const board=gid("board"); if(board) board.classList.toggle("quiet", s.cards.length===0)
     applyDim()
     requestAnimationFrame(function(){
       for(const id in cardEls){

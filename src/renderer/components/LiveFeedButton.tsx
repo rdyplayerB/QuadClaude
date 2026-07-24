@@ -72,7 +72,10 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         className="flex items-center gap-1 px-1.5 py-0.5 rounded text-meta leading-none shrink-0 text-[--git-cyan] bg-[--git-cyan]/10 hover:bg-[--git-cyan]/20 transition-colors"
         title={`Live delegation feed (${scopeLabel}) — click to stop`}
       >
-        <span aria-hidden>📡</span>
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+          <circle cx="7" cy="7" r="1.3" fill="currentColor" stroke="none" />
+          <path d="M4.3 9.7a3.8 3.8 0 010-5.4M9.7 4.3a3.8 3.8 0 010 5.4M2.7 11.3a6 6 0 010-8.6M11.3 2.7a6 6 0 010 8.6" />
+        </svg>
         <span className="pane-ctl-label max-w-[90px] truncate">Live feed · {scopeLabel}</span>
         <span className="opacity-60">×</span>
       </button>
@@ -90,7 +93,10 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--git-cyan] transition-colors rounded"
         title="Open the live delegation feed here — keep/delegate decisions + worker output. Pick which Claude session to follow, or all."
       >
-        <span aria-hidden className="text-body leading-none">📡</span>
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+          <circle cx="7" cy="7" r="1.3" fill="currentColor" stroke="none" />
+          <path d="M4.3 9.7a3.8 3.8 0 010-5.4M9.7 4.3a3.8 3.8 0 010 5.4M2.7 11.3a6 6 0 010-8.6M11.3 2.7a6 6 0 010 8.6" />
+        </svg>
         <span className="pane-ctl-label text-meta leading-none">Live feed</span>
         {candidates.length > 0 && (
           <svg width="8" height="8" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -107,7 +113,10 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
             onClick={() => start(undefined)}
             className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
           >
-            <span aria-hidden>🌐</span> All delegations
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2" className="shrink-0">
+              <circle cx="7" cy="7" r="5.4" />
+              <path d="M1.6 7h10.8M7 1.6c1.7 1.5 2.7 3.4 2.7 5.4S8.7 10.9 7 12.4C5.3 10.9 4.3 9 4.3 7S5.3 3.1 7 1.6z" />
+            </svg> All delegations
           </button>
           <div className="border-t border-[--border]" />
           <div className="max-h-[180px] overflow-y-auto">
