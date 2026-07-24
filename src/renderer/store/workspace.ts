@@ -93,6 +93,22 @@ const debouncedSave = (saveFn: () => void) => {
   saveTimeout = setTimeout(saveFn, 500) // Debounce by 500ms
 }
 
+type WSet = (fn: (s: WorkspaceStore) => Partial<WorkspaceStore>) => void
+type WGet = () => WorkspaceStore
+
+// Immutably replace one pane (by id); debounced-save unless save === false.
+// Collapses the panes.map(...) + debouncedSave pattern repeated across setters.
+function patchPane(set: WSet, get: WGet, id: number, updater: (p: PaneConfig) => PaneConfig, save = true): void {
+  set((state) => ({ panes: state.panes.map((p) => (p.id === id ? updater(p) : p)) }))
+  if (save) debouncedSave(() => get().saveWorkspace())
+}
+
+// Set one pane field, skipping the write (and re-render) if already equal.
+function patchPaneField<K extends keyof PaneConfig>(set: WSet, get: WGet, id: number, field: K, value: PaneConfig[K], save = true): void {
+  if (get().panes.find((p) => p.id === id)?.[field] === value) return
+  patchPane(set, get, id, (p) => ({ ...p, [field]: value }), save)
+}
+
 // Strip all pairing fields from a pane (used when dissolving a pair).
 function stripPair(pane: PaneConfig): PaneConfig {
   if (!pane.pairId && !pane.pairRole && !pane.pairColor) return pane
@@ -466,65 +482,18 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Pane actions
   updatePane: (id, updates) => {
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, ...updates } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
+    patchPane(set, get, id, (p) => ({ ...p, ...updates }))
   },
 
-  setPaneState: (id, paneState) => {
-    // Avoid unnecessary re-renders if state hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.state === paneState) return
+  // No save: pane state flips constantly during terminal activity.
+  setPaneState: (id, paneState) => patchPaneField(set, get, id, 'state', paneState, false),
 
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, state: paneState } : pane
-      ),
-    }))
-    // Don't save on pane state changes - too frequent during terminal activity
-  },
+  setPaneLabel: (id, label) => patchPaneField(set, get, id, 'label', label),
 
-  setPaneLabel: (id, label) => {
-    // Avoid unnecessary re-renders if label hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.label === label) return
+  setPaneCwd: (id, cwd) => patchPaneField(set, get, id, 'workingDirectory', cwd),
 
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, label } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
-
-  setPaneCwd: (id, cwd) => {
-    // Avoid unnecessary re-renders if cwd hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.workingDirectory === cwd) return
-
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, workingDirectory: cwd } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
-
-  setPaneAgent: (id, agentId) => {
-    // Persist which agent this pane runs, so the window remembers its role.
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.agentId === agentId) return
-
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, agentId } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
+  // Persist which agent this pane runs, so the window remembers its role.
+  setPaneAgent: (id, agentId) => patchPaneField(set, get, id, 'agentId', agentId),
 
   pairPanes: (orchestratorId, workerId) => {
     if (orchestratorId === workerId) return
