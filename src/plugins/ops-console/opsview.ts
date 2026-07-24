@@ -33,8 +33,8 @@ const CSS = `
 .content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px 14px}
 /* Full-bleed title bar flush to the window edge — mirrors the main app's title
    bar, with a 84px safe-area so the macOS traffic lights never crowd the brand. */
-.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:rgba(22,22,23,.72);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px 0 84px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
-.recbtn,.clock,.zoomgrp{-webkit-app-region:no-drag}
+.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:linear-gradient(90deg,transparent 0 84px,rgba(22,22,23,.72) 84px);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px 0 84px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.recbtn,.zoomgrp{-webkit-app-region:no-drag}
 .zoomgrp{display:flex;align-items:center;border:1px solid var(--line);background:var(--term);border-radius:var(--r);overflow:hidden}
 .zoomgrp button{border:0;background:transparent;color:var(--fg3);font-family:var(--mono);font-size:var(--fs-meta);padding:4px 8px;cursor:pointer;letter-spacing:.04em}
 .zoomgrp button:hover{color:var(--fg);background:rgba(255,255,255,.06)}
@@ -47,9 +47,6 @@ const CSS = `
 .recbtn{border:1px solid var(--line);background:var(--term);color:var(--fg3);font-family:var(--mono);font-size:var(--fs-meta);padding:4px 9px;border-radius:var(--r);cursor:pointer;letter-spacing:.04em}
 .recbtn.on{color:var(--red);border-color:rgba(248,113,113,.5);background:rgba(248,113,113,.08)}
 .recbtn.on::before{content:"● ";}
-.clock{color:var(--fg2);font-size:var(--fs-body)}
-.cur{display:inline-block;width:7px;height:12px;background:var(--teal);vertical-align:-2px;margin-left:2px;animation:blink 1.1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
 .kpis{flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:0 0 10px}
 .kpi{padding:9px 11px;background:var(--pane);border:1px solid var(--line);border-radius:var(--rp)}
 .kpi.alert{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.05)}
@@ -148,7 +145,7 @@ const CSS = `
 #verify.flash{animation:vflash .5s ease}
 @keyframes vflash{0%{border-color:var(--red)}100%{border-color:var(--line)}}
 #connecting{position:absolute;inset:0;display:grid;place-items:center;color:var(--fg3);font-size:var(--fs-heading);background:var(--scrim)}
-@media(prefers-reduced-motion:reduce){.card,.carry,.meter i{transition:none!important}.card.wait,.workline .sp,.cur,.live::before{animation:none!important}}
+@media(prefers-reduced-motion:reduce){.card,.carry,.meter i{transition:none!important}.card.wait,.workline .sp,.live::before{animation:none!important}}
 `
 
 const HTML = `
@@ -167,7 +164,6 @@ const HTML = `
       <button class="recbtn" id="recBtn">REC</button>
       <button class="recbtn" id="popBtn">⇱ pop out</button>
       <button class="recbtn" id="closeBtn">✕ close</button>
-      <div class="clock" id="clock">--:--:--<span class="cur"></span></div>
     </div>
     <div class="content">
     <div class="kpis" id="kpis"></div>
@@ -209,7 +205,7 @@ export function createOpsView(root, handlers) {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
   let cardEls={}, colBodies={}, agentTps={}, agentTpsShown={}, kpiShown={}, kpiTarget={}, boardBuilt=false, boardRenders=0, lastSnapAt=0
   let verifyOn=false, prevMissedPhantom=0
-  let rafId=0, clockId=0, destroyed=false
+  let rafId=0, destroyed=false
 
   function buildShell(){
     const board=gid("board"); board.innerHTML=""
@@ -448,7 +444,6 @@ export function createOpsView(root, handlers) {
     if(mp>prevMissedPhantom){ box.classList.remove("flash"); void box.offsetWidth; box.classList.add("flash") }
     prevMissedPhantom=mp
   }
-  function clock(){ const n=new Date(); gid("clock").innerHTML=n.toTimeString().slice(0,8)+'<span class="cur"></span>' }
   let lastFrame=0
   function loop(ts){
     if(destroyed) return
@@ -490,13 +485,13 @@ export function createOpsView(root, handlers) {
   gid("zoomPct").onclick=()=>emitScale(1)
   gid("zoomPct").textContent=Math.round(scale*100)+"%"
 
-  clock(); clockId=setInterval(clock,1000); rafId=requestAnimationFrame(loop)
+  rafId=requestAnimationFrame(loop)
 
   return {
     update(s){ try{ render(s) }catch(e){ /* ignore */ } },
     setVerify(o){ renderVerify(o) },
     // Reflect a scale set elsewhere (Cmd +/−) without re-emitting it.
     setScale(n){ scale=clampScale(n); gid("zoomPct").textContent=Math.round(scale*100)+"%" },
-    destroy(){ destroyed=true; cancelAnimationFrame(rafId); clearInterval(clockId); root.innerHTML="" },
+    destroy(){ destroyed=true; cancelAnimationFrame(rafId); root.innerHTML="" },
   }
 }

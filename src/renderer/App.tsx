@@ -374,7 +374,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-meta text-[--ui-text-secondary]">v1.31.8</span>
+          <span className="text-meta text-[--ui-text-secondary]">v1.31.9</span>
         </div>
 
         {/* Center - layout selector + add pane */}

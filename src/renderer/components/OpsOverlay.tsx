@@ -96,11 +96,17 @@ export function OpsOverlay() {
   return (
     <div
       className="fixed inset-0 z-[60]"
-      style={
-        img
+      style={{
+        // Punch out the macOS traffic-light corner (84×38 — the same safe area
+        // the console's title bar already reserves via padding-left). The
+        // overlay is otherwise fully opaque and paints across the whole window,
+        // which left the window controls sitting on a black field instead of
+        // the app's normal chrome, so they read as three black discs.
+        clipPath: 'polygon(84px 0, 100% 0, 100% 100%, 0 100%, 0 38px, 84px 38px)',
+        ...(img
           ? { backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }
-          : { background: '#0e1013' }
-      }
+          : { background: '#0e1013' }),
+      }}
     >
       {/* Same opacity overlay the panes use — dims the wallpaper for readability. */}
       {wallpaperOn && (
