@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
 
 interface LiveFeedButtonProps {
   paneId: number
@@ -49,31 +49,15 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
   })
   const setPaneLiveFeed = useWorkspaceStore((s) => s.setPaneLiveFeed)
 
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+  const menu = useAnchoredMenu({ width: 200 })
 
   const start = useCallback(
     (scope?: number) => {
       setPaneLiveFeed(paneId, true, scope)
       sendToTerminal(paneId, feedCmd(scope))
-      setOpen(false)
+      menu.close()
     },
-    [paneId, setPaneLiveFeed],
+    [paneId, setPaneLiveFeed, menu],
   )
 
   const stop = useCallback(() => {
@@ -84,8 +68,8 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
   const onButton = useCallback(() => {
     // One-click global feed when there's nothing to scope to; otherwise open the picker.
     if (candidates.length === 0) start(undefined)
-    else setOpen((v) => !v)
-  }, [candidates.length, start])
+    else menu.toggle()
+  }, [candidates.length, start, menu])
 
   if (!pane) return null
 
@@ -107,16 +91,10 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
   // Only offer to start on an idle shell pane (never type into a running Claude session).
   if (pane.state !== 'shell') return null
 
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 200 }
-  }
-
   return (
     <>
       <button
-        ref={buttonRef}
+        ref={menu.triggerRef}
         onClick={onButton}
         className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--git-cyan] transition-colors rounded"
         title="Open the live delegation feed here — keep/delegate decisions + worker output. Pick which Claude session to follow, or all."
@@ -130,12 +108,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
         )}
       </button>
 
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
+      <PortalMenu menu={menu}>
           <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-muted]">
             Follow which session?
           </div>
@@ -161,9 +134,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
               </button>
             ))}
           </div>
-        </div>,
-        document.body,
-      )}
+      </PortalMenu>
     </>
   )
 })

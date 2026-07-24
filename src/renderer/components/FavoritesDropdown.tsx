@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
 
 interface FavoritesDropdownProps {
   paneId: number
@@ -21,31 +21,12 @@ function getFolderName(path: string): string {
 }
 
 export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, currentDirectory }: FavoritesDropdownProps) {
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const menu = useAnchoredMenu({ width: 220 })
   const { preferences, updatePreferences } = useWorkspaceStore()
 
   const favorites = preferences.favoriteDirectories
   const normalizedCwd = normalizePath(currentDirectory)
   const isCwdStarred = favorites.some((f) => normalizePath(f) === normalizedCwd)
-
-  // Close on click outside
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const toggleOpen = useCallback(() => setOpen((o) => !o), [])
 
   const addFavorite = useCallback(() => {
     if (isCwdStarred || !currentDirectory) return
@@ -59,21 +40,14 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
 
   const navigateTo = useCallback((path: string) => {
     sendToTerminal(paneId, `cd "${path}"\n`)
-    setOpen(false)
-  }, [paneId])
-
-  // Calculate dropdown position
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 220 }
-  }
+    menu.close()
+  }, [paneId, menu])
 
   return (
     <>
       <button
-        ref={buttonRef}
-        onClick={toggleOpen}
+        ref={menu.triggerRef}
+        onClick={menu.toggle}
         className="flex items-center gap-1 px-1.5 py-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
         title="Favorite Directories"
       >
@@ -83,12 +57,7 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
         <span className="pane-ctl-label text-meta font-mono leading-none">Favorites</span>
       </button>
 
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[220px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
+      <PortalMenu menu={menu}>
           {/* Favorite list */}
           {favorites.length === 0 ? (
             <div className="px-3 py-2 text-body text-[--ui-text-muted]">No favorites yet</div>
@@ -140,9 +109,7 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
               {isCwdStarred ? 'Unstar current directory' : 'Star current directory'}
             </span>
           </button>
-        </div>,
-        document.body
-      )}
+      </PortalMenu>
     </>
   )
 })

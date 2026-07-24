@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { launchAgent, resolvePaneProfile, sendToTerminal } from './TerminalPane'
 import { ClaudeAccount } from '../../shared/types'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
 
 interface AgentBadgeProps {
   paneId: number
@@ -12,9 +12,7 @@ interface AgentBadgeProps {
 // the label shows which agent the pane runs (Claude / Qwen / Codex / ...),
 // clicking it launches that agent, and the caret switches the assigned agent.
 export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) {
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const menu = useAnchoredMenu({ width: 230 })
 
   const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
   const agentProfiles = useWorkspaceStore((s) => s.preferences.agentProfiles)
@@ -33,27 +31,15 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   // list only changes via Settings, which the user would have closed before reaching here.
   const [accounts, setAccounts] = useState<ClaudeAccount[]>([])
   useEffect(() => {
-    if (!open) return
+    if (!menu.open) return
     window.electronAPI.claudeAccountsList().then(setAccounts).catch(() => {})
-  }, [open])
+  }, [menu.open])
 
-  // Bind this pane to a Claude account (or back to the global login) and respawn so the new
-  // account's token takes effect. Only re-launches Claude if Claude was the running agent.
-  // Close on click outside
+  // When the menu closes (incl. via the shared click-outside handler), leave
+  // "pair with" sub-mode too, so it never reopens mid-pairing.
   useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-        setPairMode(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+    if (!menu.open) setPairMode(false)
+  }, [menu.open])
 
   const profiles = agentProfiles ?? []
   const paneProfile = resolvePaneProfile(pane, { agentProfiles, defaultAgentId })
@@ -78,7 +64,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
       updatePane(paneId, { agentId: profileId, claudeAccountId: accountId })
       const profile = (agentProfiles ?? []).find((p) => p.id === profileId)
       if (profile) launchAgent(paneId, profile, pane.workingDirectory)
-      setOpen(false)
+      menu.close()
     },
     [pane, paneId, agentProfiles, updatePane],
   )
@@ -103,25 +89,12 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
         )
       }
       setPairMode(false)
-      setOpen(false)
+      menu.close()
     },
     [paneId, pairPanes],
   )
 
-  const closeMenu = useCallback(() => {
-    setOpen(false)
-    setPairMode(false)
-  }, [])
-
-  const MENU_W = 230
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    // Right-align under the badge, but clamp into the viewport so a pane near either edge
-    // (common with 4–5 panes) never pushes the menu off-screen.
-    const left = Math.min(Math.max(8, rect.right - MENU_W), window.innerWidth - MENU_W - 8)
-    return { top: rect.bottom + 4, left }
-  }
+  const closeMenu = useCallback(() => menu.close(), [menu])
 
   if (!pane) return null
 
@@ -152,8 +125,8 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
       </button>
       {/* Switch agent */}
       <button
-        ref={buttonRef}
-        onClick={() => (open ? closeMenu() : setOpen(true))}
+        ref={menu.triggerRef}
+        onClick={() => (menu.open ? closeMenu() : menu.setOpen(true))}
         className="px-0.5 py-0.5 rounded-r text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors"
         title="Switch agent"
       >
@@ -162,12 +135,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
         </svg>
       </button>
 
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[230px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
+      <PortalMenu menu={menu}>
           <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-muted]">
             Launch
           </div>
@@ -263,9 +231,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
               <span aria-hidden>🔗</span> Pair with…
             </button>
           )}
-        </div>,
-        document.body,
-      )}
+      </PortalMenu>
     </div>
   )
 })

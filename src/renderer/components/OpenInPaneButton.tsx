@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { focusTerminal, launchAgent, resolvePaneProfile } from './TerminalPane'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
 
 interface OpenInPaneButtonProps {
   paneId: number
@@ -21,23 +21,7 @@ function paneStatus(state: string, serverCount: number): string {
  * none are free, shows a picker so you can deliberately override a busy pane.
  */
 export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenInPaneButtonProps) {
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!pickerOpen) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setPickerOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [pickerOpen])
+  const menu = useAnchoredMenu({ width: 200 })
 
   // Resolve the freshest folder for the source pane (real cwd, then tracked)
   const resolveDir = useCallback(async (): Promise<string | null> => {
@@ -52,7 +36,7 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
   }, [paneId])
 
   const launchIn = useCallback(async (targetId: number) => {
-    setPickerOpen(false)
+    menu.close()
     const dir = await resolveDir()
     if (!dir) return
     const store = useWorkspaceStore.getState()
@@ -78,22 +62,16 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
       launchIn(free.id)
     } else {
       // No free pane - let the user pick which busy pane to override
-      setPickerOpen(true)
+      menu.setOpen(true)
     }
-  }, [paneId, launchIn])
-
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 200 }
-  }
+  }, [paneId, launchIn, menu])
 
   const others = useWorkspaceStore.getState().panes.filter((p) => p.id !== paneId)
 
   return (
     <>
       <button
-        ref={buttonRef}
+        ref={menu.triggerRef}
         onClick={handleClick}
         className="flex items-center gap-1 px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors rounded"
         title="Open this folder in another pane and start Claude"
@@ -106,12 +84,7 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
         <span className="pane-ctl-label text-meta leading-none">Fork</span>
       </button>
 
-      {pickerOpen && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[--border] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
+      <PortalMenu menu={menu}>
           <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-dimmed] border-b border-[--border]">
             No free pane — override:
           </div>
@@ -128,9 +101,7 @@ export const OpenInPaneButton = memo(function OpenInPaneButton({ paneId }: OpenI
               </span>
             </button>
           ))}
-        </div>,
-        document.body
-      )}
+      </PortalMenu>
     </>
   )
 })
