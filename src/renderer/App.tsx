@@ -5,8 +5,11 @@ import { DelegationDashboard } from './components/DelegationDashboard'
 import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals, dumpPaneDiagnostics, checkPaneHealth } from './components/TerminalPane'
+import { getFolderName } from './components/PaneHeader'
+import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
+import { useUiScale, applyUiScale, readUiScale } from './uiScale'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
@@ -25,7 +28,7 @@ function AddPaneButton() {
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6">
         <path d="M8 3v10M3 8h10" strokeLinecap="round" />
       </svg>
-      <span className="text-[11px] leading-none">Add</span>
+      <span className="text-body leading-none">Add</span>
     </button>
   )
 }
@@ -55,6 +58,20 @@ function App() {
   // Read latest open-state inside the (stable) menu-action handler without re-subscribing.
   const isDashboardOpenRef = useRef(isDashboardOpen)
   useEffect(() => { isDashboardOpenRef.current = isDashboardOpen }, [isDashboardOpen])
+
+  // Chrome zoom lives in uiScale.ts so Settings can drive the same value.
+  // Mounting the hook applies any persisted scale on load.
+  useUiScale()
+
+  // Cmd +/− targets the frontmost surface. The Activity Console owns its own
+  // scale (OpsOverlay), so App only needs to know whether it's showing.
+  const isOpsOpenRef = useRef(false)
+  useEffect(() => {
+    const unsub = window.electronAPI.onOpsInappShow?.((v: boolean) => { isOpsOpenRef.current = v })
+    return () => { if (unsub) unsub() }
+  }, [])
+  const zoomOps = (step: number) =>
+    window.dispatchEvent(new CustomEvent('qc-ops-zoom', { detail: step }))
 
   // Handle prompt injection (no newline - just inject text)
   const handlePromptClick = useCallback((prompt: SavedPrompt) => {
@@ -197,14 +214,27 @@ function App() {
         case 'launch-claude':
           sendToTerminal(store.activePaneId, 'claude\n')
           break
+        // Cmd +/− goes to the frontmost surface: Activity Console, else the
+        // delegation dashboard, else the terminals. Whatever you're looking at
+        // is what resizes, so the keys never act on something off-screen.
         case 'increase-font':
-          // While the dashboard is open, Cmd+ zooms IT instead of the terminals.
-          if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s + 0.1))
+          if (isOpsOpenRef.current) zoomOps(+0.1)
+          else if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s + 0.1))
           else store.updatePreferences({ fontSize: Math.min(24, store.preferences.fontSize + 1) })
           break
         case 'decrease-font':
-          if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s - 0.1))
+          if (isOpsOpenRef.current) zoomOps(-0.1)
+          else if (isDashboardOpenRef.current) setDashScale((s) => clampScale(s - 0.1))
           else store.updatePreferences({ fontSize: Math.max(10, store.preferences.fontSize - 1) })
+          break
+        case 'increase-ui':
+          applyUiScale(readUiScale() + 0.1)
+          break
+        case 'decrease-ui':
+          applyUiScale(readUiScale() - 0.1)
+          break
+        case 'reset-ui':
+          applyUiScale(1)
           break
         case 'open-settings':
           setIsSettingsOpen(true)
@@ -220,6 +250,80 @@ function App() {
 
     return unsubscribe
   }, [handleTerminalFocus])
+
+  // Push a compact live workspace snapshot to main for plugins that observe
+  // pane state (e.g. the Activity Console). Pane states (claude-active/waiting)
+  // live only in this store; main can't see them otherwise. STRICTLY GATED: the
+  // store subscription only checks a boolean and returns unless a plugin with
+  // the "read:workspace" capability is enabled — so with all such plugins off
+  // (the default) this costs nothing beyond that boolean check.
+  useEffect(() => {
+    let observers = false      // any plugin observing pane state (→ snapshot push)
+    let verifyOn = false       // Ops Console verification mode (→ emit transitions)
+    let accountLabels: Record<string, string> = {}
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let seq = 0
+    const prevStates = new Map<number, string>()
+    const push = () => {
+      if (!observers) return
+      const st = useWorkspaceStore.getState()
+      const snap = {
+        activePaneId: st.activePaneId,
+        panes: st.panes.map((p, i) => {
+          const parts = p.workingDirectory.split('/').filter(Boolean)
+          return {
+            id: p.id,
+            pos: i,
+            folder: getFolderName(p.workingDirectory),
+            proj: parts.length >= 2 ? parts[parts.length - 2] : (parts[0] ?? ''),
+            cwd: p.workingDirectory,
+            state: p.state,
+            account: p.claudeAccountId ? (accountLabels[p.claudeAccountId] ?? '@account') : '@login',
+            model: 'Opus 4.8',
+          }
+        }),
+      }
+      window.electronAPI.pushWorkspaceSnapshot?.(snap)
+    }
+    // Runs on every store change. Cheap when off (early boolean returns).
+    const onChange = () => {
+      if (verifyOn) {
+        // ground truth: emit a transition event the instant a pane state flips.
+        // t0 = now (this fires synchronously after the store setState).
+        const st = useWorkspaceStore.getState()
+        for (const p of st.panes) {
+          const prev = prevStates.get(p.id)
+          if (prev !== undefined && prev !== p.state) {
+            window.electronAPI.pushOpsTransition?.({ seq: ++seq, paneId: p.id, from: prev, to: p.state, t0: Date.now() })
+          }
+          prevStates.set(p.id, p.state)
+        }
+      }
+      if (observers) { if (timer) clearTimeout(timer); timer = setTimeout(push, 400) }
+    }
+    const evalPlugins = (descriptors: Array<{ enabled: boolean; manifest: { capabilities?: string[] }; settings?: Record<string, unknown> }>) => {
+      const ds = descriptors ?? []
+      const nowObs = ds.some((d) => d.enabled && d.manifest.capabilities?.includes('read:workspace'))
+      const nowVerify = ds.some((d) => d.enabled && !!d.settings?.verificationMode)
+      const obsTurnedOn = nowObs && !observers
+      if (nowVerify && !verifyOn) {
+        // seed prevStates so we don't emit phantom transitions for existing states
+        prevStates.clear()
+        for (const p of useWorkspaceStore.getState().panes) prevStates.set(p.id, p.state)
+      }
+      observers = nowObs; verifyOn = nowVerify
+      if (obsTurnedOn) {
+        window.electronAPI.claudeAccountsList?.().then((accts: Array<{ id: string; label: string }>) => {
+          accountLabels = Object.fromEntries((accts ?? []).map((a: { id: string; label: string }) => [a.id, '@' + a.label]))
+          onChange()
+        }).catch(() => onChange())
+      }
+    }
+    window.electronAPI.listPlugins?.().then(evalPlugins).catch(() => {})
+    const unsubPlugins = window.electronAPI.onPluginChanged?.(evalPlugins)
+    const unsub = useWorkspaceStore.subscribe(onChange)
+    return () => { if (timer) clearTimeout(timer); unsub(); if (unsubPlugins) unsubPlugins() }
+  }, [])
 
   // Lightweight, anomaly-gated pane health sweep. Every 15s (skipped while the
   // window is hidden) it logs ONLY panes that are sized + have content but whose
@@ -260,17 +364,17 @@ function App() {
   return (
     <div className="h-screen w-screen flex flex-col bg-transparent overflow-hidden relative font-mono">
       {/* Title bar - glass effect */}
-      <div className="h-9 titlebar-drag-region border-b border-white/[0.06] flex items-center justify-between px-3 glass-header">
+      <div className="h-9 titlebar-drag-region border-b border-white/[0.06] flex items-center justify-between px-3 glass-header chrome-legible">
         {/* Left side - after traffic lights */}
         <div className="flex items-center gap-2 pl-[72px]">
           <span
-            className="text-[12px] font-medium text-[--ui-text-secondary]"
+            className="text-body font-medium text-[--ui-text-secondary]"
             title="QuadClaude — the ADHD workspace for Claude Code"
           >
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-[10px] text-[--ui-text-faint]">v1.30.4</span>
+          <span className="text-meta text-[--ui-text-secondary]">v1.31.6</span>
         </div>
 
         {/* Center - layout selector + add pane */}
@@ -281,10 +385,24 @@ function App() {
 
         {/* Right side - utility buttons (per-account usage now lives in each pane's status line) */}
         <div className="flex items-center gap-0.5">
+          {/* Activity Console — live ops view of every pane */}
+          <button
+            onClick={async () => {
+              await window.electronAPI.togglePlugin?.('ops-console', true)
+              window.electronAPI.openPlugin?.('ops-console')
+            }}
+            className="px-1.5 py-1 text-[--ui-text-secondary] hover:text-[--accent] transition-colors titlebar-no-drag"
+            title="Activity Console — live view of every pane (⌘⇧A)"
+            aria-label="Open Activity Console"
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 8h2.5l1.8-4.5 3 9 1.8-4.5H16" />
+            </svg>
+          </button>
           {/* Delegation dashboard */}
           <button
             onClick={() => setIsDashboardOpen(true)}
-            className="px-1.5 py-1 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
+            className="px-1.5 py-1 text-[--ui-text-secondary] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
             title="Delegation dashboard"
             aria-label="Open delegation dashboard"
           >
@@ -296,7 +414,7 @@ function App() {
           {/* Settings */}
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="px-1.5 py-1 text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
+            className="px-1.5 py-1 text-[--ui-text-secondary] hover:text-[--ui-text-primary] transition-colors titlebar-no-drag"
             title="Settings (Cmd+,)"
             aria-label="Open settings"
           >
@@ -324,6 +442,9 @@ function App() {
 
       {/* Dedicated delegation dashboard */}
       <DelegationDashboard isOpen={isDashboardOpen} onClose={() => setIsDashboardOpen(false)} scale={dashScale} onScaleChange={(n) => setDashScale(clampScale(n))} />
+
+      {/* Activity Console — in-app overlay (plugin, low-memory native render) */}
+      <OpsOverlay />
 
     </div>
   )

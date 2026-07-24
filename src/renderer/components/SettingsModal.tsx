@@ -3,7 +3,9 @@ import { useWorkspaceStore } from '../store/workspace'
 import { HotkeyBindings, DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, BackgroundMode, PortIsolation, LoopbackStatus } from '../../shared/types'
 import { AgentsSettings } from './AgentsSettings'
 import { ClaudeAccountsSettings } from './ClaudeAccountsSettings'
+import { PluginsSettings } from './PluginsSettings'
 import { ModelRouterSettings } from './ModelRouterSettings'
+import { useUiScale, applyUiScale } from '../uiScale'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -11,7 +13,7 @@ interface SettingsModalProps {
 }
 
 type HotkeyField = keyof HotkeyBindings
-type TabId = 'general' | 'models' | 'agents' | 'accounts' | 'background' | 'shortcuts' | 'about'
+type TabId = 'general' | 'models' | 'agents' | 'accounts' | 'plugins' | 'background' | 'shortcuts' | 'about'
 
 // One toggle, defined once so every switch in Settings looks and behaves identically.
 function Toggle({ on, onChange, label }: { on: boolean; onChange: () => void; label: string }) {
@@ -33,8 +35,8 @@ function SettingRow({ title, caption, children }: { title: string; caption?: str
   return (
     <div className="flex items-center justify-between gap-4 py-1.5">
       <div className="flex flex-col gap-0.5 min-w-0">
-        <span className="text-sm text-[--ui-text-primary]">{title}</span>
-        {caption && <span className="text-[11px] text-[--ui-text-dimmed]">{caption}</span>}
+        <span className="text-body text-[--ui-text-primary]">{title}</span>
+        {caption && <span className="text-meta text-[--ui-text-dimmed]">{caption}</span>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -46,6 +48,12 @@ const TAB_ICONS: Record<TabId, ReactNode> = {
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
       <path d="M2 4.5h8M12.5 4.5H14M2 11.5h3.5M8 11.5h6" />
       <circle cx="11" cy="4.5" r="1.6" /><circle cx="6.5" cy="11.5" r="1.6" />
+    </svg>
+  ),
+  plugins: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="2" width="5" height="5" rx="1" /><rect x="9" y="2" width="5" height="5" rx="1" />
+      <rect x="2" y="9" width="5" height="5" rx="1" /><path d="M9 11.5h5M11.5 9v5" />
     </svg>
   ),
   models: (
@@ -85,6 +93,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'models', label: 'Models' },
   { id: 'agents', label: 'Agents' },
   { id: 'accounts', label: 'Accounts' },
+  { id: 'plugins', label: 'Plugins' },
   { id: 'background', label: 'Background' },
   { id: 'shortcuts', label: 'Shortcuts' },
   { id: 'about', label: 'About' },
@@ -93,6 +102,7 @@ const TABS: { id: TabId; label: string }[] = [
 export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { preferences, updatePreferences, updateBackground } = useWorkspaceStore()
   const { hotkeys, fontSize } = preferences
+  const uiScale = useUiScale()
   const background = preferences.background ?? DEFAULT_BACKGROUND
   const modalRef = useRef<HTMLDivElement>(null)
   const firstFocusableRef = useRef<HTMLButtonElement>(null)
@@ -207,12 +217,12 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
   const renderHotkeyRow = (field: HotkeyField, label: string) => (
     <div key={field} className="flex items-center justify-between">
-      <span className="text-sm text-[--ui-text-primary]" id={`hotkey-label-${field}`}>{label}</span>
+      <span className="text-body text-[--ui-text-primary]" id={`hotkey-label-${field}`}>{label}</span>
       <button
         onClick={() => setEditingHotkey(field)}
         onKeyDown={(e) => editingHotkey === field && handleHotkeyKeyDown(e, field)}
         onBlur={() => setEditingHotkey(null)}
-        className={`px-3 py-1.5 min-w-[104px] text-sm text-center rounded-lg transition-all ${
+        className={`px-3 py-1.5 min-w-[104px] text-body text-center rounded-lg transition-all ${
           editingHotkey === field
             ? 'bg-[--accent]/10 border-2 border-[--accent] text-[--accent]'
             : 'glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--ui-text-primary]'
@@ -240,7 +250,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b glass-border shrink-0">
-          <h2 id="settings-title" className="text-base font-semibold text-[--ui-text-primary]">Settings</h2>
+          <h2 id="settings-title" className="text-title font-semibold text-[--ui-text-primary]">Settings</h2>
           <button
             ref={firstFocusableRef}
             onClick={onClose}
@@ -264,7 +274,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   key={t.id}
                   onClick={() => setTab(t.id)}
                   aria-current={active ? 'page' : undefined}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all ${
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-body transition-all ${
                     active
                       ? 'bg-[--accent]/12 text-[--accent] font-medium'
                       : 'text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/40'
@@ -285,18 +295,45 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   <div className="flex items-center gap-2" role="group" aria-label="Font size">
                     <button
                       onClick={() => updatePreferences({ fontSize: Math.max(10, fontSize - 1) })}
-                      className="w-8 h-8 flex items-center justify-center text-sm glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                      className="w-8 h-8 flex items-center justify-center text-body glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                       aria-label="Decrease font size"
                     >
                       −
                     </button>
-                    <span className="w-8 text-center text-sm font-medium text-[--ui-text-primary]" aria-live="polite">
+                    <span className="w-8 text-center text-body font-medium text-[--ui-text-primary]" aria-live="polite">
                       {fontSize}
                     </span>
                     <button
                       onClick={() => updatePreferences({ fontSize: Math.min(24, fontSize + 1) })}
-                      className="w-8 h-8 flex items-center justify-center text-sm glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                      className="w-8 h-8 flex items-center justify-center text-body glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
                       aria-label="Increase font size"
+                    >
+                      +
+                    </button>
+                  </div>
+                </SettingRow>
+
+                <SettingRow title="UI size" caption="App text — toolbar, pane headers, Settings (⌘⇧ +/−)">
+                  <div className="flex items-center gap-2" role="group" aria-label="UI size">
+                    <button
+                      onClick={() => applyUiScale(uiScale - 0.1)}
+                      className="w-8 h-8 flex items-center justify-center text-body glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                      aria-label="Decrease UI size"
+                    >
+                      −
+                    </button>
+                    <button
+                      onClick={() => applyUiScale(1)}
+                      className="w-12 text-center text-body font-medium tabular-nums text-[--ui-text-primary] hover:text-[--accent]"
+                      title="Reset to 100%"
+                      aria-live="polite"
+                    >
+                      {Math.round(uiScale * 100)}%
+                    </button>
+                    <button
+                      onClick={() => applyUiScale(uiScale + 0.1)}
+                      className="w-8 h-8 flex items-center justify-center text-body glass-control text-[--ui-text-secondary] hover:border-[--accent] hover:text-[--accent] transition-all rounded-lg"
+                      aria-label="Increase UI size"
                     >
                       +
                     </button>
@@ -339,7 +376,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   <select
                     value={preferences.portIsolation ?? 'off'}
                     onChange={(e) => updatePreferences({ portIsolation: e.target.value as PortIsolation })}
-                    className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent]"
+                    className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body text-[--ui-text-primary] outline-none focus:border-[--accent]"
                   >
                     <option value="off">Off</option>
                     <option value="loopback">Loopback IP</option>
@@ -348,14 +385,14 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 </SettingRow>
 
                 {preferences.portIsolation === 'loopback' && (
-                  <div className="text-[11px] text-[--ui-text-dimmed] space-y-1.5 pb-1">
+                  <div className="text-body text-[--ui-text-dimmed] space-y-1.5 pb-1">
                     {loopback && !loopback.supported ? (
                       <p>This OS binds 127.0.0.0/8 without setup — loopback isolation works out of the box.</p>
                     ) : (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span>
                           macOS aliases:{' '}
-                          <span className={loopback?.ready ? 'text-emerald-400' : 'text-amber-300'}>
+                          <span className={loopback?.ready ? 'text-[--success]' : 'text-[--warning]'}>
                             {loopback ? `${loopback.configured}/${loopback.expected} set up` : '…'}
                           </span>
                         </span>
@@ -363,7 +400,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                           <button
                             onClick={setupLoopback}
                             disabled={settingUpLoopback}
-                            className="text-xs px-2 py-0.5 rounded bg-[--accent] text-white disabled:opacity-40"
+                            className="text-body px-2 py-0.5 rounded bg-[--accent] text-white disabled:opacity-40"
                           >
                             {settingUpLoopback ? 'Setting up…' : 'Set up aliases (admin)'}
                           </button>
@@ -378,7 +415,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   </div>
                 )}
                 {preferences.portIsolation === 'port' && (
-                  <p className="text-[11px] text-[--ui-text-dimmed] pb-1">
+                  <p className="text-body text-[--ui-text-dimmed] pb-1">
                     Each pane gets a distinct <span className="font-mono">PORT</span> base (3000, 3100, …). No setup needed,
                     for tools that honor <span className="font-mono">PORT</span>. Re-launch a pane to apply.
                   </p>
@@ -391,6 +428,8 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
             {tab === 'agents' && <AgentsSettings />}
 
             {tab === 'accounts' && <ClaudeAccountsSettings />}
+
+            {tab === 'plugins' && <PluginsSettings />}
 
             {tab === 'background' && (
               <div className="space-y-4">
@@ -405,13 +444,13 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 {background.enabled && (
                   <>
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-[--ui-text-primary]" id="bg-mode-label">Apply to</span>
+                      <span className="text-body text-[--ui-text-primary]" id="bg-mode-label">Apply to</span>
                       <div className="flex items-center glass-control rounded-lg p-1" role="radiogroup" aria-labelledby="bg-mode-label">
                         {(['unified', 'per-pane'] as BackgroundMode[]).map((m) => (
                           <button
                             key={m}
                             onClick={() => updateBackground({ mode: m })}
-                            className={`px-3 py-1.5 text-sm rounded-md transition-all ${
+                            className={`px-3 py-1.5 text-body rounded-md transition-all ${
                               background.mode === m
                                 ? 'glass-control-active text-[--ui-text-primary] font-medium'
                                 : 'text-[--ui-text-muted] hover:text-[--ui-text-secondary]'
@@ -426,7 +465,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                     </div>
 
                     <div>
-                      <span className="text-sm text-[--ui-text-primary] mb-2 block">Wallpaper</span>
+                      <span className="text-body text-[--ui-text-primary] mb-2 block">Wallpaper</span>
                       <div className="grid grid-cols-4 gap-2">
                         {[{ src: 'backgrounds/bg.png', label: 'Rooftop' }].map((wp) => (
                           <button
@@ -441,7 +480,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                           >
                             <img src={wp.src} alt={wp.label} className="w-full h-full object-cover" draggable={false} />
                             <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1">
-                              <span className="text-[10px] text-white/80">{wp.label}</span>
+                              <span className="text-meta text-white/80">{wp.label}</span>
                             </div>
                             {background.image === wp.src && (
                               <div className="absolute top-1 right-1 w-4 h-4 bg-[--accent] rounded-full flex items-center justify-center">
@@ -465,7 +504,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                           >
                             <img src={`file://${wp}`} alt={wp.split('/').pop()} className="w-full h-full object-cover" draggable={false} />
                             <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1">
-                              <span className="text-[10px] text-white/80 truncate block">{wp.split('/').pop()}</span>
+                              <span className="text-meta text-white/80 truncate block">{wp.split('/').pop()}</span>
                             </div>
                             {background.image === wp && (
                               <div className="absolute top-1 right-1 w-4 h-4 bg-[--accent] rounded-full flex items-center justify-center">
@@ -483,7 +522,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                                   ...(background.image === wp ? { image: DEFAULT_BACKGROUND.image } : {}),
                                 })
                               }}
-                              className="absolute top-1 left-1 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 cursor-pointer"
+                              className="absolute top-1 left-1 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[--danger] cursor-pointer"
                               title="Remove wallpaper"
                             >
                               <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
@@ -506,13 +545,13 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                             <path d="M8 3v10M3 8h10" />
                           </svg>
-                          <span className="text-[10px]">Add</span>
+                          <span className="text-meta">Add</span>
                         </button>
                       </div>
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-[--ui-text-primary]" id="bg-opacity-label">Opacity</span>
+                      <span className="text-body text-[--ui-text-primary]" id="bg-opacity-label">Opacity</span>
                       <div className="flex items-center gap-3">
                         <input
                           type="range"
@@ -524,7 +563,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                           className="w-40 accent-[--accent]"
                           aria-labelledby="bg-opacity-label"
                         />
-                        <span className="text-xs text-[--ui-text-muted] w-10 text-right">
+                        <span className="text-body text-[--ui-text-muted] w-10 text-right">
                           {Math.round(background.opacity * 100)}%
                         </span>
                       </div>
@@ -539,7 +578,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 <div className="flex items-center justify-end -mt-1 mb-4">
                   <button
                     onClick={handleResetHotkeys}
-                    className="text-xs text-[--ui-text-muted] hover:text-[--accent] transition-colors"
+                    className="text-body text-[--ui-text-muted] hover:text-[--accent] transition-colors"
                     aria-label="Reset shortcuts to defaults"
                   >
                     Reset to defaults
@@ -547,7 +586,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                 </div>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-2">
                   <div>
-                    <span className="text-xs text-[--ui-text-muted] mb-2 block uppercase tracking-wide">Focus pane</span>
+                    <span className="text-body text-[--ui-text-muted] mb-2 block uppercase tracking-wide">Focus pane</span>
                     <div className="space-y-2">
                       {(Object.keys(terminalHotkeyLabels) as HotkeyField[]).map((field) =>
                         renderHotkeyRow(field, terminalHotkeyLabels[field]!),
@@ -555,7 +594,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                     </div>
                   </div>
                   <div>
-                    <span className="text-xs text-[--ui-text-muted] mb-2 block uppercase tracking-wide">Switch layout</span>
+                    <span className="text-body text-[--ui-text-muted] mb-2 block uppercase tracking-wide">Switch layout</span>
                     <div className="space-y-2">
                       {(Object.keys(layoutHotkeyLabels) as HotkeyField[]).map((field) =>
                         renderHotkeyRow(field, layoutHotkeyLabels[field]!),
@@ -568,9 +607,9 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
             {tab === 'about' && (
               <div className="h-full flex flex-col items-center justify-center text-center gap-2">
-                <div className="text-sm font-medium text-[--ui-text-primary]">QuadClaude</div>
-                <div className="text-xs text-[--ui-text-secondary]">The ADHD workspace for Claude Code</div>
-                <div className="text-xs text-[--ui-text-muted]">
+                <div className="text-body font-medium text-[--ui-text-primary]">QuadClaude</div>
+                <div className="text-body text-[--ui-text-secondary]">The ADHD workspace for Claude Code</div>
+                <div className="text-body text-[--ui-text-muted]">
                   crafted by{' '}
                   <a href="https://birudo.studio" target="_blank" rel="noopener noreferrer" className="text-[--accent] hover:underline">
                     ビルド studio
@@ -581,7 +620,7 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   </a>
                   {' '}· v{appVersion}
                 </div>
-                <div className="text-[10px] text-[--ui-text-faint] leading-snug mt-2 max-w-xs">
+                <div className="text-meta text-[--ui-text-faint] leading-snug mt-2 max-w-xs">
                   Not affiliated with Anthropic. Claude is a trademark of Anthropic PBC.
                 </div>
               </div>

@@ -237,6 +237,9 @@ export interface WorkspacePreferences {
   portIsolation?: PortIsolation
   // Delegation workflow: master switch + how the worker feed window is offered
   delegation?: DelegationPrefs
+  // Per-plugin state (enabled + settings), keyed by plugin id. Managed by the
+  // generic PluginHost; merged with each plugin's manifest defaults on load.
+  plugins?: Record<string, { enabled: boolean; settings: Record<string, unknown> }>
 }
 
 // Delegation is opt-in. When enabled and a delegation model is configured, the app
@@ -364,6 +367,24 @@ export const IPC_CHANNELS = {
   CLAUDE_ACCOUNTS_SAVE: 'claude-accounts:save', // upsert {id?,label,email,token?}
   CLAUDE_ACCOUNTS_DELETE: 'claude-accounts:delete',
   CLAUDE_ACCOUNTS_VERIFY: 'claude-accounts:verify', // fetch a token's real account (id)
+
+  // --- Generic plugin system (PluginHost) ---
+  PLUGIN_LIST: 'plugin:list',            // → PluginDescriptor[]
+  PLUGIN_TOGGLE: 'plugin:toggle',        // (id, enabled) → PluginDescriptor[]
+  PLUGIN_SET_SETTING: 'plugin:set-setting', // (id, key, value) → PluginDescriptor[]
+  PLUGIN_OPEN: 'plugin:open',            // (id) — open a window-kind plugin
+  PLUGIN_CHANGED: 'plugin:changed',      // main → renderer: descriptors changed (push)
+  // Renderer → main: compact live workspace snapshot for plugins that observe
+  // pane state (only pushed while at least one such plugin is enabled).
+  PLUGIN_WORKSPACE_SNAPSHOT: 'plugin:workspace-snapshot',
+  // Verification: renderer → main, one event per real pane state transition
+  // (only emitted while the Ops Console's verificationMode setting is on).
+  OPS_VERIFY_TRANSITION: 'ops:verify-transition',
+  // In-app native overlay (rendered in the main window's renderer, no window):
+  OPS_INAPP_SNAPSHOT: 'ops:inapp-snapshot',  // main → main renderer: OpsSnapshot
+  OPS_INAPP_VERIFY: 'ops:inapp-verify',      // main → main renderer: VerifyOverlay
+  OPS_INAPP_SHOW: 'ops:inapp-show',          // main → main renderer: boolean
+  OPS_CLOSE: 'ops:close',                     // main renderer → main: close console
 } as const
 
 // --- Delegation telemetry ----------------------------------------------------
@@ -573,6 +594,11 @@ export type MenuAction =
   | 'toggle-theme'
   | 'increase-font'
   | 'decrease-font'
+  // Chrome zoom (Cmd+Shift +/−/0) — the app's own UI text, distinct from the
+  // font actions above, which target the frontmost surface's content.
+  | 'increase-ui'
+  | 'decrease-ui'
+  | 'reset-ui'
   | 'open-settings'
   | 'toggle-prompt-bar'
   | 'dump-diagnostics'

@@ -504,10 +504,6 @@ export function stopPerfMonitor() {
   }
 }
 
-export function isPerfMonitorRunning(): boolean {
-  return sampleTimer !== null
-}
-
 export function setupPerfHandlers() {
   // Renderer pushes its snapshot here every few seconds.
   ipcMain.on('perf:report', (_e, data) => {
@@ -515,16 +511,6 @@ export function setupPerfHandlers() {
     lastRendererReportAt = Date.now()
   })
 
-  // Renderer (or a hotkey) can drop a labeled marker, e.g. "feels slow now".
-  ipcMain.on('perf:marker', (_e, label: string) => {
-    addMarker(typeof label === 'string' ? label : 'marker')
-  })
-
-  ipcMain.handle('perf:status', () => ({
-    running: isPerfMonitorRunning(),
-    logFile: logFilePath,
-    logDir: getPerfLogDir(),
-  }))
 }
 
 export function revealPerfLogs() {

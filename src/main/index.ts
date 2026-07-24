@@ -14,6 +14,11 @@ import { logger } from './logger'
 import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv, DEFAULT_ACCOUNT_MODEL } from '../shared/types'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
 import {
+  initPluginHost, getPluginMenuItems, listPlugins, togglePlugin, setPluginSetting,
+  openPlugin, receiveWorkspaceSnapshot, emitPtyExit, shutdownPlugins,
+} from './pluginHost'
+import { WorkspaceSnapshot } from '../shared/plugins'
+import {
   startPerfMonitor,
   stopPerfMonitor,
   setupPerfHandlers,
@@ -969,6 +974,8 @@ function createApplicationMenu() {
           click: () => sendMenuAction('cycle-pane')
         },
         { type: 'separator' },
+        // Cmd +/- targets whichever surface is frontmost — Activity Console,
+        // else the delegation dashboard, else the terminals (see App.tsx).
         {
           label: 'Increase Font Size',
           accelerator: 'CmdOrCtrl+Plus',
@@ -979,6 +986,28 @@ function createApplicationMenu() {
           accelerator: 'CmdOrCtrl+-',
           click: () => sendMenuAction('decrease-font')
         },
+        { type: 'separator' },
+        // The app's own UI text (toolbar, pane headers, Settings), separate
+        // from terminal font so each can be sized for how it's read.
+        {
+          label: 'Increase UI Size',
+          accelerator: 'CmdOrCtrl+Shift+Plus',
+          click: () => sendMenuAction('increase-ui')
+        },
+        {
+          label: 'Decrease UI Size',
+          accelerator: 'CmdOrCtrl+Shift+-',
+          click: () => sendMenuAction('decrease-ui')
+        },
+        {
+          label: 'Reset UI Size',
+          accelerator: 'CmdOrCtrl+Shift+0',
+          click: () => sendMenuAction('reset-ui')
+        },
+        { type: 'separator' },
+        // Plugin-contributed items (e.g. Activity Console). Generic — any
+        // enabled window-kind plugin with a menu entry appears here.
+        ...getPluginMenuItems(),
         { type: 'separator' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
@@ -1319,6 +1348,17 @@ function setupIPC() {
   ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, async (_, id: string) => accountStore.delete(id))
   ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_VERIFY, async (_, id: string) => accountStore.verify(id))
 
+  // --- Generic plugin system ---
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_LIST, async () => listPlugins())
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_TOGGLE, async (_, id: string, enabled: boolean) => togglePlugin(id, enabled))
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_SET_SETTING, async (_, id: string, key: string, value: unknown) => setPluginSetting(id, key, value))
+  ipcMain.on(IPC_CHANNELS.PLUGIN_OPEN, (_, id: string) => openPlugin(id))
+  // Renderer pushes a compact live workspace snapshot for plugins that observe
+  // pane state (fire-and-forget; the host no-ops if nothing subscribes).
+  ipcMain.on(IPC_CHANNELS.PLUGIN_WORKSPACE_SNAPSHOT, (_, snap: WorkspaceSnapshot) => {
+    try { receiveWorkspaceSnapshot(snap) } catch (e) { logger.warn('pluginHost', 'bad workspace snapshot', String(e)) }
+  })
+
   // Build the shareable report; if `save` is requested, write it via a save dialog.
   // Always returns the report text so the renderer can also copy it to the clipboard.
   ipcMain.handle(IPC_CHANNELS.DELEGATION_EXPORT, async (_, save: boolean) => {
@@ -1506,6 +1546,7 @@ app.whenReady().then(() => {
     }, (paneId, exitCode) => {
       logger.info('pty', `PTY exited for pane ${paneId}`, `Exit code: ${exitCode}`)
       sendToRenderer(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
+      emitPtyExit(paneId, exitCode) // feed plugins (Ops Console incident toasts)
     })
     logger.info('pty', 'PtyManager initialized')
   } catch (error) {
@@ -1525,6 +1566,27 @@ app.whenReady().then(() => {
   )
 
   createWindow()
+
+  // Generic plugin host: activates enabled plugins (e.g. the Ops Console) and
+  // wires them a read-only capability context. Must run after ptyManager +
+  // workspaceManager + createWindow (menu/notify depend on them).
+  try {
+    initPluginHost({
+      appVersion: app.getVersion(),
+      homeDir: app.getPath('home'),
+      initialPluginPrefs: workspaceManager?.load()?.preferences?.plugins,
+      ptyStats: () => ptyManager?.getStats() ?? { sessions: 0, totalBytesOut: 0, perPaneBytesOut: {} },
+      getGitStatus: (paneId) => ptyManager?.getGitStatus(paneId) ?? Promise.resolve(null),
+      getContextUsage: (paneId) => ptyManager?.getContextUsage(paneId) ?? Promise.resolve(null),
+      rebuildMenu: () => createApplicationMenu(),
+      notifyChanged: (descriptors) => sendToRenderer(IPC_CHANNELS.PLUGIN_CHANGED, descriptors),
+      sendToUi: (channel, payload) => sendToRenderer(channel, payload),
+    })
+    // Rebuild the menu so any auto-enabled plugin's item appears.
+    createApplicationMenu()
+  } catch (error) {
+    logger.error('pluginHost', 'Failed to init plugin host', error instanceof Error ? error.message : String(error))
+  }
 
   // Start usage polling
   usagePoller = new UsagePoller()
@@ -1572,6 +1634,7 @@ app.on('before-quit', (e) => {
   if (isHardExiting) return
   isHardExiting = true
   logger.info('app', 'App is quitting')
+  try { shutdownPlugins() } catch { /* never block quit */ }
   stopPerfMonitor()
   // Save CWDs before killing PTYs (important when Cmd+Q is used) — synchronous.
   if (ptyManager && workspaceManager) {

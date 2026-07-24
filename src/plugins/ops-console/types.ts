@@ -1,0 +1,80 @@
+// Ops Console data contract — main service produces OpsSnapshot; the window
+// renderer consumes it and animates the diff between consecutive snapshots.
+// Snapshot-only design (no separate event stream): the renderer derives "what
+// moved" by comparing card ids/columns, which keeps the IPC surface tiny and
+// makes live mode and record mode render through the identical path.
+
+export type AgentState = 'active' | 'waiting' | 'idle'
+export type CardColumn = 'queued' | 'work' | 'need' | 'done'
+
+export interface OpsAgent {
+  paneId: number
+  pos: number          // index in panes[] → identity color index (PANE_COLORS)
+  name: string         // folder name
+  proj: string         // parent dir label
+  state: AgentState
+  model: string
+  account: string      // e.g. "@boshiro.one"
+  branch?: string
+  dirty?: number
+  ahead?: number
+  ctxPct: number       // 0 = unknown
+  tps: number          // live output rate, tokens/sec (0 when not active)
+}
+
+export interface OpsCard {
+  id: string
+  paneId: number
+  col: CardColumn
+  tag: string
+  task: string
+  file?: string
+  add?: number
+  del?: number
+  tokens?: number      // k-tokens for this task
+  elapsedMs?: number   // for working cards (renderer ticks it locally)
+  word?: string        // whimsy progress word
+  ask?: string         // question text (needs-input)
+  when?: string        // done label (e.g. "just now")
+}
+
+export interface OpsFeedItem {
+  id: string
+  paneId: number
+  main: string         // may contain <b>…</b>
+  sub?: string
+  ageSec: number       // seconds since it happened (renderer formats)
+  incident?: boolean
+}
+
+export interface OpsSnapshot {
+  ts: number
+  recordMode: boolean
+  paneCount: number
+  agents: OpsAgent[]
+  cards: OpsCard[]
+  feed: OpsFeedItem[]  // newest first
+}
+
+// WorkspaceSnapshot (the renderer → main pane push) is the generic shape in
+// shared/plugins.ts, reused here so the service can enrich it.
+export type { WorkspaceSnapshot, PaneSnapshot } from '../../shared/plugins'
+
+// --- Verification (accuracy + timing tracking) ---------------------------
+// One real pane state transition, timestamped at the moment the store flips
+// (ground truth). Emitted event-driven from the renderer when verify is on.
+export interface VerifyTransition { seq: number; paneId: number; from: string; to: string; t0: number }
+// A card column change observed in the console window (the visual truth).
+export interface VerifyMove { cardId: string; paneId: number; fromCol: CardColumn | 'none'; toCol: CardColumn | 'none'; tRender: number; builtAt: number }
+// Live overlay stats the window shows while verifying.
+export interface VerifyOverlay {
+  on: boolean
+  n: number            // transitions seen
+  represented: number  // matched to a viz move
+  missed: number       // no viz move (aliased/dropped)
+  phantom: number      // viz move with no real transition
+  mismatch: number     // matched pane but wrong column
+  lastMs: number | null
+  avgMs: number | null
+  p95Ms: number | null
+}

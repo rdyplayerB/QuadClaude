@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, ClaudeAccount } from '../shared/types'
+import { PluginDescriptor, WorkspaceSnapshot } from '../shared/plugins'
 
 // Every pane registers its OWN terminal:output + pty:exit listener (each filters
 // by paneId), so with up to MAX_PANES (12) panes — plus brief overlap while a
@@ -168,6 +169,41 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, id) as Promise<ClaudeAccount[]>,
   claudeAccountsVerify: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_VERIFY, id) as Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>,
+
+  // Generic plugin system (Settings → Plugins tab)
+  listPlugins: () => ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_LIST) as Promise<PluginDescriptor[]>,
+  togglePlugin: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_TOGGLE, id, enabled) as Promise<PluginDescriptor[]>,
+  setPluginSetting: (id: string, key: string, value: unknown) =>
+    ipcRenderer.invoke(IPC_CHANNELS.PLUGIN_SET_SETTING, id, key, value) as Promise<PluginDescriptor[]>,
+  openPlugin: (id: string) => ipcRenderer.send(IPC_CHANNELS.PLUGIN_OPEN, id),
+  onPluginChanged: (callback: (descriptors: PluginDescriptor[]) => void) => {
+    const handler = (_: Electron.IpcRendererEvent, d: PluginDescriptor[]) => callback(d)
+    ipcRenderer.on(IPC_CHANNELS.PLUGIN_CHANGED, handler)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.PLUGIN_CHANGED, handler)
+  },
+  // Compact live workspace snapshot for plugins that observe pane state.
+  pushWorkspaceSnapshot: (snap: WorkspaceSnapshot) =>
+    ipcRenderer.send(IPC_CHANNELS.PLUGIN_WORKSPACE_SNAPSHOT, snap),
+  // Verification: emit one event per real pane state transition (ground truth).
+  pushOpsTransition: (evt: { seq: number; paneId: number; from: string; to: string; t0: number }) =>
+    ipcRenderer.send(IPC_CHANNELS.OPS_VERIFY_TRANSITION, evt),
+  // In-app Activity Console overlay bridge (native, this window's process)
+  onOpsInappSnapshot: (cb: (snap: unknown) => void) => {
+    const h = (_: unknown, s: unknown) => cb(s); ipcRenderer.on(IPC_CHANNELS.OPS_INAPP_SNAPSHOT, h)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.OPS_INAPP_SNAPSHOT, h)
+  },
+  onOpsInappVerify: (cb: (o: unknown) => void) => {
+    const h = (_: unknown, o: unknown) => cb(o); ipcRenderer.on(IPC_CHANNELS.OPS_INAPP_VERIFY, h)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.OPS_INAPP_VERIFY, h)
+  },
+  onOpsInappShow: (cb: (show: boolean) => void) => {
+    const h = (_: unknown, v: boolean) => cb(v); ipcRenderer.on(IPC_CHANNELS.OPS_INAPP_SHOW, h)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.OPS_INAPP_SHOW, h)
+  },
+  opsSetRecord: (on: boolean) => ipcRenderer.send('ops:set-record', on),
+  opsReportMove: (m: unknown) => ipcRenderer.send('ops:verify-move', m),
+  opsClose: () => ipcRenderer.send(IPC_CHANNELS.OPS_CLOSE),
   onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
     const handler = (_: unknown, event: DelegationEvent) => callback(event)
     ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)
@@ -179,8 +215,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Performance monitoring
   reportPerf: (data: unknown) => ipcRenderer.send('perf:report', data),
-  markPerf: (label: string) => ipcRenderer.send('perf:marker', label),
-  getPerfStatus: () => ipcRenderer.invoke('perf:status'),
   onPerfFlush: (callback: () => void) => {
     const handler = () => callback()
     ipcRenderer.on('perf:flush', handler)
@@ -239,11 +273,22 @@ declare global {
       claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
       claudeAccountsDelete: (id: string) => Promise<ClaudeAccount[]>
       claudeAccountsVerify: (id: string) => Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>
+      listPlugins: () => Promise<PluginDescriptor[]>
+      togglePlugin: (id: string, enabled: boolean) => Promise<PluginDescriptor[]>
+      setPluginSetting: (id: string, key: string, value: unknown) => Promise<PluginDescriptor[]>
+      openPlugin: (id: string) => void
+      onPluginChanged: (callback: (descriptors: PluginDescriptor[]) => void) => () => void
+      pushWorkspaceSnapshot: (snap: WorkspaceSnapshot) => void
+      pushOpsTransition: (evt: { seq: number; paneId: number; from: string; to: string; t0: number }) => void
+      onOpsInappSnapshot: (cb: (snap: unknown) => void) => () => void
+      onOpsInappVerify: (cb: (o: unknown) => void) => () => void
+      onOpsInappShow: (cb: (show: boolean) => void) => () => void
+      opsSetRecord: (on: boolean) => void
+      opsReportMove: (m: unknown) => void
+      opsClose: () => void
       onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
       getPathForFile: (file: File) => string
       reportPerf: (data: unknown) => void
-      markPerf: (label: string) => void
-      getPerfStatus: () => Promise<{ running: boolean; logFile: string | null; logDir: string }>
       onPerfFlush: (callback: () => void) => () => void
     }
   }
