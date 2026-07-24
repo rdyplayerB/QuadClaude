@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { launchAgent, resolvePaneProfile, sendToTerminal } from './TerminalPane'
 import { ClaudeAccount } from '../../shared/types'
-import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { PortalMenu, useAnchoredMenu, menuItemClass } from './ui/PortalMenu'
 
 interface AgentBadgeProps {
   paneId: number
@@ -190,7 +190,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                 onClick={() => {
                   swapPairRoles(paneId)
                 }}
-                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className={menuItemClass}
               >
                 Swap roles
               </button>
@@ -199,7 +199,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   unpairPane(paneId)
                   closeMenu()
                 }}
-                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className={menuItemClass}
               >
                 Unpair
               </button>
@@ -216,7 +216,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   <button
                     key={t.id}
                     onClick={() => doPair(t.id)}
-                    className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] truncate"
+                    className={`${menuItemClass} truncate`}
                   >
                     {t.label}
                   </button>
@@ -226,7 +226,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           ) : (
             <button
               onClick={enterPairMode}
-              className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+              className={`${menuItemClass} flex items-center gap-2`}
             >
               <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="shrink-0">
                 <path d="M5.8 8.2l2.4-2.4M5.9 3.9l.8-.8a2.3 2.3 0 013.2 3.2l-.8.8M8.1 10.1l-.8.8a2.3 2.3 0 01-3.2-3.2l.8-.8" />

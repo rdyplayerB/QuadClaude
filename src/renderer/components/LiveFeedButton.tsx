@@ -1,7 +1,7 @@
 import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
-import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { PortalMenu, useAnchoredMenu, menuItemClass } from './ui/PortalMenu'
 import { folderName } from '../util/paths'
 
 interface LiveFeedButtonProps {
@@ -111,7 +111,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
           </div>
           <button
             onClick={() => start(undefined)}
-            className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+            className={`${menuItemClass} flex items-center gap-2`}
           >
             <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.2" className="shrink-0">
               <circle cx="7" cy="7" r="5.4" />
@@ -124,7 +124,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
               <button
                 key={c.id}
                 onClick={() => start(c.id)}
-                className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+                className={`${menuItemClass} flex items-center gap-2`}
               >
                 <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[--git-green] animate-pulse" />
                 <span className="truncate flex-1">{c.name || c.term}</span>

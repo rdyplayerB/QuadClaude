@@ -62,6 +62,13 @@ export function useAnchoredMenu(opts: { width?: number; align?: 'left' | 'right'
   }
 }
 
+// The shared look for a row inside a PortalMenu, so the four pane-header menus
+// don't each re-type it. Callers append layout modifiers (flex items-center
+// gap-2, truncate, justify-between). Kept as a class string (not a component)
+// so Tailwind emits the exact same CSS — a set of classes is order-independent.
+export const menuItemClass =
+  'w-full px-3 py-1.5 text-body text-left text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50'
+
 // The glass dropdown panel, portaled to <body>. Children are the menu's rows.
 export function PortalMenu({ menu, className = '', children }: { menu: AnchoredMenu; className?: string; children: ReactNode }) {
   if (!menu.open) return null
