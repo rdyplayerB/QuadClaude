@@ -83,15 +83,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION) as Promise<string>,
 
-  // Usage tracking
-  onUsageUpdate: (callback: (data: UsageData) => void) => {
-    const handler = (_: Electron.IpcRendererEvent, data: UsageData) => { callback(data) }
-    ipcRenderer.on(IPC_CHANNELS.USAGE_UPDATE, handler)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.USAGE_UPDATE, handler)
-  },
-  fetchUsage: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.USAGE_FETCH) as Promise<UsageData | null>,
-
   // Context usage per pane
   getContextUsage: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_CONTEXT_USAGE, paneId) as Promise<ContextUsage | null>,

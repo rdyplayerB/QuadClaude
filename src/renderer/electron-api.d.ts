@@ -34,8 +34,6 @@ declare global {
       onMenuAction: (callback: (action: MenuAction) => void) => () => void
       onSystemResume: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
-      onUsageUpdate: (callback: (data: UsageData) => void) => () => void
-      fetchUsage: () => Promise<UsageData | null>
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
       detectServers: () => Promise<Record<number, ServerInfo[]>>
       killServer: (paneId: number, pid: number) => Promise<boolean>

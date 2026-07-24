@@ -1408,10 +1408,6 @@ function setupIPC() {
     return app.getVersion()
   })
 
-  // Usage tracking
-  ipcMain.handle(IPC_CHANNELS.USAGE_FETCH, async () => {
-    return usagePoller?.getLatest() ?? null
-  })
 
   // Per-pane context window usage
   ipcMain.handle(IPC_CHANNELS.PTY_CONTEXT_USAGE, async (_, paneId: number) => {
