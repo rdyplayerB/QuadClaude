@@ -33,7 +33,11 @@ Working doc for the in-progress code-health effort. Branch: `feat/delegation-das
 | `6998444` | **2.2 Polish** — `:focus-visible` cyan rings (xterm excluded); last emoji (`📡🌐🔗`) → stroke SVGs in LiveFeedButton/AgentBadge/PaneHeader; console **"All quiet"** empty state (`.board.quiet .board-empty`). Screenshot-verified. |
 | `b3cfb4d` | **2.3 Button variants (scoped)** — the 6 identical PortalMenu rows → exported `menuItemClass` (Tailwind class-set is order-independent ⇒ byte-identical CSS). Did NOT build a universal `<Button>`. |
 | `86f7343` | Version → **1.31.7**. |
-| `9641d85` | **2.4 (partial) main split** — `installStatuslineScript` (464 self-contained lines) → `main/statusline.ts`; index.ts **1674 → 1210**. main `tsc --noEmit` holds at 11 pre-existing baseline errors, 0 new. |
+| `9641d85` | **2.4a main split** — `installStatuslineScript` (464 lines) → `main/statusline.ts`; index.ts 1674 → 1210. |
+| `883cc2e` | **2.4b main split** — `createApplicationMenu` (~275 lines) → `main/menu.ts` via `buildApplicationMenu(sendMenuAction, openLogViewer)` (params named to keep the template verbatim); index.ts 1210 → 937. Boot-verified (menu builds without throwing). |
+| `f499129` | **2.4c main split — DONE** — `setupIPC` (46 handlers) → `main/ipc.ts` `registerIpcHandlers(deps)`; only edits are 3 `mainWindow`→`getMainWindow()` (late-bound getter); managers passed by value (nullable-typed, `?.` verbatim); 13 unused imports removed from index.ts. index.ts 937 → **557**. Verified: 6 IPC domains round-trip via electronAPI, `pty.getCwd` returns real cwd, 0 `pane-blank-detected`. |
+
+**§2.4 `main/index.ts` split is COMPLETE.** index.ts **1674 → 557** across statusline/menu/ipc modules (statusline 470, ipc 416, menu 290). main `tsc --noEmit` held at the same 11 pre-existing baseline errors through every step (the 2 real TS2345s now live in ipc.ts with their handler bodies). Each slice got a full build + isolated packaged boot-test.
 
 Also done earlier in-session (folded into the above / prior commits): dead-code removal
 (OPS_SNAPSHOT channel, `anyWorkspaceObserverEnabled`, `recordAgentIndex`, `PluginPrefs`,
@@ -49,15 +53,19 @@ clobber it — real Claude sessions). Install when they quit + relaunch:
 
 ## 2. Remaining plan (safe sequencing — do in this order)
 
-### LOW RISK — ✅ ALL COMPLETE (2.1–2.3 done; 2.4 partially done, see note)
+### LOW RISK — ✅ ALL COMPLETE (2.1–2.4 done)
 
-> **Batch shipped `5d295a9`→`9641d85` (v1.31.7), screenshot-verified.** 2.1 store DRY ✅, 2.2 polish ✅
-> (board-as-hero was the one item deliberately skipped — see below), 2.3 button variants ✅ (scoped to
-> `menuItemClass`, not a universal `<Button>` — the ~29 glass-control / ~22 primary sites were judged NOT
-> worth a component; they're already token-consistent). 2.4 main split: `statusline.ts` extracted ✅;
-> **`createApplicationMenu`→`menu.ts` and `setupIPC`→`main/ipc/*` remain** (see 2.4 note — higher-touch,
-> deferred). **Board-as-hero (2.2) intentionally NOT done** — the `.stage` grid weighting is fine as-is;
-> re-weighting risks the verified layout for marginal gain.
+> **Shipped `5d295a9`→`f499129` (v1.31.7), verified each step.** 2.1 store DRY ✅, 2.2 polish ✅
+> (board-as-hero deliberately skipped), 2.3 button variants ✅ (scoped to `menuItemClass`, not a universal
+> `<Button>` — the ~29 glass-control / ~22 primary sites were judged NOT worth a component; already
+> token-consistent), **2.4 main split ✅ COMPLETE** — index.ts 1674 → 557 across statusline/menu/ipc
+> modules, each with a full build + isolated boot-test (see the DONE table above). **Board-as-hero (2.2)
+> intentionally NOT done** — the `.stage` grid weighting is fine as-is; re-weighting risks the verified
+> layout for marginal gain.
+>
+> **Next up is MEDIUM/HIGH risk only** (§2.5 plugin-host decoupling, §2.6 PiP-canvas disposal, §2.7
+> TerminalPane split). None is "continue straight through" — each wants its own focused, closely-verified
+> pass. Nothing low-risk remains.
 
 Original detail (kept for reference):
 
@@ -80,11 +88,11 @@ Original detail (kept for reference):
 - Target: `components/ui/Button.tsx` with `variant: 'primary' | 'glass'` + `size`, resolving to existing tokens (optionally `@apply`-based `.btn-primary`/`.btn-glass` in index.css). **Leave** the one-off link/chip/segmented buttons.
 - Effort M, risk low (pure styling; screenshot modals before/after).
 
-**2.4 `main/index.ts` split** — PARTIALLY DONE (`9641d85`). index.ts now **1210 lines**.
-- ✅ `installStatuslineScript` → `main/statusline.ts` (464 lines, app/fs/path/logger only).
-- **REMAINING (deferred — not "continue straight through"; needs a full build per iteration since there's no fast main tsc gate, and `setupIPC` wires the module singletons so it carries real init-order risk):**
-  - `createApplicationMenu` + `sendMenuAction` (~851-1128 in old numbering, ~278 lines) → `main/menu.ts`. Mechanical, but references `mainWindow`/`sendMenuAction`/`workspaceManager`.
-  - `setupIPC` (~386 lines, 47 handlers, 8 domains) → `main/ipc/{pty,workspace,router,delegation,accounts,plugins,app}.ts` each exporting `register(deps)`; thin `setupIPC` calls them. `IPC_CHANNELS` already give stable names. **Highest-risk of the "low-risk" set** — do as its own focused pass with a full build + boot smoke-test (every menu item + IPC path).
+**2.4 `main/index.ts` split** — ✅ DONE (`9641d85`, `883cc2e`, `f499129`). index.ts **1674 → 557**.
+- ✅ `installStatuslineScript` → `main/statusline.ts` (470 lines).
+- ✅ `createApplicationMenu` → `main/menu.ts` (290 lines) — `buildApplicationMenu(sendMenuAction, openLogViewer)`, params named to keep the template verbatim; the 5 menu-only imports moved with it.
+- ✅ `setupIPC` → `main/ipc.ts` (416 lines) — `registerIpcHandlers(deps)`, ONE file (not 7 — the deps-threading risk is identical per-handler whether split 1 or 7 ways, and one import list + one boot-test is easier to get right; domain sub-split is optional future polish). Handlers verbatim except 3 `mainWindow`→`getMainWindow()` (late-bound getter); managers by value (nullable-typed, `?.` verbatim); 13 unused imports pruned from index.ts.
+- **KEY LEARNING for the remaining medium/high items:** the "pass a getter for anything late-bound or created-after-registration, by-value for created-before-and-never-reassigned" rule made the IPC move behavior-safe. Verify late-binding by grepping the moved body for bare module-`let`s (here: only `mainWindow`).
 
 ### MEDIUM RISK
 
