@@ -124,7 +124,7 @@ function openLogViewer() {
     }
     .log-path {
       font-size: 11px;
-      color: #808080;
+      color: #737375;
       margin-bottom: 16px;
       word-break: break-all;
     }
@@ -144,7 +144,7 @@ function openLogViewer() {
     }
     button:hover { background: #4c4c4c; }
     pre {
-      background: #252526;
+      background: #252525;
       border: 1px solid #3c3c3c;
       border-radius: 4px;
       padding: 16px;
@@ -153,11 +153,11 @@ function openLogViewer() {
       white-space: pre-wrap;
       word-wrap: break-word;
     }
-    .error { color: #f48771; }
-    .warn { color: #cca700; }
-    .info { color: #75beff; }
+    .error { color: #f87171; }
+    .warn { color: #fbbf24; }
+    .info { color: #22d3ee; }
     .empty {
-      color: #808080;
+      color: #737375;
       font-style: italic;
     }
   </style>

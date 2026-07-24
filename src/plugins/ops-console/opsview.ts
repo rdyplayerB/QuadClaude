@@ -12,12 +12,12 @@ const CSS = `
   --bg:transparent;--scrim:rgba(15,15,16,.72);
   /* NEUTRAL gray surfaces (R≈G≈B) to match the app's #1e1e1e/#252525 — a cool
      blue-biased tint read as "a different app" against the neutral main UI. */
-  --pane:rgba(34,34,36,.52);--term:rgba(43,43,45,.68);
-  --line:rgba(255,255,255,.08);--line-soft:rgba(255,255,255,.05);--sel:rgba(34,211,238,.18);
-  --fg:#eef1f5;--fg2:#9aa4af;--fg3:#6b7078;--faint:#474d55;--bright:#fff;
+  --pane:var(--surface-1,rgba(30,30,32,.55));--term:var(--surface-2,rgba(40,40,42,.72));
+  --line:var(--border,rgba(255,255,255,.08));--line-soft:var(--edge-soft,rgba(255,255,255,.05));--sel:rgba(34,211,238,.18);
+  --fg:var(--text-1,#f0f0f1);--fg2:var(--text-2,#9d9d9f);--fg3:var(--text-3,#737375);--faint:var(--text-4,#4e4e50);--bright:#fff;
   --accent:#22d3ee;
-  --green:#4ade80;--red:#f87171;--teal:#22d3ee;
-  --g-green:#4ade80;--g-cyan:#22d3ee;--g-yellow:#fbbf24;--g-orange:#fb923c;--amber:#fbbf24;
+  --green:var(--success,#4ade80);--red:var(--danger,#f87171);--teal:#22d3ee;
+  --g-green:#4ade80;--g-cyan:#22d3ee;--g-yellow:#fbbf24;--g-orange:#fb923c;--amber:var(--warning,#fbbf24);
   --mono:ui-monospace,"SF Mono",Menlo,Monaco,"Courier New",monospace;--r:2px;--rp:2px; display:block; height:100%;
   /* Type comes from the app's shared scale (index.css) — custom properties
      inherit straight through the shadow boundary, so the console sizes with

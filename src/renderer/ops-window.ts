@@ -8,6 +8,11 @@
 //
 // The snapshot/verify stream is the same IPC the in-app overlay uses; main
 // routes it to whichever surface is currently hosting the console.
+// The shared design tokens. This window does NOT load the app bundle, so
+// without this the console's `var(--fs-*)` / `var(--text-*)` lookups would all
+// be undefined here and the popped-out console would render at browser-default
+// type — visibly different from the in-app one.
+import './tokens.css'
 import { createOpsView } from '../plugins/ops-console/opsview'
 
 const host = document.getElementById('ops')
