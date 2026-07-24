@@ -15,6 +15,30 @@
 import './tokens.css'
 import { createOpsView } from '../plugins/ops-console/opsview'
 
+// Paint the same ground the in-app overlay uses: the user's wallpaper, dimmed by
+// their opacity setting. Without this the popped-out window is a flat dark slab
+// while the in-app console shows the wallpaper through its glass panels — the
+// console looks like a different app depending on where it's hosted.
+async function applyWallpaperGround() {
+  try {
+    const ws = await window.electronAPI?.loadWorkspace?.()
+    const bg = ws?.preferences?.background
+    const body = document.body
+    if (bg?.enabled && bg.image) {
+      const url = bg.image.startsWith('/') ? `file://${bg.image}` : bg.image
+      body.style.backgroundImage = `url(${url})`
+      body.style.backgroundSize = 'cover'
+      body.style.backgroundPosition = 'center'
+      body.style.backgroundRepeat = 'no-repeat'
+      // Same dimming layer the panes use, so panel contrast matches in-app.
+      const dim = document.createElement('div')
+      dim.style.cssText = `position:fixed;inset:0;pointer-events:none;background:rgba(30,30,30,${bg.opacity ?? 0.85})`
+      body.insertBefore(dim, body.firstChild)
+    }
+  } catch { /* no wallpaper — the flat ground is a fine fallback */ }
+}
+applyWallpaperGround()
+
 const host = document.getElementById('ops')
 if (host) {
   const shadow = host.attachShadow({ mode: 'open' })

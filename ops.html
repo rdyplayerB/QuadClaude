@@ -7,7 +7,10 @@
     <title>Activity Console</title>
     <style>
       html, body { margin: 0; height: 100%; background: #0e1013; overflow: hidden; }
-      #ops { height: 100%; }
+      /* Positioned + stacked above the wallpaper dimming layer that
+         ops-window.ts inserts as body's first child (that layer is fixed, so a
+         statically-positioned #ops would paint underneath it). */
+      #ops { height: 100%; position: relative; z-index: 1; }
     </style>
   </head>
   <body>

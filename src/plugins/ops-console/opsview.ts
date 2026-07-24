@@ -33,7 +33,7 @@ const CSS = `
 .content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px 14px}
 /* Full-bleed title bar flush to the window edge — mirrors the main app's title
    bar, with a 84px safe-area so the macOS traffic lights never crowd the brand. */
-.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:linear-gradient(90deg,transparent 0 84px,rgba(22,22,23,.72) 84px);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px 0 84px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:rgba(22,22,23,.72);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px 0 84px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 .recbtn,.zoomgrp{-webkit-app-region:no-drag}
 .zoomgrp{display:flex;align-items:center;border:1px solid var(--line);background:var(--term);border-radius:var(--r);overflow:hidden}
 .zoomgrp button{border:0;background:transparent;color:var(--fg3);font-family:var(--mono);font-size:var(--fs-meta);padding:4px 8px;cursor:pointer;letter-spacing:.04em}
