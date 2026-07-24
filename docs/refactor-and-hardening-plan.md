@@ -28,20 +28,38 @@ Working doc for the in-progress code-health effort. Branch: `feat/delegation-das
 | `05336b1` | Removed the **dead usage renderer API** (`onUsageUpdate`/`fetchUsage`/`USAGE_FETCH`); kept the live `UsagePoller` (it writes the `.statusline-usage-*` caches the pane status line reads via `QC_USAGE_CACHE`). |
 | `c2880f3` | **Shared `<PortalMenu>`/`useAnchoredMenu`** (`components/ui/PortalMenu.tsx`) — deduped 4 dropdowns, **fixed the off-screen-clip bug** (only AgentBadge had the viewport clamp). |
 | `f240747` | **Path helpers** → `renderer/util/paths.ts` (`folderName(path, fallback?)`, `normalizePath`). |
+| `5fbaa15` | This handoff doc. |
+| `5d295a9` | **2.1 Store DRY** — `patchPane`/`patchPaneField` collapse `updatePane`+`setPaneState/Label/Cwd/Agent` (~62 lines → 19). `setPaneState` keeps its no-save hot-path. renderer `tsc` 0. |
+| `6998444` | **2.2 Polish** — `:focus-visible` cyan rings (xterm excluded); last emoji (`📡🌐🔗`) → stroke SVGs in LiveFeedButton/AgentBadge/PaneHeader; console **"All quiet"** empty state (`.board.quiet .board-empty`). Screenshot-verified. |
+| `b3cfb4d` | **2.3 Button variants (scoped)** — the 6 identical PortalMenu rows → exported `menuItemClass` (Tailwind class-set is order-independent ⇒ byte-identical CSS). Did NOT build a universal `<Button>`. |
+| `86f7343` | Version → **1.31.7**. |
+| `9641d85` | **2.4 (partial) main split** — `installStatuslineScript` (464 self-contained lines) → `main/statusline.ts`; index.ts **1674 → 1210**. main `tsc --noEmit` holds at 11 pre-existing baseline errors, 0 new. |
 
 Also done earlier in-session (folded into the above / prior commits): dead-code removal
 (OPS_SNAPSHOT channel, `anyWorkspaceObserverEnabled`, `recordAgentIndex`, `PluginPrefs`,
 `stopFrameTracking`, `markPerf`/`getPerfStatus` + handlers + `isPerfMonitorRunning`, `.bolt`
 console CSS, 6 opsview `:host` tokens, ~17 lines of index.css cruft tokens).
 
-**Installed app is NOT yet caught up** — last full install predates the reliability cluster.
-Do a `npm run build` + install (bump to next patch, e.g. 1.31.6) so persistence/reliable-open ship.
+**Installed app is NOT yet caught up** — **v1.31.7 is BUILT** in `release/mac-arm64/` (reliability
+cluster + this whole batch) but the **install is blocked because the user's app is running** (never
+clobber it — real Claude sessions). Install when they quit + relaunch:
+`rm -rf /Applications/QuadClaude.app && ditto release/mac-arm64/QuadClaude.app /Applications/QuadClaude.app`.
 
 ---
 
 ## 2. Remaining plan (safe sequencing — do in this order)
 
-### LOW RISK (continue straight through, commit each)
+### LOW RISK — ✅ ALL COMPLETE (2.1–2.3 done; 2.4 partially done, see note)
+
+> **Batch shipped `5d295a9`→`9641d85` (v1.31.7), screenshot-verified.** 2.1 store DRY ✅, 2.2 polish ✅
+> (board-as-hero was the one item deliberately skipped — see below), 2.3 button variants ✅ (scoped to
+> `menuItemClass`, not a universal `<Button>` — the ~29 glass-control / ~22 primary sites were judged NOT
+> worth a component; they're already token-consistent). 2.4 main split: `statusline.ts` extracted ✅;
+> **`createApplicationMenu`→`menu.ts` and `setupIPC`→`main/ipc/*` remain** (see 2.4 note — higher-touch,
+> deferred). **Board-as-hero (2.2) intentionally NOT done** — the `.stage` grid weighting is fine as-is;
+> re-weighting risks the verified layout for marginal gain.
+
+Original detail (kept for reference):
 
 **2.1 Store DRY** — `renderer/store/workspace.ts` (679 lines).
 - `panes.map(p => p.id === id ? {...p, ...u} : p)` appears **~10×** (`updatePane`, `setPaneState/Label/Cwd/Agent/LiveFeed/GitStatus/Servers`).
@@ -62,10 +80,11 @@ Do a `npm run build` + install (bump to next patch, e.g. 1.31.6) so persistence/
 - Target: `components/ui/Button.tsx` with `variant: 'primary' | 'glass'` + `size`, resolving to existing tokens (optionally `@apply`-based `.btn-primary`/`.btn-glass` in index.css). **Leave** the one-off link/chip/segmented buttons.
 - Effort M, risk low (pure styling; screenshot modals before/after).
 
-**2.4 `main/index.ts` split** (1664 lines) — low risk but large / mechanical.
-- `createWindow` (~685-843); `createApplicationMenu` (~851-1128, **278 lines**); `setupIPC` (~1133-1518, **386 lines, 47 handlers** across 8 domains); `installStatuslineScript` (~221+); log viewer.
-- Target: `main/ipc/{pty,workspace,router,delegation,accounts,plugins,app}.ts` each exporting `register(deps)` called by a thin `setupIPC`; `main/menu.ts`; `main/statusline.ts`. Move-only, no behavior change. `IPC_CHANNELS` constants already give each handler a stable name.
-- Effort M-L, risk low. **Verify:** app boots, every menu item + IPC path works.
+**2.4 `main/index.ts` split** — PARTIALLY DONE (`9641d85`). index.ts now **1210 lines**.
+- ✅ `installStatuslineScript` → `main/statusline.ts` (464 lines, app/fs/path/logger only).
+- **REMAINING (deferred — not "continue straight through"; needs a full build per iteration since there's no fast main tsc gate, and `setupIPC` wires the module singletons so it carries real init-order risk):**
+  - `createApplicationMenu` + `sendMenuAction` (~851-1128 in old numbering, ~278 lines) → `main/menu.ts`. Mechanical, but references `mainWindow`/`sendMenuAction`/`workspaceManager`.
+  - `setupIPC` (~386 lines, 47 handlers, 8 domains) → `main/ipc/{pty,workspace,router,delegation,accounts,plugins,app}.ts` each exporting `register(deps)`; thin `setupIPC` calls them. `IPC_CHANNELS` already give stable names. **Highest-risk of the "low-risk" set** — do as its own focused pass with a full build + boot smoke-test (every menu item + IPC path).
 
 ### MEDIUM RISK
 
