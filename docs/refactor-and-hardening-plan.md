@@ -96,13 +96,35 @@ Original detail (kept for reference):
 
 ### MEDIUM RISK
 
-**2.5 Plugin-host decoupling** — the "second plugin is easy" item. The lifecycle (`pluginHost.ts`, `shared/plugins.ts`) is genuinely generic; the **presentation/transport is hardcoded to ops-console**:
+**2.5 Plugin-host decoupling — ❌ DON'T DO IT (yet). Re-evaluated 2026-07-24 with the code open; the
+original recommendation was wrong.** Findings that reversed the call:
+- `pluginHost.ts` (185 lines) is **already fully generic** — manifest validation + version gate,
+  accelerator-conflict detection, enable/disable lifecycle, capability-injected context, settings +
+  change callbacks, menu contribution, workspace-snapshot/pty-exit distribution. The static `REGISTRY`
+  import is the *documented, correct* v1 pattern ("adding a plugin = drop folder + one line here"),
+  not debt — dynamic loading is an explicit v1 non-goal.
+- `App.tsx`'s snapshot effect is **already capability-driven** (`capabilities.includes('read:workspace')`,
+  `settings.verificationMode`) — not ops-specific. Only the channel *name* (`pushOpsTransition`) is.
+- What's actually left is 3 small spots: one static import in `OpsOverlay`, two hardcoded
+  `'ops-console'` strings, and the typed `ops*` transport. Generalizing that transport to
+  `PLUGIN_UI_MESSAGE(pluginId, unknown)` **trades away type safety** (the bridge is 5 typed callbacks:
+  onMove/onRecord/onClose/initialScale/onScale; the channels carry typed `OpsSnapshot`/`VerifyOverlay`)
+  for indirection, at a sample size of **one plugin**.
+- **Verdict:** textbook speculative generality. The part that genuinely needed to be generic already is.
+  Let **plugin #2's actual shape** drive the renderer-side seam — designing it blind against n=1 is how
+  you get an abstraction that doesn't fit the second case anyway. Revisit *when* a second plugin exists.
+
+<details><summary>Original (superseded) analysis — kept for whoever revisits this with plugin #2</summary>
+
+The lifecycle (`pluginHost.ts`, `shared/plugins.ts`) is genuinely generic; the **presentation/transport is hardcoded to ops-console**:
 - `OpsOverlay.tsx:2` statically `import { createOpsView } from '../../plugins/ops-console/opsview'` (named generic, renders one plugin).
 - `App.tsx` (~389-401) hardcoded "Activity Console" button calling `togglePlugin('ops-console', true)` + `openPlugin('ops-console')` by string.
 - `App.tsx` (~290-321) ops-console **verification-mode** (`verifyOn`, `pushOpsTransition`, `prevStates`) baked into App's generic workspace-snapshot effect.
 - `preload.ts` seven `ops*` methods; `types.ts` `OPS_*` channels interleaved with generic `PLUGIN_*`.
 - Target: renderer plugin-UI registry — a plugin exposes optional `renderOverlay(shadowRoot, bridge)` (mirrors `createOpsView`); `OpsOverlay` → generic `PluginOverlayHost` that looks up the active window-plugin's factory. Generic top-bar "open plugin" from `listPlugins()` menu metadata. Generalize IPC to `PLUGIN_UI_SHOW / PLUGIN_UI_MESSAGE(pluginId, payload)`; move verification-transition emission behind a generic capability. Keep ops-console as the reference adopter.
 - Effort M, risk medium (touches the live overlay + IPC). NOTE: the overlay pull-on-mount + `ops:request-state` added this session should migrate onto the generic path.
+
+</details>
 
 ### HIGH RISK (each its own focused pass, before/after verification)
 
