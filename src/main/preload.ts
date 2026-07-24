@@ -204,6 +204,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   opsSetRecord: (on: boolean) => ipcRenderer.send('ops:set-record', on),
   opsReportMove: (m: unknown) => ipcRenderer.send('ops:verify-move', m),
   opsClose: () => ipcRenderer.send(IPC_CHANNELS.OPS_CLOSE),
+  opsRequestState: () => ipcRenderer.send('ops:request-state'),
   onDelegationEvent: (callback: (event: DelegationEvent) => void) => {
     const handler = (_: unknown, event: DelegationEvent) => callback(event)
     ipcRenderer.on(IPC_CHANNELS.DELEGATION_EVENT, handler)
@@ -221,75 +222,3 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('perf:flush', handler)
   },
 })
-
-// Type declaration for the renderer
-declare global {
-  interface Window {
-    electronAPI: {
-      createPty: (paneId: number, cwd?: string, env?: Record<string, string>) => Promise<boolean>
-      killPty: (paneId: number) => Promise<void>
-      getCwd: (paneId: number) => Promise<string | null>
-      getGitStatus: (paneId: number) => Promise<GitStatus | null>
-      isClaudeRunning: (paneId: number) => Promise<boolean>
-      sendInput: (paneId: number, data: string) => void
-      resizeTerminal: (paneId: number, cols: number, rows: number) => void
-      onTerminalOutput: (callback: (paneId: number, data: string) => void) => () => void
-      onPtyExit: (callback: (paneId: number, exitCode: number) => void) => () => void
-      loadWorkspace: () => Promise<WorkspaceState>
-      saveWorkspace: (state: Partial<WorkspaceState>) => Promise<void>
-      getHomeDir: () => Promise<string>
-      onMenuAction: (callback: (action: MenuAction) => void) => () => void
-      onSystemResume: (callback: () => void) => () => void
-      getAppVersion: () => Promise<string>
-      onUsageUpdate: (callback: (data: UsageData) => void) => () => void
-      fetchUsage: () => Promise<UsageData | null>
-      getContextUsage: (paneId: number) => Promise<ContextUsage | null>
-      detectServers: () => Promise<Record<number, ServerInfo[]>>
-      killServer: (paneId: number, pid: number) => Promise<boolean>
-      pasteImage: (paneId: number, filePath: string) => Promise<boolean>
-      openImageDialog: () => Promise<string | null>
-      openExternal: (url: string) => Promise<boolean>
-      openInEditor: (paneId: number, filePath: string) => Promise<boolean>
-      logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) => void
-      routerStatus: () => Promise<RouterStatus>
-      routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
-      routerDeleteProvider: (name: string) => Promise<void>
-      routerTest: (input: RouterProviderInput) => Promise<RouterTestResult>
-      routerSetDelegation: (route: string) => Promise<RouterDelegationStatus>
-      routerDelegationStatus: () => Promise<RouterDelegationStatus>
-      routerClearDelegation: () => Promise<RouterDelegationStatus>
-      loopbackStatus: () => Promise<LoopbackStatus>
-      ensureLoopback: () => Promise<LoopbackStatus>
-      delegationSummaries: () => Promise<DelegationProjectSummary[]>
-      delegationEvents: () => Promise<DelegationEvent[]>
-      delegationDecisions: () => Promise<DelegationDecision[]>
-      delegationInsights: () => Promise<DelegationInsights>
-      delegationFullPrompt: (ts: string, task: string) => Promise<string | null>
-      delegationClear: () => Promise<DelegationProjectSummary[]>
-      delegationVerdict: (task: string, verdict: 'ship' | 'revert' | 'edit') => Promise<boolean>
-      delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
-      clipboardWriteText: (text: string) => Promise<boolean>
-      claudeAccountsList: () => Promise<ClaudeAccount[]>
-      claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
-      claudeAccountsDelete: (id: string) => Promise<ClaudeAccount[]>
-      claudeAccountsVerify: (id: string) => Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>
-      listPlugins: () => Promise<PluginDescriptor[]>
-      togglePlugin: (id: string, enabled: boolean) => Promise<PluginDescriptor[]>
-      setPluginSetting: (id: string, key: string, value: unknown) => Promise<PluginDescriptor[]>
-      openPlugin: (id: string) => void
-      onPluginChanged: (callback: (descriptors: PluginDescriptor[]) => void) => () => void
-      pushWorkspaceSnapshot: (snap: WorkspaceSnapshot) => void
-      pushOpsTransition: (evt: { seq: number; paneId: number; from: string; to: string; t0: number }) => void
-      onOpsInappSnapshot: (cb: (snap: unknown) => void) => () => void
-      onOpsInappVerify: (cb: (o: unknown) => void) => () => void
-      onOpsInappShow: (cb: (show: boolean) => void) => () => void
-      opsSetRecord: (on: boolean) => void
-      opsReportMove: (m: unknown) => void
-      opsClose: () => void
-      onDelegationEvent: (callback: (event: DelegationEvent) => void) => () => void
-      getPathForFile: (file: File) => string
-      reportPerf: (data: unknown) => void
-      onPerfFlush: (callback: () => void) => () => void
-    }
-  }
-}

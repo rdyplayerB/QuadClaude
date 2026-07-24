@@ -76,6 +76,8 @@ const plugin: PluginModule = {
     on('ops:verify-move', (_e, m) => verify?.onMove(m as VerifyMove))
     on('ops:set-record', (_e, val) => setRecording(!!val))
     on(IPC_CHANNELS.OPS_CLOSE, () => closeConsole())
+    // Renderer asks for current visibility on mount (recovers a dropped startup push).
+    on('ops:request-state', () => ctx?.services.sendToUi(IPC_CHANNELS.OPS_INAPP_SHOW, visible))
     unsubSettings = context.onSettingsChanged(() => {
       const ms = Number(context.getSetting<number>('pollIntervalMs') ?? 1000) || 1000
       if (service) service.updateInterval(ms)

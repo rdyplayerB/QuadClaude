@@ -1129,6 +1129,20 @@ function sendMenuAction(action: MenuAction) {
   sendToRenderer(IPC_CHANNELS.APP_MENU_ACTION, action)
 }
 
+// Persist plugin enabled-state + settings to the workspace so they survive a
+// restart. Called after every toggle/setSetting (rare, user-driven — load()
+// here is fine, unlike the debounced pane-save path). Without this, enabling a
+// plugin / "open at launch" / verification mode all silently reset on relaunch.
+function persistPluginPrefs(): void {
+  if (!workspaceManager) return
+  const plugins: Record<string, { enabled: boolean; settings: Record<string, unknown> }> = {}
+  for (const d of listPlugins()) {
+    if (d.manifest?.id) plugins[d.manifest.id] = { enabled: d.enabled, settings: d.settings }
+  }
+  const preferences = workspaceManager.load().preferences
+  workspaceManager.save({ preferences: { ...preferences, plugins } })
+}
+
 // Setup IPC handlers
 function setupIPC() {
   // PTY creation
@@ -1350,8 +1364,8 @@ function setupIPC() {
 
   // --- Generic plugin system ---
   ipcMain.handle(IPC_CHANNELS.PLUGIN_LIST, async () => listPlugins())
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_TOGGLE, async (_, id: string, enabled: boolean) => togglePlugin(id, enabled))
-  ipcMain.handle(IPC_CHANNELS.PLUGIN_SET_SETTING, async (_, id: string, key: string, value: unknown) => setPluginSetting(id, key, value))
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_TOGGLE, async (_, id: string, enabled: boolean) => { const d = togglePlugin(id, enabled); persistPluginPrefs(); return d })
+  ipcMain.handle(IPC_CHANNELS.PLUGIN_SET_SETTING, async (_, id: string, key: string, value: unknown) => { const d = setPluginSetting(id, key, value); persistPluginPrefs(); return d })
   ipcMain.on(IPC_CHANNELS.PLUGIN_OPEN, (_, id: string) => openPlugin(id))
   // Renderer pushes a compact live workspace snapshot for plugins that observe
   // pane state (fire-and-forget; the host no-ops if nothing subscribes).

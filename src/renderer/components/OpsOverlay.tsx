@@ -31,6 +31,10 @@ export function OpsOverlay() {
 
   useEffect(() => {
     const unsub = window.electronAPI.onOpsInappShow?.((v: boolean) => setShow(v))
+    // Pull current visibility on mount — recovers a show-push that was dropped
+    // during the startup race (open-at-launch firing before this listener
+    // existed), instead of relying solely on the push ever having landed.
+    window.electronAPI.opsRequestState?.()
     return () => { if (unsub) unsub() }
   }, [])
 
@@ -55,16 +59,27 @@ export function OpsOverlay() {
   useEffect(() => {
     if (!show || !hostRef.current) return
     const shadow = hostRef.current.shadowRoot ?? hostRef.current.attachShadow({ mode: 'open' })
-    const view = createOpsView(shadow, {
-      onMove: (m: unknown) => window.electronAPI.opsReportMove?.(m),
-      onRecord: (on: boolean) => window.electronAPI.opsSetRecord?.(on),
-      onClose: () => { setShow(false); window.electronAPI.opsClose?.() },
-      initialScale: readOpsScale(),
-      onScale: (n: number) => setScale(clampOpsScale(n)),
-    })
+    // Isolate the plugin from its host: if mounting the view throws, close the
+    // console instead of taking down the whole renderer (all four terminals).
+    let view: ReturnType<typeof createOpsView>
+    try {
+      view = createOpsView(shadow, {
+        onMove: (m: unknown) => window.electronAPI.opsReportMove?.(m),
+        onRecord: (on: boolean) => window.electronAPI.opsSetRecord?.(on),
+        onClose: () => { setShow(false); window.electronAPI.opsClose?.() },
+        initialScale: readOpsScale(),
+        onScale: (n: number) => setScale(clampOpsScale(n)),
+      })
+    } catch (e) {
+      console.error('[ops] failed to mount Activity Console', e)
+      window.electronAPI.opsClose?.()
+      return
+    }
     viewRef.current = view
-    const u1 = window.electronAPI.onOpsInappSnapshot?.((s: unknown) => view.update(s))
-    const u2 = window.electronAPI.onOpsInappVerify?.((o: unknown) => view.setVerify(o))
+    // A throw while rendering a snapshot/verify frame must not crash the host —
+    // swallow + log and keep the last good frame.
+    const u1 = window.electronAPI.onOpsInappSnapshot?.((s: unknown) => { try { view.update(s) } catch (e) { console.warn('[ops] snapshot render failed', e) } })
+    const u2 = window.electronAPI.onOpsInappVerify?.((o: unknown) => { try { view.setVerify(o) } catch (e) { console.warn('[ops] verify render failed', e) } })
     return () => { if (u1) u1(); if (u2) u2(); viewRef.current = null; view.destroy() }
   }, [show])
 

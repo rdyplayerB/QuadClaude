@@ -172,9 +172,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         savedState.preferences?.defaultAgentId,
       )
 
-      // Migrate removed layouts to 'grid'
+      // Migrate removed layouts to 'grid'. These legacy names aren't in the
+      // current LayoutMode union, so compare as plain strings.
       let layout = savedState.layout
-      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen' || layout === 'split' || layout === 'history') {
+      if ((['horizontal', 'vertical', 'fullscreen', 'split', 'history'] as string[]).includes(layout)) {
         layout = 'grid'
       }
 
