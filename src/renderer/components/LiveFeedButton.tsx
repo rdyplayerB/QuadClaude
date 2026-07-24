@@ -2,19 +2,10 @@ import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
 import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { folderName } from '../util/paths'
 
 interface LiveFeedButtonProps {
   paneId: number
-}
-
-// The human name shown in a pane header — the folder/repo name of its cwd (e.g. "diablo")
-// — so feed scopes are identifiable by project, not just "Terminal N". Mirrors
-// getFolderName in PaneHeader.
-function paneName(dir: string): string {
-  if (!dir) return ''
-  if (/^\/Users\/[^/]+\/?$/.test(dir)) return '~'
-  const parts = dir.split('/')
-  return parts[parts.length - 1] || parts[parts.length - 2] || ''
 }
 
 // The shell command that tails a feed into this pane. scope === undefined → the global
@@ -39,13 +30,13 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
   const candidates = useWorkspaceStore((s) =>
     s.panes
       .filter((p) => p.id !== paneId && (p.state === 'claude-active' || p.state === 'claude-waiting'))
-      .map((p) => ({ id: p.id, name: paneName(p.workingDirectory), term: p.label })),
+      .map((p) => ({ id: p.id, name: folderName(p.workingDirectory), term: p.label })),
   )
   const scopeLabel = useWorkspaceStore((s) => {
     if (pane?.liveFeedScope === undefined) return 'All'
     const o = s.panes.find((p) => p.id === pane.liveFeedScope)
     if (!o) return `Terminal ${(pane.liveFeedScope ?? 0) + 1}`
-    return paneName(o.workingDirectory) || o.label
+    return folderName(o.workingDirectory) || o.label
   })
   const setPaneLiveFeed = useWorkspaceStore((s) => s.setPaneLiveFeed)
 

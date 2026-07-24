@@ -1,5 +1,6 @@
 import { DragEvent, memo } from 'react'
 import { MIN_PANES } from '../../shared/types'
+import { folderName } from '../util/paths'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal, disposeTerminalForPane, restartShell } from './TerminalPane'
 import { FavoritesDropdown } from './FavoritesDropdown'
@@ -34,14 +35,7 @@ export const PANE_COLORS = [
 
 // Extract folder/repo name from path
 export function getFolderName(path: string): string {
-  if (!path) return 'Terminal'
-  const parts = path.split('/')
-  const name = parts[parts.length - 1] || parts[parts.length - 2]
-  // If it's home directory, show ~
-  if (path.match(/^\/Users\/[^/]+\/?$/)) {
-    return '~'
-  }
-  return name || 'Terminal'
+  return folderName(path, 'Terminal')
 }
 
 export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) {

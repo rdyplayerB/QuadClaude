@@ -2,22 +2,11 @@ import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
 import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { folderName, normalizePath } from '../util/paths'
 
 interface FavoritesDropdownProps {
   paneId: number
   currentDirectory: string
-}
-
-function normalizePath(p: string): string {
-  return p.replace(/\/+$/, '')
-}
-
-function getFolderName(path: string): string {
-  if (!path) return ''
-  const parts = path.split('/')
-  const name = parts[parts.length - 1] || parts[parts.length - 2]
-  if (path.match(/^\/Users\/[^/]+\/?$/)) return '~'
-  return name || path
 }
 
 export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, currentDirectory }: FavoritesDropdownProps) {
@@ -70,7 +59,7 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
                   onClick={() => navigateTo(path)}
                   title={path}
                 >
-                  <span className="truncate flex-1 text-[--ui-text-primary]">{getFolderName(path)}</span>
+                  <span className="truncate flex-1 text-[--ui-text-primary]">{folderName(path)}</span>
                   <button
                     className="shrink-0 p-0.5 text-[--ui-text-muted] hover:text-[--danger] opacity-0 group-hover/fav:opacity-100 transition-opacity"
                     onClick={(e) => {
