@@ -51,6 +51,19 @@ clobber it — real Claude sessions). Install when they quit + relaunch:
 
 ---
 
+## STATUS: effort concluded 2026-07-24, **v1.31.7 shipped + installed**
+
+All LOW-RISK work (§2.1–2.4) is done and verified. §2.5 was **re-evaluated and reversed** (see below —
+don't do it at n=1 plugins). §2.6 / §2.7 were **deliberately deferred**: both are high-risk with modest
+payoff, and are better driven by an actual need than by a checklist. Nothing here is "in flight" — pick
+an item up only if something concrete demands it.
+
+Install note: the app was running, so 1.31.7 went in via an **inode-safe swap** (`mv` old bundle aside
+on the same volume, then `ditto` the new one in) — never `rm -rf` a live bundle. Rollback:
+`/Applications/QuadClaude-1.31.5-backup.app`.
+
+---
+
 ## 2. Remaining plan (safe sequencing — do in this order)
 
 ### LOW RISK — ✅ ALL COMPLETE (2.1–2.4 done)
