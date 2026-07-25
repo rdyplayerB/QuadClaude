@@ -117,7 +117,13 @@ export class WorkspaceManager {
     // load() runs fs.existsSync() for every pane, and save() is called on a
     // debounced cadence for many UI changes (focus, layout, settings).
     const current = this.store.get('workspace', createDefaultWorkspace())
-    this.store.set('workspace', { ...current, ...state })
+    // Shallow-merge the top level, but merge `preferences` one level deeper.
+    // The renderer sends its whole preferences object and knows nothing about
+    // main-owned keys like `plugins`, so a plain spread silently wiped them on
+    // every debounced save — which is why plugin enable/settings never stuck.
+    const merged = { ...current, ...state }
+    if (state.preferences) merged.preferences = { ...current.preferences, ...state.preferences }
+    this.store.set('workspace', merged)
   }
 
   getWindowBounds(): WindowBounds | undefined {

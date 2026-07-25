@@ -162,6 +162,8 @@ const plugin: PluginModule = {
 
   open() { openConsole() },
 
+  close() { closeConsole() },
+
   deactivate() {
     closeConsole()
     if (verify) { verify.stop(); verify = null }

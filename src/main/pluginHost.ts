@@ -166,6 +166,17 @@ export function setPluginSetting(id: string, key: string, value: unknown): Plugi
   const d = listPlugins(); deps?.notifyChanged(d); return d
 }
 
+// Dismiss every plugin's UI without deactivating it. Called when the app window
+// goes away: a plugin's "is my UI showing" flag lives in the main process and
+// would otherwise survive the window, so the next window would come back with
+// the plugin's UI already on top of the app.
+export function closeAllPluginUi(): void {
+  for (const e of entries.values()) {
+    if (!e.active || !e.mod.close) continue
+    try { e.mod.close() } catch (err) { logger.error('pluginHost', `close failed "${e.manifest.id}"`, String(err)) }
+  }
+}
+
 export function openPlugin(id: string): void {
   const e = entries.get(id)
   if (e && e.active && e.mod.open) { try { e.mod.open() } catch (err) { logger.error('pluginHost', `open failed "${id}"`, String(err)) } }

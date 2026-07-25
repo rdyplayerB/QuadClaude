@@ -88,6 +88,7 @@ export interface PluginModule {
   activate(ctx: PluginContext): void | Promise<void>
   deactivate(): void | Promise<void>
   open?(): void // for window-kind plugins: focus/create the window
+  close?(): void // dismiss any UI; called when the app window goes away
 }
 
 // Resolve a plugin's effective settings: manifest defaults merged under saved values.

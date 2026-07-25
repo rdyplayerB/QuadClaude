@@ -13,7 +13,7 @@ import { installStatuslineScript } from './statusline'
 import { buildApplicationMenu } from './menu'
 import { registerIpcHandlers } from './ipc'
 import {
-  initPluginHost, listPlugins, emitPtyExit, shutdownPlugins,
+  initPluginHost, listPlugins, emitPtyExit, shutdownPlugins, closeAllPluginUi,
 } from './pluginHost'
 import {
   startPerfMonitor,
@@ -368,6 +368,9 @@ function createWindow() {
     // 'window-all-closed' never fires and closing QuadClaude strands a lone
     // console window keeping the whole app alive. Tearing them down here also
     // means the console always comes back in-app on the next launch.
+    // Dismiss plugin UI first so its "showing" flag doesn't survive the window
+    // and re-open on top of a freshly created one.
+    try { closeAllPluginUi() } catch { /* never block teardown */ }
     for (const w of BrowserWindow.getAllWindows()) {
       if (!w.isDestroyed()) { try { w.destroy() } catch { /* already gone */ } }
     }
