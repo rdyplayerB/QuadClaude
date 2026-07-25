@@ -46,3 +46,6 @@ temp/
 # claude-mem auto-generated activity files
 CLAUDE.md
 **/CLAUDE.md
+
+# qcdelegate runs aider, which drops a tags cache in the repo root
+.aider*
