@@ -15,6 +15,12 @@ import { TokenMeter } from './token-meter'
 const RETURN_TTL = 20000     // how long a finished step stays on the board
 const SUB_DONE_TTL = 60000   // a finished subagent lingers longer — rarer, bigger news
 const STALE_STEP_MS = 300000 // an unfinished step older than this is assumed lost
+// An unreported fork on a pane that has sat NON-active this long is presumed
+// finished with its notification missed — a real fork's completion re-activates
+// the parent, so "parent idle + fork still 'running'" cannot persist honestly.
+// Observed live before this guard: subagent cards showing running for 394 MINUTES
+// on a READY pane, inflating the "tasks working" KPI with phantoms.
+const SUB_STALE_MS = 600000
 
 const stateOf = (s: string): AgentState =>
   s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : s === 'claude-idle' ? 'ready' : 'idle'
@@ -37,6 +43,7 @@ export class OpsService {
   // and one big Write can push a spawn out of it while the fork is still
   // running — so once seen, a subagent is remembered here until it reports back.
   private subsByPane = new Map<number, Map<string, OpsSubagent>>()
+  private lastPr = new Map<number, string>()      // last pr-link surfaced per pane
   private tokenMeter = new TokenMeter()
   private transcriptCache = new Map<string, { info: TranscriptInfo; at: number }>()
   private ctxCache = new Map<number, { v: { contextPct: number; model: string } | null; at: number }>()
@@ -150,13 +157,15 @@ export class OpsService {
       const tokens = tfile ? this.tokenMeter.read(tfile) : undefined
       const tokPerMin = tfile ? this.tokenMeter.rate(tfile) : 0
 
+      // ---- cards from transcript + state ----
+      const t = this.transcriptFor(p.cwd)
+
       agents.push({
         paneId: p.id, pos: p.pos, name: p.folder, proj: p.proj, state: st,
         model, account: p.account, branch, dirty, ahead, ctxPct, tps, tokens, tokPerMin,
+        outSeries: tfile ? this.tokenMeter.series(tfile) : undefined,
+        queued: t.queueDepth || undefined,
       })
-
-      // ---- cards from transcript + state ----
-      const t = this.transcriptFor(p.cwd)
       const file = t.editedFiles[t.editedFiles.length - 1]
       // The session's ai-title is written once, early, and never revised — it
       // pins the card to the FIRST thing you asked hours ago. The last prompt is
@@ -176,6 +185,8 @@ export class OpsService {
       for (const sub of known.values()) {
         if (!sub.done && t.notifications.some((n) => n.includes(sub.name))) sub.done = true
         if (sub.done && now - sub.spawnedAt > SUB_DONE_TTL) known.delete(sub.id)
+        // Missed-notification guard — see SUB_STALE_MS.
+        if (!sub.done && st !== 'active' && now - sub.spawnedAt > SUB_STALE_MS) known.delete(sub.id)
       }
       const subs = [...known.values()]
       if (subs.length) agents[agents.length - 1].subagents = subs.slice(-4)
@@ -190,15 +201,19 @@ export class OpsService {
 
       for (const s of t.steps) {
         if (s.spawns) continue // handled above, with its own lifecycle
+        // Human voice first: the model's own sentence about the call, falling
+        // back to the raw argument. The tag chip still names the tool, so the
+        // system identity is never lost — only the headline becomes readable.
+        const say = s.desc || s.target || s.name
         if (s.endedAt) {
           if (now - s.endedAt > RETURN_TTL) continue // retired off the board
           cards.push({
-            id: s.id, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: s.target || s.name,
+            id: s.id, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, durMs: s.endedAt - s.startedAt, tokens: s.tokens, err: s.err,
           })
         } else if (st === 'active' && now - s.startedAt < STALE_STEP_MS) {
           cards.push({
-            id: s.id, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: s.target || s.name,
+            id: s.id, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, tokens: s.tokens,
           })
         }
@@ -208,9 +223,13 @@ export class OpsService {
       // i.e. Claude is writing its next message. Real, and it is the THINKING column.
       const inFlight = t.steps.some((s) => !s.endedAt && !s.spawns)
       if (st === 'active' && !inFlight) {
+        // Real thinking blocks are encrypted (measured: 0/200 with text), so the
+        // narration line is Claude's newest outward prose — what it just said is
+        // the only visible form of what it is thinking about.
         cards.push({
           id: `p${p.id}-think`, paneId: p.id, col: 'think', kind: 'think', tag: 'thinking',
-          task: title, think: t.lastThinking?.slice(0, 150), startedAt: t.lastRecordAt || now,
+          task: title, think: (t.lastThinking || t.lastAssistantText)?.replace(/\s+/g, ' ').slice(0, 150),
+          startedAt: t.lastRecordAt || now,
         })
       }
       if (st === 'waiting') {
@@ -218,6 +237,17 @@ export class OpsService {
           id: `p${p.id}-blocked`, paneId: p.id, col: 'blocked', kind: 'step', tag: 'prompt',
           task: title, ask: t.lastAssistantText?.slice(0, 110) || 'waiting for your input',
         })
+      }
+
+      // A PR opened is the rarest, biggest card on the board — milestone-lived.
+      if (t.prLink && this.lastPr.get(p.id) !== t.prLink) {
+        const seen = this.lastPr.has(p.id) // first sight of an old link ≠ news
+        this.lastPr.set(p.id, t.prLink)
+        if (seen) {
+          const label = t.prLabel || t.prLink.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)
+          this.pushFeed(p.id, `<b>${p.folder}</b> opened <b class="done">${label}</b>`, t.prLink.slice(0, 80))
+          this.done.push({ card: { id: `p${p.id}-pr-${now}`, paneId: p.id, col: 'return', kind: 'step', tag: 'PR', task: label, when: 'just now' }, at: now })
+        }
       }
 
       // ---- feed from real state transitions ----

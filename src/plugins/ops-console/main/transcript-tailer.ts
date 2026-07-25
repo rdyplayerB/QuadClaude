@@ -21,6 +21,8 @@ export interface Step {
   id: string           // tool_use id
   name: string         // tool name
   target: string       // command / file / query — whatever identifies it
+  desc?: string        // the model's own sentence about this call (Bash description,
+                       // AskUserQuestion's question) — the human voice for the step
   think?: string       // reasoning from the same assistant message
   startedAt: number
   endedAt?: number     // set when the matching tool_result arrives
@@ -36,10 +38,16 @@ export interface TranscriptInfo {
   adds: number            // cumulative-ish adds seen in the tail
   dels: number
   todos: Todo[]
-  lastAssistantText?: string // for the "question" when waiting
+  lastAssistantText?: string // for the "question" when waiting — and the narration line:
+                             // actual thinking blocks are encrypted (measured 0/200 with
+                             // text), so Claude's outward prose IS the visible thinking
+  lastSaidAt: number         // epoch of the newest assistant text
   lastAction?: string        // newest tool call, e.g. "Edit(service.ts)" — the live "doing X right now"
   steps: Step[]              // newest last, capped — the board's step cards
   lastThinking?: string      // newest reasoning text
+  prLink?: string            // newest pr-link record in the tail
+  prLabel?: string           // human form: "owner/repo #6"
+  queueDepth: number         // prompts stacked behind the current turn (queue-operation)
   lastRecordAt: number       // epoch of the newest record; "composing" = active but nothing new
   lastRecordKind: string     // 'assistant' | 'user' | ''
   notifications: string[]    // task-notification texts — how a backgrounded agent reports finishing
@@ -130,12 +138,12 @@ function textOf(content: unknown): string {
 
 // Read + parse one pane's newest session transcript tail. Never throws.
 export function readTranscript(cwd: string): TranscriptInfo {
-  const empty: TranscriptInfo = { found: false, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs: 0 }
+  const empty: TranscriptInfo = { found: false, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs: 0, lastSaidAt: 0, queueDepth: 0 }
   try {
     const file = newestTranscript(cwd)
     if (!file) return empty
     const { lines, mtimeMs } = readTail(file)
-    const info: TranscriptInfo = { found: true, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs }
+    const info: TranscriptInfo = { found: true, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs, lastSaidAt: 0, queueDepth: 0 }
     const byId = new Map<string, Step>()
 
     for (const l of lines) {
@@ -168,6 +176,26 @@ export function readTranscript(cwd: string): TranscriptInfo {
 
       if (type === 'ai-title' && d.aiTitle && typeof d.aiTitle === 'string') info.aiTitle = d.aiTitle
       if (type === 'last-prompt' && d.lastPrompt && typeof d.lastPrompt === 'string') info.lastPrompt = d.lastPrompt
+      // pr-link is a per-turn STATE record (the same PR restated every turn,
+      // 54× in one observed hour) — the last value wins; newness is the
+      // service's job, by comparing URLs across ticks.
+      if (type === 'pr-link') {
+        const u = d.prUrl ?? d.url
+        if (typeof u === 'string' && u) {
+          info.prLink = u
+          const repo = typeof d.prRepository === 'string' ? d.prRepository : ''
+          const num = Number(d.prNumber)
+          info.prLabel = (repo + (Number.isFinite(num) && num > 0 ? ` #${num}` : '')).trim() || undefined
+        }
+      }
+      // Prompts stacked behind the current turn. Tail-window arithmetic — an
+      // enqueue whose dequeue scrolled out would overcount, so floor at 0.
+      if (type === 'queue-operation') {
+        const op = String(d.operation ?? d.op ?? '')
+        if (op === 'enqueue') info.queueDepth++
+        else if (op === 'dequeue' || op === 'remove') info.queueDepth = Math.max(0, info.queueDepth - 1)
+        else if (op === 'popAll') info.queueDepth = 0
+      }
 
       // file-history-delta carries insertion/deletion counts
       if (type === 'file-history-delta') {
@@ -206,11 +234,20 @@ export function readTranscript(cwd: string): TranscriptInfo {
               if (typeof name === 'string' && name) {
                 const target = actionTarget(input)
                 info.lastAction = target ? `${name}(${target})` : name
+                // The model's own sentence about the call. Bash carries one on
+                // effectively every call (227/227 measured in a live window);
+                // for a question the question itself is the human line.
+                let desc = typeof input.description === 'string' ? input.description.replace(/\s+/g, ' ').trim().slice(0, 90) : ''
+                if (name === 'AskUserQuestion' && Array.isArray(input.questions)) {
+                  const q0 = input.questions[0] as Record<string, unknown> | undefined
+                  if (q0 && typeof q0.question === 'string') desc = q0.question.slice(0, 90)
+                }
                 if (typeof bb.id === 'string') {
                   const step: Step = {
                     id: bb.id,
                     name,
                     target,
+                    desc: desc || undefined,
                     think: think.trim() ? think.trim().replace(/\s+/g, ' ').slice(0, 150) : undefined,
                     startedAt: at,
                     tokens: Number.isFinite(outTok) && outTok > 0 ? outTok : undefined,
@@ -249,7 +286,7 @@ export function readTranscript(cwd: string): TranscriptInfo {
           }
         }
         const txt = textOf(content).trim()
-        if (txt) info.lastAssistantText = txt
+        if (txt) { info.lastAssistantText = txt; info.lastSaidAt = tsOf(d) || info.lastSaidAt }
       }
     }
     return info

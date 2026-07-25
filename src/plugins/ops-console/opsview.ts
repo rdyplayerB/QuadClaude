@@ -81,7 +81,7 @@ const CSS = `
 .gitchip .dirty{color:var(--g-orange)}
 .acct{color:var(--green)} .ctx{margin-left:auto}
 .meter{display:flex;align-items:flex-end;gap:2px;height:20px;margin-top:8px}
-.meter i{flex:1;background:var(--mc,var(--g-green));border-radius:1px;height:2px;min-height:2px}
+.meter i{flex:1;background:var(--mc,var(--g-green));border-radius:1px;height:2px;min-height:2px;transition:height .45s cubic-bezier(.4,0,.2,1)}
 .meter.flat i{background:var(--faint)}
 .r-meterlab{display:flex;justify-content:space-between;font-size:var(--fs-meta);color:var(--faint);margin-top:3px}
 .r-meterlab b{color:var(--fg3)}
@@ -101,10 +101,22 @@ const CSS = `
 .card.failed{border-color:rgba(248,113,113,.45)}
 .board{flex:1 1 auto;min-height:0;display:flex;gap:8px;padding:10px;overflow:auto;position:relative}
 .col{flex:1;min-width:176px;display:flex;flex-direction:column;gap:7px}
-.colhead{display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft)}
+.colhead{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft);cursor:help}
 .colhead .cdot{width:7px;height:7px;border-radius:1px}
 .colhead .lft{display:flex;align-items:center;gap:6px;font-weight:600}
 .colhead .cn{color:var(--fg3)}
+/* What each column actually means. The board is read at a glance by people who
+   did not write it, and "acting" in particular is not self-evident — a column
+   that is usually empty reads as broken unless you know why. */
+.coltip{position:absolute;top:calc(100% + 6px);left:0;z-index:40;width:224px;
+  background:var(--term);border:1px solid var(--line);border-radius:var(--r);padding:8px 9px;
+  font-size:var(--fs-meta);line-height:1.5;color:var(--fg2);text-transform:none;letter-spacing:0;font-weight:400;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);opacity:0;transform:translateY(-3px);pointer-events:none;
+  transition:opacity .12s ease,transform .12s ease}
+.colhead:hover .coltip{opacity:1;transform:none}
+.col:last-child .coltip{left:auto;right:0}
+.coltip b{color:var(--fg);font-weight:600}
+@media (prefers-reduced-motion:reduce){.coltip{transition:none}}
 .board-empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:9px;pointer-events:none;color:var(--faint);text-align:center}
 .board.quiet .board-empty{display:flex}
 .board-empty svg{width:26px;height:26px;opacity:.5;stroke:var(--fg3)}
@@ -189,7 +201,7 @@ const HTML = `
       <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3><span class="live">live</span></div><div class="feed" id="feed"></div></div>
     </div>
     <div class="foot">
-      <div>output meters = live tokens/sec per pane · a flat meter means the agent is waiting on you</div>
+      <div>output meters = real output tokens per 2s, oldest bar left · a flat meter means the agent produced nothing</div>
       <div id="footmeta">states mirror the app: shell · claude-active · claude-waiting</div>
     </div>
     </div>
@@ -212,7 +224,16 @@ export function createOpsView(root, handlers) {
   const qa = (sel) => root.querySelectorAll(sel)
 
   const PANE_COLORS = ["#22d3ee","#4ade80","#fbbf24","#a78bfa","#f472b6","#fb923c","#38bdf8","#34d399","#f59e0b","#c084fc","#fb7185","#2dd4bf"]
-  const COLS = [{k:"think",name:"thinking",c:"var(--fg3)"},{k:"act",name:"acting",c:"var(--teal)"},{k:"return",name:"returned",c:"var(--green)"},{k:"blocked",name:"blocked",c:"var(--amber)"}]
+  const COLS = [
+    {k:"think",name:"thinking",c:"var(--fg3)",
+     tip:"Claude is <b>streaming a message</b> — reasoning or writing a reply — with no tool call in flight. One card per working pane."},
+    {k:"act",name:"acting",c:"var(--teal)",
+     tip:"A tool call has <b>started and not returned yet</b>. Usually sparse: most calls finish in well under a second, so they can begin and end between two reads of the transcript and land straight in returned."},
+    {k:"return",name:"returned",c:"var(--green)",
+     tip:"The tool result <b>came back</b>. Duration shown is real, measured start-to-result. Cards linger <b>20s</b> and then retire off the board."},
+    {k:"blocked",name:"blocked",c:"var(--amber)",
+     tip:"Claude <b>asked you a question and stopped</b>. Nothing moves in that pane until you answer — this column being empty is good news."},
+  ]
   const ac = (pos) => PANE_COLORS[((pos%12)+12)%12]
   // 1234 -> "1.2k", 1234567 -> "1.2M"
   const fmtTok = (n) => { n=+n||0; return n>=1e6?(Math.round(n/1e5)/10)+"M":(n>=1000?(Math.round(n/100)/10)+"k":String(n)) }
@@ -221,7 +242,7 @@ export function createOpsView(root, handlers) {
 
   let snap=null, prev=null, selPane=null
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
-  let cardEls={}, colBodies={}, agentTps={}, agentTpsShown={}, kpiShown={}, kpiTarget={}, boardBuilt=false, boardRenders=0, lastSnapAt=0
+  let cardEls={}, colBodies={}, agentSeries={}, kpiShown={}, kpiTarget={}, boardBuilt=false, boardRenders=0, lastSnapAt=0
   let verifyOn=false, prevMissedPhantom=0
   let rafId=0, destroyed=false
 
@@ -229,7 +250,8 @@ export function createOpsView(root, handlers) {
     const board=gid("board"); board.innerHTML=""
     COLS.forEach(function(c){
       const col=document.createElement("div"); col.className="col"
-      col.innerHTML='<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span><span class="cn" id="cn-'+c.k+'">0</span></div>'
+      col.innerHTML='<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span><span class="cn" id="cn-'+c.k+'">0</span>'+
+        '<div class="coltip">'+c.tip+'</div></div>'
       const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
       col.appendChild(body); board.appendChild(col); colBodies[c.k]=body
     })
@@ -306,32 +328,40 @@ export function createOpsView(root, handlers) {
       ctx.style.color=a.ctxPct===0?"var(--fg3)":a.ctxPct<=50?"var(--g-cyan)":a.ctxPct<=75?"var(--g-yellow)":"var(--red)"
       const meter=row.querySelector(".meter"); meter.classList.toggle("flat",a.state!=="active"); meter.style.setProperty("--mc",col)
       const tpm=a.tokPerMin||0
-      row.querySelector(".mlab").textContent=a.state==="active"?(tpm?fmtTok(tpm)+" tok/min":"working"):(a.state==="waiting"?"blocked":(a.state==="ready"?"awaiting instruction":"idle"))
+      // Queued prompts ride the status label — real queue-operation records,
+      // surfaced here rather than as a fifth lane (extra lanes scored WORSE in
+      // the 2026-07-25 lane study; extra sources scored better).
+      const qd=a.queued?" · "+a.queued+" queued":""
+      row.querySelector(".mlab").textContent=(a.state==="active"?(tpm?fmtTok(tpm)+" tok/min":"working"):(a.state==="waiting"?"blocked":(a.state==="ready"?"awaiting instruction":"idle")))+qd
       const tk=a.tokens
       row.querySelector(".tkl").textContent=tk?("↓"+fmtTok(tk.output)+" out · "+fmtTok(tk.total)+" total"):"terminal output"
       const subsEl=row.querySelector(".subs"); const subs=a.subagents||[]
       subsEl.innerHTML=subs.map(function(x){
         return '<div class="subrow'+(x.done?" done":"")+'"><span class="subglyph">'+(x.done?"●":"○")+'</span>'+
           '<span class="subname">'+esc(x.name)+'</span><span class="subtag">SUB</span></div>' }).join("")
-      agentTps[a.paneId]=a.state==="active"?a.tps:0
+      agentSeries[a.paneId]=a.outSeries||[]
     })
     Array.prototype.slice.call(host.querySelectorAll(".r")).forEach(function(row){ const pid=+row.getAttribute("data-pane"); if(!seen[pid]) row.remove() })
   }
+  // A full-tilt agent produces roughly this many output tokens in one 2s bucket.
+  // Scaling against it means a trickle reads as a trickle instead of filling the
+  // meter; a pane that beats it scales against its own peak instead.
+  const METER_REF=400
   function smoothMeters(){
-    // A calm equalizer, not per-frame noise: each pane's bars undulate as one
-    // gentle, phase-shifted wave whose overall HEIGHT tracks that pane's real
-    // output (tokens/sec). Tall = producing a lot; flat = waiting on you.
-    const t=performance.now()/1000
+    // Every bar is one real 2s bucket of output tokens — oldest left, newest
+    // right — straight from TokenMeter.series(). This was a sine wave once: it
+    // looked alive at all times, which is precisely the problem. A bucket where
+    // the agent produced nothing is now 0, and the meter says so.
     qa("#roster .r").forEach(function(row){
-      const pid=+row.getAttribute("data-pane"); const target=agentTps[pid]||0
+      const pid=+row.getAttribute("data-pane")
+      const s=agentSeries[pid]||[]
       const bars=row.querySelectorAll(".meter i")
-      if(target<=0){ if(!row._flat){ row._flat=true; bars.forEach(function(b){b.style.height="2px"}) } return }
-      row._flat=false
-      let shown=agentTpsShown[pid]||0; shown+=(target-shown)*0.06; agentTpsShown[pid]=shown // ease amplitude
-      const amp=Math.min(1,shown/150)
+      let ref=METER_REF
+      for(let k=0;k<s.length;k++) if(s[k]>ref) ref=s[k]
       bars.forEach(function(b,i){
-        const wave=0.5+0.5*Math.sin(t*1.9 + i*0.55)   // slow travelling wave, per-bar phase
-        b.style.height=(3+amp*13*(0.4+0.6*wave)).toFixed(1)+"px"
+        const idx=s.length-bars.length+i        // right-align: newest bucket rightmost
+        const v=idx>=0?(s[idx]||0):0
+        b.style.height=(2+Math.round(16*Math.min(1,v/ref)))+"px"
       })
     })
   }
