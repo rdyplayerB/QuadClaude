@@ -79,7 +79,11 @@ export class OpsService {
   private transcriptFor(cwd: string): TranscriptInfo {
     const cached = this.transcriptCache.get(cwd)
     const now = Date.now()
-    if (cached && now - cached.at < 3000) return cached.info // throttle disk reads to ~3s
+    // 1.5s, not 3s: a tool that returns in under a poll window would otherwise
+    // jump straight to RETURNED, never visibly passing through ACTING. The cost
+    // is re-parsing a 256KB tail per pane at this cadence — page-cached, but the
+    // knob to turn if the console ever shows up in a CPU profile.
+    if (cached && now - cached.at < 1500) return cached.info
     const info = readTranscript(cwd)
     this.transcriptCache.set(cwd, { info, at: now })
     return info
