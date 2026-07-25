@@ -31,10 +31,12 @@ const CSS = `
 ::selection{background:var(--sel)}
 .wrap{width:100%;margin:0 auto;flex:1;min-height:0;display:flex;flex-direction:column}
 .content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px 14px}
-/* Full-bleed title bar flush to the window edge — mirrors the main app's title
-   bar, with a 84px safe-area so the macOS traffic lights never crowd the brand. */
-.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:rgba(22,22,23,.72);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px 0 84px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+/* Console title bar. In-app it sits directly under the app's own title bar, so
+   it needs no traffic-light safe area; popped out the console IS the window, so
+   .ops-host.popped re-adds the 84px inset for that window's controls. */
+.titlebar{flex:0 0 auto;display:flex;align-items:center;gap:10px;height:38px;background:rgba(22,22,23,.72);border:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 14px;font-size:var(--fs-body);-webkit-app-region:drag;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 .recbtn,.zoomgrp{-webkit-app-region:no-drag}
+.ops-host.popped .titlebar{padding-left:84px}
 .zoomgrp{display:flex;align-items:center;border:1px solid var(--line);background:var(--term);border-radius:var(--r);overflow:hidden}
 .zoomgrp button{border:0;background:transparent;color:var(--fg3);font-family:var(--mono);font-size:var(--fs-meta);padding:4px 8px;cursor:pointer;letter-spacing:.04em}
 .zoomgrp button:hover{color:var(--fg);background:rgba(255,255,255,.06)}
@@ -462,6 +464,7 @@ export function createOpsView(root, handlers) {
   // is hosting the view: the in-app overlay offers "pop out", the standalone
   // window offers "pop in" (which destroys that window so its memory is freed).
   var popped=!!(handlers&&handlers.popped)
+  if(popped){ var oh=root.querySelector(".ops-host"); if(oh) oh.classList.add("popped") }
   var popBtn=gid("popBtn")
   popBtn.textContent = popped ? "⇲ pop in" : "⇱ pop out"
   popBtn.title = popped

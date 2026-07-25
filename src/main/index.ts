@@ -363,6 +363,14 @@ function createWindow() {
   mainWindow.on('closed', () => {
     logger.info('window', 'Main window closed')
     mainWindow = null
+    // Nothing may outlive the app window. A popped-out Activity Console (or the
+    // log viewer) is still a BrowserWindow, so leaving it open means
+    // 'window-all-closed' never fires and closing QuadClaude strands a lone
+    // console window keeping the whole app alive. Tearing them down here also
+    // means the console always comes back in-app on the next launch.
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) { try { w.destroy() } catch { /* already gone */ } }
+    }
   })
 
   // Create application menu

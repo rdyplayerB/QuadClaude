@@ -94,19 +94,21 @@ export function OpsOverlay() {
     : null
 
   return (
+    // Starts BELOW the app's own title bar (h-9 = 36px) instead of covering the
+    // whole window. The main window is `transparent: true`, so anything opaque
+    // painted over the macOS traffic lights swallows them (they rendered as
+    // three black discs); clipping a hole for them worked but left a visible
+    // patch, because the hole exposed different chrome than the surrounding
+    // bar. Letting the app's real title bar own that strip removes the whole
+    // class of problem — the controls sit where they always have, and the
+    // console reads as part of the app rather than a takeover.
     <div
-      className="fixed inset-0 z-[60]"
-      style={{
-        // Punch out the macOS traffic-light corner (84×38 — the same safe area
-        // the console's title bar already reserves via padding-left). The
-        // overlay is otherwise fully opaque and paints across the whole window,
-        // which left the window controls sitting on a black field instead of
-        // the app's normal chrome, so they read as three black discs.
-        clipPath: 'polygon(84px 0, 100% 0, 100% 100%, 0 100%, 0 38px, 84px 38px)',
-        ...(img
+      className="fixed inset-x-0 bottom-0 top-9 z-[60]"
+      style={
+        img
           ? { backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }
-          : { background: '#0e1013' }),
-      }}
+          : { background: '#0e1013' }
+      }
     >
       {/* Same opacity overlay the panes use — dims the wallpaper for readability. */}
       {wallpaperOn && (
