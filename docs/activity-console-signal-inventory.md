@@ -89,8 +89,40 @@ claude_code.events
 ```
 
 The app would run a tiny local OTLP receiver and inject the env vars when
-spawning a pane. `cost.usage` in particular is the most inherently tweetable
-number available anywhere in the system.
+spawning a pane.
+
+### 2.1 `cost.usage` is NOT real money — do not display it as money
+
+An earlier draft of this doc called it "actual dollars". That was wrong, and the
+correction matters because the number looks authoritative:
+
+- `costUSD` appears **0 times** across all 40 transcripts.
+- Anthropic's usage API returns `limit_dollars: null`, `used_dollars: null`,
+  `remaining_dollars: null` for a subscription account. It reports *utilization
+  percentage*, not currency.
+- In the binary, `costUSD` accumulates alongside token counts per model
+  (`s.costUSD += o.costUSD` next to `inputTokens`, `cacheReadInputTokens`). It is
+  **token count × per-model list rate**.
+
+So it answers "what would this have cost on the pay-per-token API", not "what did
+this cost me". On a Max/Pro subscription the marginal cost of a token is zero —
+the fee is flat and already paid. Rendering `$2.14` would be a fabricated figure
+wearing a currency symbol.
+
+### 2.2 Use subscription utilization instead — real, and better
+
+The app **already polls** the number that actually constrains the user:
+
+```
+five_hour: { utilization: 23, resets_at: "…04:20:00Z" }
+seven_day: { utilization: 71, resets_at: "…05:00:00Z" }
+```
+
+This is ground truth from Anthropic, it moves during a session, and it is more
+meaningful to other subscribers than an imputed dollar figure: "that run burned
+4% of my weekly limit" lands with anyone on the same plan, and can't be accused
+of inventing numbers. Pair it with real token counts (exact, from `usage`) and
+the `resets_at` countdown the statusline already shows.
 
 ---
 
@@ -168,7 +200,9 @@ cache (`/tmp/quadclaude-ctx-<pid>.json`) · usage API (5h / 7d utilization) ·
    drains on its own: QUEUED → THINKING → ACTING → RETURNED, plus BLOCKED.
 3. **Diff odometer** from `structuredPatch` — a running +N/−M that ticks upward
    visibly on every edit.
-4. **Cost + token odometer** from OTEL — "this 20-minute clip cost $2.14".
+4. **Budget-burn odometer** — real token counts plus the 5h/7d *utilization*
+   the app already polls ("that run burned 4% of my weekly limit"). Never a
+   dollar figure; see §2.1.
 5. **Skill / MCP lanes** — `attributionSkill`, `attributionMcpTool`.
 6. **Delegation lane** — `qcdelegate` Bash calls + `events.jsonl`, showing route,
    duration, and whether `QC_CHECK` passed. *(Still outstanding.)*
@@ -188,6 +222,8 @@ cache (`/tmp/quadclaude-ctx-<pid>.json`) · usage API (5h / 7d utilization) ·
   tokens` line the pane prints is not in the parent transcript (no
   `isSidechain:true` records, no separate file). Only reachable by scraping the
   terminal buffer.
+- **Dollar cost.** There is no billed figure to read for a subscription
+  account — see §2.1. Show utilization and tokens, never currency.
 - **OTEL is opt-in per process** — the app must inject the env vars at pane
   spawn; sessions started outside QuadClaude won't report.
 
