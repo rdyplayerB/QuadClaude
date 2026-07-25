@@ -24,8 +24,15 @@ const MATCH_TIMEOUT_MS = 4000 // a transition unmatched this long = missed
 // This also bounds what verification can claim: it checks that pane-state edges
 // reach the board, not that every individual step lands correctly. Step-level
 // accuracy would need the transcript itself as ground truth.
+// A turn that ends now surfaces its outcome in LANDED (the finishing step is
+// carried there), while individual steps still settle in RETURNED — so the
+// end-of-turn edge legitimately lands in either. Listing only 'return' here
+// would score every completed turn as a MISMATCH against a board that is in
+// fact correct. A pane going active can also reveal a queued prompt first.
 const stateToCols = (s: string): string[] =>
-  s === 'claude-active' ? ['think', 'act'] : s === 'claude-waiting' ? ['blocked'] : ['return']
+  s === 'claude-active' ? ['think', 'act', 'queued']
+    : s === 'claude-waiting' ? ['blocked']
+    : ['return', 'landed']
 const sameCols = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x) => b.includes(x))
 
 interface Pending { t: VerifyTransition; tRecv: number; timer: ReturnType<typeof setTimeout>; expectFrom: string[]; expectTo: string[] }
@@ -89,8 +96,13 @@ export class VerificationTracker {
   // visual truth: a card changed column in the window
   onMove(m: VerifyMove) {
     if (!this.on) return
-    // match the oldest pending transition for this pane whose expected columns fit
-    const i = this.pending.findIndex((p) => p.t.paneId === m.paneId)
+    // Cards are now carried between lanes, so the board emits step-level moves
+    // (act→return, return→landed) continuously — not just on pane-state edges.
+    // Those are real, but they are not what this correlator measures, and
+    // counting them as phantoms would drown the signal it does measure. Prefer a
+    // pending transition whose expected columns actually fit before falling back.
+    let i = this.pending.findIndex((p) => p.t.paneId === m.paneId && p.expectTo.includes(m.toCol))
+    if (i < 0) i = this.pending.findIndex((p) => p.t.paneId === m.paneId)
     if (i < 0) {
       // a viz move with no corresponding real transition
       this.phantom++
