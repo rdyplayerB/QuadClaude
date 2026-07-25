@@ -47,7 +47,7 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   // agents stay in 'shell' state, so the badge just shows their identity.
   const claudeRunning =
     paneProfile.builtin === 'claude' &&
-    (pane?.state === 'claude-active' || pane?.state === 'claude-waiting')
+    (pane?.state === 'claude-active' || pane?.state === 'claude-idle' || pane?.state === 'claude-waiting')
 
   const launch = useCallback(() => {
     if (!pane) return

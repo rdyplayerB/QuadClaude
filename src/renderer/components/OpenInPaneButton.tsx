@@ -11,6 +11,7 @@ interface OpenInPaneButtonProps {
 function paneStatus(state: string, serverCount: number): string {
   if (state === 'claude-waiting') return 'Claude — needs you'
   if (state === 'claude-active') return 'Claude running'
+  if (state === 'claude-idle') return 'Claude — idle'
   if (serverCount > 0) return `server${serverCount > 1 ? 's' : ''} running`
   return 'idle'
 }

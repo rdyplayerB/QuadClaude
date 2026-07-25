@@ -36,6 +36,7 @@ export interface OpsCard {
   tokens?: number      // k-tokens for this task
   elapsedMs?: number   // for working cards (renderer ticks it locally)
   word?: string        // whimsy progress word
+  action?: string      // newest real tool call, e.g. "Bash(npm test)" — changes every few seconds
   ask?: string         // question text (needs-input)
   when?: string        // done label (e.g. "just now")
 }

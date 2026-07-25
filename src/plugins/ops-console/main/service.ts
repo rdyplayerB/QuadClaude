@@ -147,7 +147,11 @@ export class OpsService {
       const t = this.transcriptFor(p.cwd)
       const tag = TAG_BY_HINT(p.folder)
       const file = t.editedFiles[t.editedFiles.length - 1]
-      const title = (t.aiTitle || (t.lastPrompt ? t.lastPrompt.split('\n')[0].slice(0, 48) : '') || 'Session').trim()
+      // The session's ai-title is written once, early, and never revised — it
+      // pins the card to the FIRST thing you asked hours ago. The last prompt is
+      // the instruction actually in flight, so it leads and ai-title backstops it.
+      const prompt = t.lastPrompt ? t.lastPrompt.replace(/\[Image #\d+\]\s*/g, '').split('\n')[0].trim() : ''
+      const title = (prompt.slice(0, 60) || t.aiTitle || 'Session').trim()
 
       if (t.todos.length) {
         // real todos → columns
@@ -163,7 +167,7 @@ export class OpsService {
           } else cards.push({ ...base, col: 'queued' })
         })
       } else if (st === 'active') {
-        cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'work', tag, task: title, file, add: t.adds, del: t.dels, word: WORDS[p.id % WORDS.length], tokens: this.tokEst(p.id, ctxPct), elapsedMs: this.elapsed(p.id, st) })
+        cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'work', tag, task: title, file, action: t.lastAction, add: t.adds, del: t.dels, word: WORDS[p.id % WORDS.length], tokens: this.tokEst(p.id, ctxPct), elapsedMs: this.elapsed(p.id, st) })
       } else if (st === 'waiting') {
         cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'need', tag, task: title, ask: t.lastAssistantText?.slice(0, 110) || 'waiting for your input' })
       }

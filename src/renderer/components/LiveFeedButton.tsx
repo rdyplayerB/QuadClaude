@@ -29,7 +29,7 @@ export const LiveFeedButton = memo(function LiveFeedButton({ paneId }: LiveFeedB
   // the project name (folder) and the "Terminal N" label so the menu shows both.
   const candidates = useWorkspaceStore((s) =>
     s.panes
-      .filter((p) => p.id !== paneId && (p.state === 'claude-active' || p.state === 'claude-waiting'))
+      .filter((p) => p.id !== paneId && (p.state === 'claude-active' || p.state === 'claude-idle' || p.state === 'claude-waiting'))
       .map((p) => ({ id: p.id, name: folderName(p.workingDirectory), term: p.label })),
   )
   const scopeLabel = useWorkspaceStore((s) => {

@@ -285,7 +285,7 @@ export function createOpsView(root, handlers) {
       const ctx=row.querySelector(".ctx"); ctx.textContent="Ctx: "+(a.ctxPct?a.ctxPct+"%":"—")
       ctx.style.color=a.ctxPct===0?"var(--fg3)":a.ctxPct<=50?"var(--g-cyan)":a.ctxPct<=75?"var(--g-yellow)":"var(--red)"
       const meter=row.querySelector(".meter"); meter.classList.toggle("flat",a.state!=="active"); meter.style.setProperty("--mc",col)
-      row.querySelector(".mlab").textContent=a.state==="active"?Math.round(a.tps)+" tok/s":(a.state==="waiting"?"0 tok/s · waiting":"idle")
+      row.querySelector(".mlab").textContent=a.state==="active"?Math.round(a.tps)+" tok/s":(a.state==="waiting"?"0 tok/s · waiting":(a.state==="ready"?"awaiting instruction":"idle"))
       agentTps[a.paneId]=a.state==="active"?a.tps:0
     })
     Array.prototype.slice.call(host.querySelectorAll(".r")).forEach(function(row){ const pid=+row.getAttribute("data-pane"); if(!seen[pid]) row.remove() })
@@ -308,9 +308,11 @@ export function createOpsView(root, handlers) {
       })
     })
   }
-  function cardSig(c){ return [c.col,c.tag,c.task,c.file,c.add,c.del,c.word,c.ask,c.when].join("|") }
+  function cardSig(c){ return [c.col,c.tag,c.task,c.file,c.action,c.add,c.del,c.word,c.ask,c.when].join("|") }
   function cardBody(c){
-    if(c.col==="work") return '<div class="updateline"><span class="g">●</span> Update(<span class="fn">'+esc(c.file||"session")+'</span>) <span class="add">+'+(c.add||0)+'</span>'+((c.del)?' <span class="del">−'+c.del+'</span>':'')+'</div>'+
+    // The action line is the live one — it turns over with every tool call, so
+    // it leads when present and the file/diff line stands in when it isn't.
+    if(c.col==="work") return '<div class="updateline"><span class="g">●</span> '+(c.action?esc(c.action):'Update(<span class="fn">'+esc(c.file||"session")+'</span>)')+' <span class="add">+'+(c.add||0)+'</span>'+((c.del)?' <span class="del">−'+c.del+'</span>':'')+'</div>'+
       '<div class="workline"><span class="sp">✳</span> <span class="wtxt">'+esc(c.word||"Working")+'… (<span class="wel">0s</span> · ↓<span class="wtok">'+(c.tokens||0)+'</span>k tokens)</span></div>'
     if(c.col==="need") return '<div class="askline">'+esc(c.ask||"waiting for input")+'</div>'
     if(c.col==="done") return '<div class="doneline">completed · '+esc(c.when||"just now")+'</div>'

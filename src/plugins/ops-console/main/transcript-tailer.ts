@@ -24,7 +24,21 @@ export interface TranscriptInfo {
   dels: number
   todos: Todo[]
   lastAssistantText?: string // for the "question" when waiting
+  lastAction?: string        // newest tool call, e.g. "Edit(service.ts)" — the live "doing X right now"
   mtimeMs: number
+}
+
+// A tool call's most identifying argument, so the card can say what is actually
+// happening instead of just that something is.
+function actionTarget(input: Record<string, unknown>): string {
+  const raw =
+    (typeof input.file_path === 'string' && path.basename(input.file_path)) ||
+    (typeof input.command === 'string' && input.command) ||
+    (typeof input.pattern === 'string' && input.pattern) ||
+    (typeof input.description === 'string' && input.description) ||
+    (typeof input.url === 'string' && input.url) ||
+    ''
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 44)
 }
 
 function slugForCwd(cwd: string): string {
@@ -125,6 +139,10 @@ export function readTranscript(cwd: string): TranscriptInfo {
             if (bb.type === 'tool_use') {
               const name = bb.name
               const input = (bb.input ?? {}) as Record<string, unknown>
+              if (typeof name === 'string' && name) {
+                const target = actionTarget(input)
+                info.lastAction = target ? `${name}(${target})` : name
+              }
               if ((name === 'Edit' || name === 'Write' || name === 'MultiEdit') && typeof input.file_path === 'string') {
                 const base = path.basename(input.file_path)
                 info.editedFiles = info.editedFiles.filter((f) => f !== base)
