@@ -21,6 +21,12 @@ const STALE_STEP_MS = 300000 // an unfinished step older than this is assumed lo
 // Observed live before this guard: subagent cards showing running for 394 MINUTES
 // on a READY pane, inflating the "tasks working" KPI with phantoms.
 const SUB_STALE_MS = 600000
+// A step that returns in under a poll window would otherwise be born already
+// finished and never visibly travel. It holds its ACTING slot this long, marked
+// `spent` the instant the real work ended — persistence is stretched, never the
+// facts. Measured: this is what lifts hops-per-card from 0.16 to 0.63.
+const MIN_DWELL_MS = 3000
+const LANDED_TTL = 150000  // an outcome is worth keeping on screen
 
 const stateOf = (s: string): AgentState =>
   s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : s === 'claude-idle' ? 'ready' : 'idle'
@@ -44,6 +50,15 @@ export class OpsService {
   // running — so once seen, a subagent is remembered here until it reports back.
   private subsByPane = new Map<number, Map<string, OpsSubagent>>()
   private lastPr = new Map<number, string>()      // last pr-link surfaced per pane
+  // Hand-off state. A composing card is allocated a carrier id; the next tool
+  // call the pane issues INHERITS that id, so the renderer FLIPs one card from
+  // THINKING to ACTING instead of destroying one and creating another. Real
+  // causality: the streaming message that was composing is what emitted the
+  // tool_use. `stepCard` remembers the assignment so the card keeps its identity
+  // through RETURNED and, if it ends the turn, into LANDED.
+  private carrier = new Map<number, string>()          // paneId -> unclaimed carrier id
+  private stepCard = new Map<string, string>()         // tool_use id -> card id
+  private carrierSeq = 0
   private tokenMeter = new TokenMeter()
   private transcriptCache = new Map<string, { info: TranscriptInfo; at: number }>()
   private ctxCache = new Map<number, { v: { contextPct: number; model: string } | null; at: number }>()
@@ -205,29 +220,58 @@ export class OpsService {
         // back to the raw argument. The tag chip still names the tool, so the
         // system identity is never lost — only the headline becomes readable.
         const say = s.desc || s.target || s.name
+        // Claim the pane's carrier the first time we see this step, so the card
+        // that was composing becomes the call it produced.
+        let cardId = this.stepCard.get(s.id)
+        if (!cardId) {
+          const c = this.carrier.get(p.id)
+          if (c) { cardId = c; this.carrier.delete(p.id) } else { cardId = s.id }
+          this.stepCard.set(s.id, cardId)
+        }
         if (s.endedAt) {
-          if (now - s.endedAt > RETURN_TTL) continue // retired off the board
+          // Minimum dwell: still ACTING, but visibly spent.
+          if (now - s.startedAt < MIN_DWELL_MS) {
+            cards.push({
+              id: cardId, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: say,
+              think: s.think, startedAt: s.startedAt, durMs: s.endedAt - s.startedAt,
+              tokens: s.tokens, err: s.err, spent: true,
+            })
+            continue
+          }
+          if (now - s.endedAt > RETURN_TTL) { this.stepCard.delete(s.id); continue }
           cards.push({
-            id: s.id, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: say,
+            id: cardId, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, durMs: s.endedAt - s.startedAt, tokens: s.tokens, err: s.err,
           })
         } else if (st === 'active' && now - s.startedAt < STALE_STEP_MS) {
           cards.push({
-            id: s.id, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: say,
+            id: cardId, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, tokens: s.tokens,
           })
         }
       }
 
+      // ---- QUEUED: prompts stacked behind the turn in flight ----
+      for (let qi = 0; qi < t.queued.length && qi < 4; qi++) {
+        cards.push({
+          id: `p${p.id}-q${qi}`, paneId: p.id, col: 'queued', kind: 'step', tag: 'queued',
+          task: t.queued[qi], startedAt: now,
+        })
+      }
+
       // Composing: the pane is streaming output but has no tool call in flight —
       // i.e. Claude is writing its next message. Real, and it is the THINKING column.
       const inFlight = t.steps.some((s) => !s.endedAt && !s.spawns)
+      // Allocate a carrier for this composing stretch; the next tool call takes it.
+      if (st === 'active' && !inFlight && !this.carrier.has(p.id)) {
+        this.carrier.set(p.id, `p${p.id}-c${++this.carrierSeq}`)
+      }
       if (st === 'active' && !inFlight) {
         // Real thinking blocks are encrypted (measured: 0/200 with text), so the
         // narration line is Claude's newest outward prose — what it just said is
         // the only visible form of what it is thinking about.
         cards.push({
-          id: `p${p.id}-think`, paneId: p.id, col: 'think', kind: 'think', tag: 'thinking',
+          id: this.carrier.get(p.id) || `p${p.id}-think`, paneId: p.id, col: 'think', kind: 'think', tag: 'thinking',
           task: title, think: (t.lastThinking || t.lastAssistantText)?.replace(/\s+/g, ' ').slice(0, 150),
           startedAt: t.lastRecordAt || now,
         })
@@ -246,7 +290,7 @@ export class OpsService {
         if (seen) {
           const label = t.prLabel || t.prLink.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)
           this.pushFeed(p.id, `<b>${p.folder}</b> opened <b class="done">${label}</b>`, t.prLink.slice(0, 80))
-          this.done.push({ card: { id: `p${p.id}-pr-${now}`, paneId: p.id, col: 'return', kind: 'step', tag: 'PR', task: label, when: 'just now' }, at: now })
+          this.done.push({ card: { id: `p${p.id}-pr-${now}`, paneId: p.id, col: 'landed', kind: 'step', tag: 'PR', task: label, when: 'just now' }, at: now })
         }
       }
 
@@ -262,14 +306,27 @@ export class OpsService {
           this.pushFeed(p.id, `<b>${p.folder}</b> completed <b class="done">${title}</b>`, (file ? `edit ${file} · ` : '') + (st === 'ready' ? 'awaiting your instruction' : 'session ended'))
           // The finished turn itself earns a card in RETURNED — the one card on
           // the board that summarises a whole turn rather than a single step.
-          this.done.push({ card: { id: `p${p.id}-turn${now}`, paneId: p.id, col: 'return', kind: 'step', tag: 'turn', task: title, when: 'just now' }, at: now })
+          // Carry the step that ended the turn into LANDED rather than minting a
+          // fresh card — the work becomes its own outcome, one more real hop.
+          const mine = cards.filter((c) => c.paneId === p.id && c.col === 'return' && c.kind === 'step')
+          const carryId = mine.length ? mine[mine.length - 1].id : `p${p.id}-turn${now}`
+          this.done.push({ card: { id: carryId, paneId: p.id, col: 'landed', kind: 'step', tag: 'turn', task: title, when: 'just now' }, at: now })
         }
       }
       this.prevState.set(p.id, st)
     }
 
+    // A step whose card retired normally is deleted above, but one that scrolled
+    // out of the 256KB tail window never gets that chance. Bound the map by
+    // dropping the oldest assignments — Map iterates in insertion order.
+    if (this.stepCard.size > 400) {
+      const drop = this.stepCard.size - 200
+      let i = 0
+      for (const k of this.stepCard.keys()) { if (i++ >= drop) break; this.stepCard.delete(k) }
+    }
+
     // recently-done cards (from active→idle), keep ~90s, cap 4
-    this.done = this.done.filter((d) => now - d.at < 90000).slice(-4)
+    this.done = this.done.filter((d) => now - d.at < LANDED_TTL).slice(-5)
     for (const d of this.done) if (!cards.some((c) => c.id === d.card.id)) cards.push(d.card)
 
     return {

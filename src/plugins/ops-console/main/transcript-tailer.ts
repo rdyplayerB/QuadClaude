@@ -48,6 +48,7 @@ export interface TranscriptInfo {
   prLink?: string            // newest pr-link record in the tail
   prLabel?: string           // human form: "owner/repo #6"
   queueDepth: number         // prompts stacked behind the current turn (queue-operation)
+  queued: string[]           // their text, oldest first — the QUEUED lane's cards
   lastRecordAt: number       // epoch of the newest record; "composing" = active but nothing new
   lastRecordKind: string     // 'assistant' | 'user' | ''
   notifications: string[]    // task-notification texts — how a backgrounded agent reports finishing
@@ -138,12 +139,12 @@ function textOf(content: unknown): string {
 
 // Read + parse one pane's newest session transcript tail. Never throws.
 export function readTranscript(cwd: string): TranscriptInfo {
-  const empty: TranscriptInfo = { found: false, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs: 0, lastSaidAt: 0, queueDepth: 0 }
+  const empty: TranscriptInfo = { found: false, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs: 0, lastSaidAt: 0, queueDepth: 0, queued: [] }
   try {
     const file = newestTranscript(cwd)
     if (!file) return empty
     const { lines, mtimeMs } = readTail(file)
-    const info: TranscriptInfo = { found: true, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs, lastSaidAt: 0, queueDepth: 0 }
+    const info: TranscriptInfo = { found: true, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs, lastSaidAt: 0, queueDepth: 0, queued: [] }
     const byId = new Map<string, Step>()
 
     for (const l of lines) {
@@ -192,9 +193,12 @@ export function readTranscript(cwd: string): TranscriptInfo {
       // enqueue whose dequeue scrolled out would overcount, so floor at 0.
       if (type === 'queue-operation') {
         const op = String(d.operation ?? d.op ?? '')
-        if (op === 'enqueue') info.queueDepth++
-        else if (op === 'dequeue' || op === 'remove') info.queueDepth = Math.max(0, info.queueDepth - 1)
-        else if (op === 'popAll') info.queueDepth = 0
+        const txt = typeof d.content === 'string' ? d.content.replace(/\s+/g, ' ').trim() : ''
+        if (op === 'enqueue') { info.queueDepth++; if (txt) info.queued.push(txt.slice(0, 90)) }
+        else if (op === 'dequeue' || op === 'remove') {
+          info.queueDepth = Math.max(0, info.queueDepth - 1)
+          info.queued.shift()
+        } else if (op === 'popAll') { info.queueDepth = 0; info.queued = [] }
       }
 
       // file-history-delta carries insertion/deletion counts

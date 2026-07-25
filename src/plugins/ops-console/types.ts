@@ -7,12 +7,18 @@
 // 'active' = generating · 'ready' = Claude up, turn over, awaiting instruction
 // 'waiting' = blocked on a prompt · 'idle' = no agent in the pane
 export type AgentState = 'active' | 'waiting' | 'ready' | 'idle'
-// A card is one STEP, and every column change is a record in the transcript:
-//   think   — the agent is composing (output streaming, no assistant record yet)
-//   act     — a tool_use was issued
+// A card is one unit of work CARRIED across lanes — the same card is handed
+// from lane to lane rather than destroyed and recreated, so what you watch is
+// one thing travelling. Every column change is a record in the transcript:
+//   queued  — a prompt stacked behind the current turn (queue-operation)
+//   think   — the agent is composing (output streaming, no tool call in flight)
+//   act     — a tool_use was issued; the composing card BECOMES this card,
+//             because that streaming message is what emitted the tool_use
 //   return  — its tool_result landed (paired by tool_use id)
-//   blocked — the pane is sitting on a permission / decision prompt
-export type CardColumn = 'think' | 'act' | 'return' | 'blocked'
+//   landed  — the outcome kept: a finished turn, a PR, a commit
+//   blocked — the pane is sitting on a permission / decision prompt (an ALARM;
+//             rendered as a thin rail, since empty is the healthy state)
+export type CardColumn = 'queued' | 'think' | 'act' | 'return' | 'landed' | 'blocked'
 
 export interface OpsAgent {
   paneId: number
@@ -49,6 +55,8 @@ export interface OpsCard {
   err?: boolean        // tool_result came back is_error
   ask?: string         // prompt text while blocked
   when?: string        // retirement label
+  spent?: boolean      // the real work ended, but the card is still serving its
+                       // minimum visible dwell — marked, never hidden
 }
 
 // A forked/backgrounded subagent, from the parent's Agent tool_use record.

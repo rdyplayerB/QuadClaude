@@ -98,9 +98,12 @@ const CSS = `
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .doneline.err{color:var(--red)}
 .card.sub{border-left:2px solid var(--g-cyan)}
+/* Real work ended, card still serving its minimum visible dwell. */
+.card.spent{opacity:.5}
 .card.failed{border-color:rgba(248,113,113,.45)}
 .board{flex:1 1 auto;min-height:0;display:flex;gap:8px;padding:10px;overflow:auto;position:relative}
-.col{flex:1;min-width:176px;display:flex;flex-direction:column;gap:7px}
+.col{flex:1;min-width:150px;display:flex;flex-direction:column;gap:7px}
+.col.rail{flex:0 0 132px;min-width:132px}
 .colhead{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft);cursor:help}
 .colhead .cdot{width:7px;height:7px;border-radius:1px}
 .colhead .lft{display:flex;align-items:center;gap:6px;font-weight:600}
@@ -224,15 +227,22 @@ export function createOpsView(root, handlers) {
   const qa = (sel) => root.querySelectorAll(sel)
 
   const PANE_COLORS = ["#22d3ee","#4ade80","#fbbf24","#a78bfa","#f472b6","#fb923c","#38bdf8","#34d399","#f59e0b","#c084fc","#fb7185","#2dd4bf"]
+  // Six lanes: work flows left to right and a card is CARRIED between them, so
+  // what you watch is one thing travelling. BLOCKED is last and narrow — it is
+  // an alarm, and empty is the healthy state, so it does not earn equal width.
   const COLS = [
-    {k:"think",name:"thinking",c:"var(--fg3)",
-     tip:"Claude is <b>streaming a message</b> — reasoning or writing a reply — with no tool call in flight. One card per working pane."},
+    {k:"queued",name:"queued",c:"var(--fg3)",
+     tip:"Prompts you stacked while the agent was busy. Drains itself as each one is picked up."},
+    {k:"think",name:"thinking",c:"var(--g-cyan)",
+     tip:"Claude is <b>streaming a message</b> — reasoning or writing — with no tool call in flight. This card is <b>carried into ACTING</b> when it issues one."},
     {k:"act",name:"acting",c:"var(--teal)",
-     tip:"A tool call has <b>started and not returned yet</b>. Usually sparse: most calls finish in well under a second, so they can begin and end between two reads of the transcript and land straight in returned."},
+     tip:"A tool call is <b>running</b>. Cards hold this slot briefly even after finishing — marked <i>ended</i> — so a sub-second call is still visible passing through."},
     {k:"return",name:"returned",c:"var(--green)",
-     tip:"The tool result <b>came back</b>. Duration shown is real, measured start-to-result. Cards linger <b>20s</b> and then retire off the board."},
+     tip:"The result <b>came back</b>. Duration is real, measured start-to-result."},
+    {k:"landed",name:"landed",c:"var(--g-yellow)",
+     tip:"Kept outcomes: a finished turn, a pull request, a commit. The step that ends a turn <b>becomes</b> the turn's outcome here."},
     {k:"blocked",name:"blocked",c:"var(--amber)",
-     tip:"Claude <b>asked you a question and stopped</b>. Nothing moves in that pane until you answer — this column being empty is good news."},
+     tip:"Claude <b>asked you a question and stopped</b>. Nothing moves in that pane until you answer — this lane being empty is good news."},
   ]
   const ac = (pos) => PANE_COLORS[((pos%12)+12)%12]
   // 1234 -> "1.2k", 1234567 -> "1.2M"
@@ -249,7 +259,7 @@ export function createOpsView(root, handlers) {
   function buildShell(){
     const board=gid("board"); board.innerHTML=""
     COLS.forEach(function(c){
-      const col=document.createElement("div"); col.className="col"
+      const col=document.createElement("div"); col.className="col"+(c.k==="blocked"?" rail":"")
       col.innerHTML='<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span><span class="cn" id="cn-'+c.k+'">0</span>'+
         '<div class="coltip">'+c.tip+'</div></div>'
       const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
@@ -401,7 +411,7 @@ export function createOpsView(root, handlers) {
           moved.push({id:c.id,pane:c.paneId,fromCol:fromCol,toCol:c.col}); colBodies[c.col].appendChild(el)
         }
       }
-      el.classList.toggle("wait",c.col==="blocked"); el.classList.toggle("sub",c.kind==="subagent"); el.classList.toggle("failed",!!c.err)
+      el.classList.toggle("wait",c.col==="blocked"); el.classList.toggle("sub",c.kind==="subagent"); el.classList.toggle("failed",!!c.err); el.classList.toggle("spent",!!c.spent)
       el.querySelector(".whodot").style.background=col
       const wn=el.querySelector(".whoname"); wn.style.color=col; wn.textContent=a.name
       el.querySelector(".ctag").textContent=c.tag||""
