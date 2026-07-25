@@ -26,7 +26,11 @@ export interface SavedPrompt {
 }
 
 // Pane state
-export type PaneState = 'shell' | 'claude-active' | 'claude-waiting'
+// 'claude-active'  — Claude is generating (the PTY is streaming its spinner)
+// 'claude-idle'    — Claude is running but its turn is over; awaiting instruction
+// 'claude-waiting' — Claude is blocked on a prompt (permission / decision menu)
+// 'shell'          — no Claude process in this pane
+export type PaneState = 'shell' | 'claude-active' | 'claude-idle' | 'claude-waiting'
 
 // Pane count bounds. The app is "QuadClaude" so 4 is the floor; extra panes
 // can be added up to MAX_PANES. 12 is a practical ceiling — beyond a 4x3 grid

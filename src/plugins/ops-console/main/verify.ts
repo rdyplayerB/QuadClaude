@@ -16,7 +16,11 @@ import { VerifyTransition, VerifyMove, VerifyOverlay } from '../types'
 
 const TRACE_PATH = path.join(os.homedir(), '.quadclaude', 'ops-verify.jsonl')
 const MATCH_TIMEOUT_MS = 4000 // a transition unmatched this long = missed
-const stateToCol = (s: string): string => (s === 'claude-active' ? 'work' : s === 'claude-waiting' ? 'need' : 'done')
+const stateToCol = (s: string): string =>
+  s === 'claude-active' ? 'work' : s === 'claude-waiting' ? 'need' : 'done'
+// NOTE: this mirrors the service's state→column mapping, so a clean run proves
+// the board tracks the state machine — not that the state machine is right.
+// 'claude-idle' and 'shell' both land in 'done': the turn is over either way.
 
 interface Pending { t: VerifyTransition; tRecv: number; timer: ReturnType<typeof setTimeout>; expectFrom: string; expectTo: string }
 

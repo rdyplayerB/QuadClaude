@@ -19,7 +19,8 @@ const TAG_BY_HINT = (folder: string): string => {
   return 'work'
 }
 
-const stateOf = (s: string): AgentState => (s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : 'idle')
+const stateOf = (s: string): AgentState =>
+  s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : s === 'claude-idle' ? 'ready' : 'idle'
 
 interface DoneMemo { card: OpsCard; at: number }
 
@@ -155,6 +156,9 @@ export class OpsService {
           if (todo.status === 'completed') cards.push({ ...base, col: 'done', when: 'done' })
           else if (todo.status === 'in_progress') {
             if (st === 'waiting') cards.push({ ...base, col: 'need', ask: t.lastAssistantText?.slice(0, 110) || 'waiting for input' })
+            // Claude parked mid-plan: the todo really is still in progress, but
+            // nothing is running — show it stalled, with the timer frozen.
+            else if (st === 'ready') cards.push({ ...base, col: 'work', file, add: t.adds, del: t.dels, word: 'Paused' })
             else cards.push({ ...base, col: 'work', file, add: t.adds, del: t.dels, word: WORDS[i % WORDS.length], tokens: this.tokEst(p.id, ctxPct), elapsedMs: this.elapsed(p.id, st) })
           } else cards.push({ ...base, col: 'queued' })
         })
@@ -163,15 +167,19 @@ export class OpsService {
       } else if (st === 'waiting') {
         cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'need', tag, task: title, ask: t.lastAssistantText?.slice(0, 110) || 'waiting for your input' })
       }
+      // st === 'ready' deliberately emits no live card — the turn is over, and
+      // the transition below has already moved it to DONE.
 
       // ---- feed from real state transitions ----
       const prevSt = this.prevState.get(p.id)
       if (prevSt && prevSt !== st) {
-        if (st === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> is <b class="wait">waiting for input</b>`, (t.lastAssistantText?.slice(0, 90) || '') + ' · claude-active → claude-waiting')
-        else if (st === 'active' && prevSt === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> resumed <b>${title}</b>`, 'you answered · claude-waiting → claude-active')
-        else if (st === 'active' && prevSt === 'idle') this.pushFeed(p.id, `<b>${p.folder}</b> started <b>${title}</b>`, 'shell → claude-active')
-        else if (st === 'idle' && prevSt === 'active') {
-          this.pushFeed(p.id, `<b>${p.folder}</b> completed <b class="done">${title}</b>`, (file ? `edit ${file} · ` : '') + 'claude-active → shell')
+        if (st === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> is <b class="wait">waiting for input</b>`, (t.lastAssistantText?.slice(0, 90) || '') + ' · blocked on a prompt')
+        else if (st === 'active' && prevSt === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> resumed <b>${title}</b>`, 'you answered · back to work')
+        else if (st === 'active') this.pushFeed(p.id, `<b>${p.folder}</b> started <b>${title}</b>`, prevSt === 'ready' ? 'new turn' : 'shell → claude')
+        else if (prevSt === 'active') {
+          // The turn ended: Claude either parked at its prompt ('ready') or the
+          // process exited ('idle'). Either way the work card is finished.
+          this.pushFeed(p.id, `<b>${p.folder}</b> completed <b class="done">${title}</b>`, (file ? `edit ${file} · ` : '') + (st === 'ready' ? 'awaiting your instruction' : 'session ended'))
           this.done.push({ card: { id: `p${p.id}-done${now}`, paneId: p.id, col: 'done', tag, task: title, when: 'just now', file }, at: now })
         }
       }

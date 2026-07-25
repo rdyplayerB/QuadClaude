@@ -6,7 +6,7 @@ import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
-import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, WorkspacePreferences } from '../../shared/types'
+import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, PaneState, WorkspacePreferences } from '../../shared/types'
 import { visiblePaneCount } from '../layouts'
 import { paneLog, armBlankWatchdog, notePaneOutput, clearBlankWatchdog } from '../paneDiag'
 
@@ -50,6 +50,45 @@ const canvasAddons = new Map<number, CanvasAddon>()
 // once per output batch — cheap. Lets diagnostics tell "no output ever arrived"
 // apart from "output arrived but never painted" (the two blank-pane causes).
 const paneReceivedBytes = new Map<number, number>()
+// --- Claude busy detection -----------------------------------------------
+// Claude animates a spinner with a live elapsed timer while it works, so a
+// working pane writes to its PTY several times a second; a pane parked at the
+// input box writes nothing at all (the cursor blink is drawn client-side).
+// That makes PTY output the one busy signal that doesn't depend on scraping
+// Claude's UI — the affordance strings change between versions, so matching
+// them would rot. Two refinements keep it honest:
+//   - a lone repaint burst isn't work, so output must run for OUTPUT_STREAK_MS
+//     before it counts as busy;
+//   - the echo of your own typing is output too, so a keystroke resets the streak.
+const lastOutputAt = new Map<number, number>()
+const outputStreakFrom = new Map<number, number>()
+const OUTPUT_QUIET_MS = 3000 // silent this long → the turn is over
+const OUTPUT_STREAK_MS = 800 // output running this long → genuinely working
+const OUTPUT_GAP_MS = 1500 // a gap this big starts a new streak
+
+function noteOutput(paneId: number) {
+  const now = Date.now()
+  const prev = lastOutputAt.get(paneId) ?? 0
+  if (now - prev > OUTPUT_GAP_MS) outputStreakFrom.set(paneId, now)
+  lastOutputAt.set(paneId, now)
+}
+
+function noteInput(paneId: number) {
+  outputStreakFrom.set(paneId, Date.now())
+}
+
+function isClaudeBusy(paneId: number): boolean {
+  const last = lastOutputAt.get(paneId) ?? 0
+  if (Date.now() - last > OUTPUT_QUIET_MS) return false
+  return last - (outputStreakFrom.get(paneId) ?? last) >= OUTPUT_STREAK_MS
+}
+
+// The three Claude states, in precedence order: a blocking prompt beats
+// everything, then live output, then "parked at the prompt, your move".
+function classifyClaudeState(paneId: number, terminal: Terminal | null): PaneState {
+  if (terminal && scanForClaudePrompt(terminal)) return 'claude-waiting'
+  return isClaudeBusy(paneId) ? 'claude-active' : 'claude-idle'
+}
 // Panes the periodic health sweep has already flagged as blank, so each is
 // reported once (not every tick) until it recovers.
 const healthAnomalyReported = new Set<number>()
@@ -167,15 +206,14 @@ function schedulePendingFlush(paneId: number, terminal: Terminal) {
   })
 }
 
-// Re-evaluate active vs waiting from the buffer, transitioning state and
+// Re-evaluate active/idle/waiting from the buffer, transitioning state and
 // chiming once when a pane newly enters the waiting state.
-function refreshClaudeWaitingState(paneId: number, terminal: Terminal | null) {
+function refreshClaudeRunState(paneId: number, terminal: Terminal | null) {
   const store = useWorkspaceStore.getState()
   const current = store.panes.find((p) => p.id === paneId)?.state
   // Only meaningful while Claude is believed to be running
-  if (current !== 'claude-active' && current !== 'claude-waiting') return
-  const waiting = terminal ? scanForClaudePrompt(terminal) : false
-  const next = waiting ? 'claude-waiting' : 'claude-active'
+  if (current !== 'claude-active' && current !== 'claude-idle' && current !== 'claude-waiting') return
+  const next = classifyClaudeState(paneId, terminal)
   if (current !== next) {
     store.setPaneState(paneId, next)
     if (next === 'claude-waiting') playDecisionChime()
@@ -531,6 +569,8 @@ function disposeTerminal(paneId: number) {
     pendingOutput.delete(paneId)
     pendingBytes.delete(paneId)
     droppedBytes.delete(paneId)
+    lastOutputAt.delete(paneId)
+    outputStreakFrom.delete(paneId)
     const handles = pendingFlush.get(paneId)
     if (handles) {
       if (handles.raf !== null) cancelAnimationFrame(handles.raf)
@@ -910,6 +950,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
       // Handle input
       terminal.onData((data) => {
+        noteInput(paneId)
         window.electronAPI.sendInput(paneId, data)
       })
 
@@ -1133,6 +1174,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         {
           // Healthy output → cancel the blank-pane watchdog (logs first-byte latency).
           notePaneOutput(paneId)
+          noteOutput(paneId)
           paneReceivedBytes.set(paneId, (paneReceivedBytes.get(paneId) ?? 0) + data.length)
           const terminal = xtermRef.current
 
@@ -1167,14 +1209,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           const st = useWorkspaceStore
             .getState()
             .panes.find((p) => p.id === paneId)?.state
-          if (st === 'claude-active' || st === 'claude-waiting') {
+          if (st === 'claude-idle' && isClaudeBusy(paneId)) {
+            // Claude picked the turn back up — don't make the 3s poll find it.
+            useWorkspaceStore.getState().setPaneState(paneId, 'claude-active')
+          }
+          if (st === 'claude-active' || st === 'claude-idle' || st === 'claude-waiting') {
             const existingTimer = promptScanTimers.get(paneId)
             if (existingTimer) clearTimeout(existingTimer)
             promptScanTimers.set(
               paneId,
               setTimeout(() => {
                 promptScanTimers.delete(paneId)
-                refreshClaudeWaitingState(paneId, xtermRef.current)
+                refreshClaudeRunState(paneId, xtermRef.current)
               }, 400)
             )
           }
@@ -1271,9 +1317,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         return
       }
 
-      // Claude is running: classify active vs waiting from the buffer.
-      const waiting = xtermRef.current ? scanForClaudePrompt(xtermRef.current) : false
-      const next = waiting ? 'claude-waiting' : 'claude-active'
+      // Claude is running: classify active vs idle vs waiting. This poll is what
+      // catches the end of a turn — output stops, nothing else fires.
+      const next = classifyClaudeState(paneId, xtermRef.current)
       if (currentState !== next) {
         store.setPaneState(paneId, next)
         // Chime on any transition into waiting (poll covers cases the

@@ -4,7 +4,9 @@
 // moved" by comparing card ids/columns, which keeps the IPC surface tiny and
 // makes live mode and record mode render through the identical path.
 
-export type AgentState = 'active' | 'waiting' | 'idle'
+// 'active' = generating · 'ready' = Claude up, turn over, awaiting instruction
+// 'waiting' = blocked on a prompt · 'idle' = no agent in the pane
+export type AgentState = 'active' | 'waiting' | 'ready' | 'idle'
 export type CardColumn = 'queued' | 'work' | 'need' | 'done'
 
 export interface OpsAgent {

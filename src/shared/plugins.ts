@@ -43,7 +43,7 @@ export interface PaneSnapshot {
   folder: string
   proj: string
   cwd: string
-  state: 'shell' | 'claude-active' | 'claude-waiting'
+  state: 'shell' | 'claude-active' | 'claude-idle' | 'claude-waiting'
   account: string
   model: string
 }
