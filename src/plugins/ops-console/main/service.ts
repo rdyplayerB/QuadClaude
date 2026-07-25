@@ -1,23 +1,19 @@
 // Live Ops Console data service. Turns real app signals into OpsSnapshots:
-//   pane states (renderer push) → agents & card columns
+//   pane states (renderer push) → agent roster + the blocked column
 //   PtyManager bytesOut delta   → per-agent output rate (tok/s)
 //   ctx% file + git status      → statusline readouts
-//   transcript tail             → card titles, files, diffs, questions, todos
-// Card ids are STABLE across ticks so the window animates real moves (FLIP)
-// rather than recreating nodes. Never throws out of a tick.
+//   transcript tail             → STEP CARDS: one per tool call, flowing
+//                                 think → act → return, plus subagent spawns
+// Card ids are the tool_use ids, so they're stable across ticks and the window
+// FLIP-animates real moves rather than recreating nodes. Never throws in a tick.
 
 import { PluginContext, WorkspaceSnapshot } from '../../../shared/plugins'
-import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, AgentState } from '../types'
+import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, OpsSubagent, AgentState } from '../types'
 import { readTranscript, TranscriptInfo } from './transcript-tailer'
 
-const WORDS = ['Churning', 'Cooking', 'Brewing', 'Simmering', 'Sautéing', 'Whisking', 'Percolating', 'Baking', 'Marinating', 'Befuddling']
-const TAG_BY_HINT = (folder: string): string => {
-  const f = folder.toLowerCase()
-  if (/vid|story|render|clip|movie/.test(f)) return 'render'
-  if (/doc|paste|blog|site|web|linktree/.test(f)) return 'build'
-  if (/quad|claude|tool|cli/.test(f)) return 'dev'
-  return 'work'
-}
+const RETURN_TTL = 20000     // how long a finished step stays on the board
+const SUB_DONE_TTL = 60000   // a finished subagent lingers longer — rarer, bigger news
+const STALE_STEP_MS = 300000 // an unfinished step older than this is assumed lost
 
 const stateOf = (s: string): AgentState =>
   s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : s === 'claude-idle' ? 'ready' : 'idle'
@@ -36,7 +32,10 @@ export class OpsService {
   private feed: OpsFeedItem[] = []
   private feedSeq = 0
   private done: DoneMemo[] = []          // recently-completed cards, per pane, aged out
-  private taskStart = new Map<number, number>() // paneId → epoch when its work card started
+  // Subagents must outlive the transcript window. We only read the last 256KB,
+  // and one big Write can push a spawn out of it while the fork is still
+  // running — so once seen, a subagent is remembered here until it reports back.
+  private subsByPane = new Map<number, Map<string, OpsSubagent>>()
   private transcriptCache = new Map<string, { info: TranscriptInfo; at: number }>()
   private ctxCache = new Map<number, { v: { contextPct: number; model: string } | null; at: number }>()
   private disposed = false
@@ -145,7 +144,6 @@ export class OpsService {
 
       // ---- cards from transcript + state ----
       const t = this.transcriptFor(p.cwd)
-      const tag = TAG_BY_HINT(p.folder)
       const file = t.editedFiles[t.editedFiles.length - 1]
       // The session's ai-title is written once, early, and never revised — it
       // pins the card to the FIRST thing you asked hours ago. The last prompt is
@@ -153,26 +151,61 @@ export class OpsService {
       const prompt = t.lastPrompt ? t.lastPrompt.replace(/\[Image #\d+\]\s*/g, '').split('\n')[0].trim() : ''
       const title = (prompt.slice(0, 60) || t.aiTitle || 'Session').trim()
 
-      if (t.todos.length) {
-        // real todos → columns
-        t.todos.forEach((todo, i) => {
-          const base = { id: `p${p.id}-t${i}`, paneId: p.id, tag, task: todo.content.slice(0, 60) }
-          if (todo.status === 'completed') cards.push({ ...base, col: 'done', when: 'done' })
-          else if (todo.status === 'in_progress') {
-            if (st === 'waiting') cards.push({ ...base, col: 'need', ask: t.lastAssistantText?.slice(0, 110) || 'waiting for input' })
-            // Claude parked mid-plan: the todo really is still in progress, but
-            // nothing is running — show it stalled, with the timer frozen.
-            else if (st === 'ready') cards.push({ ...base, col: 'work', file, add: t.adds, del: t.dels, word: 'Paused' })
-            else cards.push({ ...base, col: 'work', file, add: t.adds, del: t.dels, word: WORDS[i % WORDS.length], tokens: this.tokEst(p.id, ctxPct), elapsedMs: this.elapsed(p.id, st) })
-          } else cards.push({ ...base, col: 'queued' })
-        })
-      } else if (st === 'active') {
-        cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'work', tag, task: title, file, action: t.lastAction, add: t.adds, del: t.dels, word: WORDS[p.id % WORDS.length], tokens: this.tokEst(p.id, ctxPct), elapsedMs: this.elapsed(p.id, st) })
-      } else if (st === 'waiting') {
-        cards.push({ id: `p${p.id}-ep`, paneId: p.id, col: 'need', tag, task: title, ask: t.lastAssistantText?.slice(0, 110) || 'waiting for your input' })
+      // ---- STEP CARDS: one per real tool call, flowing think → act → return --
+      let known = this.subsByPane.get(p.id)
+      if (!known) { known = new Map(); this.subsByPane.set(p.id, known) }
+      for (const s of t.steps) {
+        if (!s.spawns) continue
+        if (!known.has(s.id)) known.set(s.id, { id: s.id, name: s.spawns.name, desc: s.spawns.desc, spawnedAt: s.startedAt, done: false })
       }
-      // st === 'ready' deliberately emits no live card — the turn is over, and
-      // the transition below has already moved it to DONE.
+      // A fork reports back as a task-notification naming it — the only
+      // completion signal the parent transcript ever carries.
+      for (const sub of known.values()) {
+        if (!sub.done && t.notifications.some((n) => n.includes(sub.name))) sub.done = true
+        if (sub.done && now - sub.spawnedAt > SUB_DONE_TTL) known.delete(sub.id)
+      }
+      const subs = [...known.values()]
+      if (subs.length) agents[agents.length - 1].subagents = subs.slice(-4)
+      for (const sub of subs) {
+        // A spawn is not a step that "returns" — the Agent call answers instantly
+        // while the fork keeps running, so it gets its own longer-lived card.
+        cards.push({
+          id: `sub-${sub.id}`, paneId: p.id, col: sub.done ? 'return' : 'act', kind: 'subagent',
+          tag: 'subagent', task: sub.desc || sub.name, sub: sub.name, startedAt: sub.spawnedAt,
+        })
+      }
+
+      for (const s of t.steps) {
+        if (s.spawns) continue // handled above, with its own lifecycle
+        if (s.endedAt) {
+          if (now - s.endedAt > RETURN_TTL) continue // retired off the board
+          cards.push({
+            id: s.id, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: s.target || s.name,
+            think: s.think, startedAt: s.startedAt, durMs: s.endedAt - s.startedAt, tokens: s.tokens, err: s.err,
+          })
+        } else if (st === 'active' && now - s.startedAt < STALE_STEP_MS) {
+          cards.push({
+            id: s.id, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: s.target || s.name,
+            think: s.think, startedAt: s.startedAt, tokens: s.tokens,
+          })
+        }
+      }
+
+      // Composing: the pane is streaming output but has no tool call in flight —
+      // i.e. Claude is writing its next message. Real, and it is the THINKING column.
+      const inFlight = t.steps.some((s) => !s.endedAt && !s.spawns)
+      if (st === 'active' && !inFlight) {
+        cards.push({
+          id: `p${p.id}-think`, paneId: p.id, col: 'think', kind: 'think', tag: 'thinking',
+          task: title, think: t.lastThinking?.slice(0, 150), startedAt: t.lastRecordAt || now,
+        })
+      }
+      if (st === 'waiting') {
+        cards.push({
+          id: `p${p.id}-blocked`, paneId: p.id, col: 'blocked', kind: 'step', tag: 'prompt',
+          task: title, ask: t.lastAssistantText?.slice(0, 110) || 'waiting for your input',
+        })
+      }
 
       // ---- feed from real state transitions ----
       const prevSt = this.prevState.get(p.id)
@@ -184,7 +217,9 @@ export class OpsService {
           // The turn ended: Claude either parked at its prompt ('ready') or the
           // process exited ('idle'). Either way the work card is finished.
           this.pushFeed(p.id, `<b>${p.folder}</b> completed <b class="done">${title}</b>`, (file ? `edit ${file} · ` : '') + (st === 'ready' ? 'awaiting your instruction' : 'session ended'))
-          this.done.push({ card: { id: `p${p.id}-done${now}`, paneId: p.id, col: 'done', tag, task: title, when: 'just now', file }, at: now })
+          // The finished turn itself earns a card in RETURNED — the one card on
+          // the board that summarises a whole turn rather than a single step.
+          this.done.push({ card: { id: `p${p.id}-turn${now}`, paneId: p.id, col: 'return', kind: 'step', tag: 'turn', task: title, when: 'just now' }, at: now })
         }
       }
       this.prevState.set(p.id, st)
@@ -204,14 +239,7 @@ export class OpsService {
     }
   }
 
-  private elapsed(paneId: number, st: AgentState): number {
-    if (st !== 'active') { this.taskStart.delete(paneId); return 0 }
-    const s = this.taskStart.get(paneId) ?? Date.now()
-    if (!this.taskStart.has(paneId)) this.taskStart.set(paneId, s)
-    return Date.now() - s
-  }
-  private tokEst(_paneId: number, ctxPct: number): number {
-    // rough k-tokens indicator from context fill (real signal), for display only
-    return Math.max(0.5, Math.round(ctxPct * 2) / 10)
-  }
 }
+// Gone with the step rewrite: elapsed() timed a whole turn (steps carry their own
+// real start/end), and tokEst() reported contextPct × 0.2 as "tokens" — a number
+// that was never a token count. Cards now show the message's real output_tokens.

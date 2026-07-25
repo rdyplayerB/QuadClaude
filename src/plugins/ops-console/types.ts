@@ -7,7 +7,12 @@
 // 'active' = generating · 'ready' = Claude up, turn over, awaiting instruction
 // 'waiting' = blocked on a prompt · 'idle' = no agent in the pane
 export type AgentState = 'active' | 'waiting' | 'ready' | 'idle'
-export type CardColumn = 'queued' | 'work' | 'need' | 'done'
+// A card is one STEP, and every column change is a record in the transcript:
+//   think   — the agent is composing (output streaming, no assistant record yet)
+//   act     — a tool_use was issued
+//   return  — its tool_result landed (paired by tool_use id)
+//   blocked — the pane is sitting on a permission / decision prompt
+export type CardColumn = 'think' | 'act' | 'return' | 'blocked'
 
 export interface OpsAgent {
   paneId: number
@@ -22,23 +27,33 @@ export interface OpsAgent {
   ahead?: number
   ctxPct: number       // 0 = unknown
   tps: number          // live output rate, tokens/sec (0 when not active)
+  subagents?: OpsSubagent[] // forks this agent has running, shown nested in the rail
 }
 
 export interface OpsCard {
-  id: string
+  id: string           // tool_use id for steps — stable, so the renderer FLIPs real moves
   paneId: number
   col: CardColumn
-  tag: string
-  task: string
-  file?: string
-  add?: number
-  del?: number
-  tokens?: number      // k-tokens for this task
-  elapsedMs?: number   // for working cards (renderer ticks it locally)
-  word?: string        // whimsy progress word
-  action?: string      // newest real tool call, e.g. "Bash(npm test)" — changes every few seconds
-  ask?: string         // question text (needs-input)
-  when?: string        // done label (e.g. "just now")
+  tag: string          // tool name ("Bash", "Edit") or "thinking" / "subagent"
+  task: string         // the target: command, file, query, description
+  kind?: 'step' | 'think' | 'subagent'
+  sub?: string         // subagent name — set means this card is NOT the main agent
+  think?: string       // real reasoning snippet from the same assistant message
+  startedAt?: number   // epoch ms; the renderer ticks the live duration off this
+  durMs?: number       // real tool_use → tool_result elapsed, once returned
+  tokens?: number      // REAL output_tokens of the message that issued this step
+  err?: boolean        // tool_result came back is_error
+  ask?: string         // prompt text while blocked
+  when?: string        // retirement label
+}
+
+// A forked/backgrounded subagent, from the parent's Agent tool_use record.
+export interface OpsSubagent {
+  id: string
+  name: string         // e.g. "tooling-landscape-research"
+  desc: string         // the description passed at spawn
+  spawnedAt: number
+  done: boolean
 }
 
 export interface OpsFeedItem {

@@ -16,13 +16,19 @@ import { VerifyTransition, VerifyMove, VerifyOverlay } from '../types'
 
 const TRACE_PATH = path.join(os.homedir(), '.quadclaude', 'ops-verify.jsonl')
 const MATCH_TIMEOUT_MS = 4000 // a transition unmatched this long = missed
-const stateToCol = (s: string): string =>
-  s === 'claude-active' ? 'work' : s === 'claude-waiting' ? 'need' : 'done'
-// NOTE: this mirrors the service's state→column mapping, so a clean run proves
-// the board tracks the state machine — not that the state machine is right.
-// 'claude-idle' and 'shell' both land in 'done': the turn is over either way.
+// Now that cards are STEPS, a pane state change no longer implies one exact
+// column — going active can surface either a composing card or an in-flight
+// tool call, depending on which the transcript reveals first. So ground truth
+// is a SET of acceptable columns; anything outside it is a real mismatch.
+//
+// This also bounds what verification can claim: it checks that pane-state edges
+// reach the board, not that every individual step lands correctly. Step-level
+// accuracy would need the transcript itself as ground truth.
+const stateToCols = (s: string): string[] =>
+  s === 'claude-active' ? ['think', 'act'] : s === 'claude-waiting' ? ['blocked'] : ['return']
+const sameCols = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x) => b.includes(x))
 
-interface Pending { t: VerifyTransition; tRecv: number; timer: ReturnType<typeof setTimeout>; expectFrom: string; expectTo: string }
+interface Pending { t: VerifyTransition; tRecv: number; timer: ReturnType<typeof setTimeout>; expectFrom: string[]; expectTo: string[] }
 
 export class VerificationTracker {
   private on = false
@@ -69,12 +75,12 @@ export class VerificationTracker {
   onTransition(t: VerifyTransition) {
     if (!this.on) return
     this.n++
-    const expectFrom = stateToCol(t.from)
-    const expectTo = stateToCol(t.to)
+    const expectFrom = stateToCols(t.from)
+    const expectTo = stateToCols(t.to)
     const tRecv = Date.now()
-    this.write({ type: 'transition', ts: tRecv, seq: t.seq, paneId: t.paneId, from: t.from, to: t.to, t0: t.t0, recvLagMs: tRecv - t.t0, expect: expectFrom + '→' + expectTo })
+    this.write({ type: 'transition', ts: tRecv, seq: t.seq, paneId: t.paneId, from: t.from, to: t.to, t0: t.t0, recvLagMs: tRecv - t.t0, expect: expectFrom.join('|') + '→' + expectTo.join('|') })
     // shell→shell etc. produce no column move; don't wait on those
-    if (expectFrom === expectTo) return
+    if (sameCols(expectFrom, expectTo)) return
     const timer = setTimeout(() => this.onTimeout(t.seq), MATCH_TIMEOUT_MS)
     this.pending.push({ t, tRecv, timer, expectFrom, expectTo })
     this.pushOverlay()
@@ -96,7 +102,7 @@ export class VerificationTracker {
     clearTimeout(p.timer)
     this.pending.splice(i, 1)
     const latency = m.tRender - p.t.t0
-    const colOk = m.toCol === p.expectTo
+    const colOk = p.expectTo.includes(m.toCol)
     if (colOk) {
       this.represented++
       this.lat.push(latency)
@@ -107,8 +113,8 @@ export class VerificationTracker {
       this.log.info(`pane ${m.paneId} ${p.t.from}→${p.t.to} represented in ${latency}ms (build ${buildLag}ms + render ${renderLag}ms)`)
     } else {
       this.mismatch++
-      this.write({ type: 'mismatch', ts: m.tRender, seq: p.t.seq, paneId: m.paneId, expected: p.expectTo, got: m.toCol, latencyMs: latency })
-      this.log.warn(`pane ${m.paneId} MISMATCH — expected column ${p.expectTo}, viz showed ${m.toCol}`)
+      this.write({ type: 'mismatch', ts: m.tRender, seq: p.t.seq, paneId: m.paneId, expected: p.expectTo.join('|'), got: m.toCol, latencyMs: latency })
+      this.log.warn(`pane ${m.paneId} MISMATCH — expected column ${p.expectTo.join('|')}, viz showed ${m.toCol}`)
     }
     this.pushOverlay()
   }
@@ -119,7 +125,7 @@ export class VerificationTracker {
     const p = this.pending[i]
     this.pending.splice(i, 1)
     this.missed++
-    this.write({ type: 'missed', ts: Date.now(), seq: p.t.seq, paneId: p.t.paneId, from: p.t.from, to: p.t.to, expect: p.expectFrom + '→' + p.expectTo, waitedMs: MATCH_TIMEOUT_MS })
+    this.write({ type: 'missed', ts: Date.now(), seq: p.t.seq, paneId: p.t.paneId, from: p.t.from, to: p.t.to, expect: p.expectFrom.join('|') + '→' + p.expectTo.join('|'), waitedMs: MATCH_TIMEOUT_MS })
     this.log.warn(`pane ${p.t.paneId} ${p.t.from}→${p.t.to} MISSED — no viz move within ${MATCH_TIMEOUT_MS}ms (aliased or dropped)`)
     this.pushOverlay()
   }

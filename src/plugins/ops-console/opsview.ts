@@ -85,6 +85,20 @@ const CSS = `
 .meter.flat i{background:var(--faint)}
 .r-meterlab{display:flex;justify-content:space-between;font-size:var(--fs-meta);color:var(--faint);margin-top:3px}
 .r-meterlab b{color:var(--fg3)}
+/* Forks nest under the agent that spawned them, and are never stylable as a
+   main agent: dimmer, indented, and carrying an explicit SUB tag. */
+.subs{margin-top:6px}
+.subrow{display:flex;align-items:center;gap:6px;padding:3px 0 3px 10px;border-left:1px solid var(--line);margin-left:3px;font-size:var(--fs-meta);color:var(--fg3)}
+.subrow .subglyph{color:var(--g-cyan)}
+.subrow.done{opacity:.55} .subrow.done .subglyph{color:var(--g-green)}
+.subrow .subname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subrow .subtag{margin-left:auto;font-size:9px;letter-spacing:.08em;color:var(--faint);border:1px solid var(--line);border-radius:1px;padding:0 3px}
+/* Reasoning text pulled straight from the transcript's thinking blocks. */
+.thinkline{color:var(--fg3);font-style:italic;line-height:1.45;margin-bottom:4px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.doneline.err{color:var(--red)}
+.card.sub{border-left:2px solid var(--g-cyan)}
+.card.failed{border-color:rgba(248,113,113,.45)}
 .board{flex:1 1 auto;min-height:0;display:flex;gap:8px;padding:10px;overflow:auto;position:relative}
 .col{flex:1;min-width:176px;display:flex;flex-direction:column;gap:7px}
 .colhead{display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft)}
@@ -198,7 +212,7 @@ export function createOpsView(root, handlers) {
   const qa = (sel) => root.querySelectorAll(sel)
 
   const PANE_COLORS = ["#22d3ee","#4ade80","#fbbf24","#a78bfa","#f472b6","#fb923c","#38bdf8","#34d399","#f59e0b","#c084fc","#fb7185","#2dd4bf"]
-  const COLS = [{k:"queued",name:"queued",c:"var(--fg3)"},{k:"work",name:"working",c:"var(--teal)"},{k:"need",name:"needs input",c:"var(--amber)"},{k:"done",name:"done",c:"var(--green)"}]
+  const COLS = [{k:"think",name:"thinking",c:"var(--fg3)"},{k:"act",name:"acting",c:"var(--teal)"},{k:"return",name:"returned",c:"var(--green)"},{k:"blocked",name:"blocked",c:"var(--amber)"}]
   const ac = (pos) => PANE_COLORS[((pos%12)+12)%12]
   const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
   const initial = (n) => (n||"?").slice(0,1).toUpperCase()
@@ -227,7 +241,7 @@ export function createOpsView(root, handlers) {
   function computeKpis(s){
     const active=s.agents.filter(a=>a.state==="active").length
     const need=s.agents.filter(a=>a.state==="waiting").length
-    const work=s.cards.filter(c=>c.col==="work").length
+    const work=s.cards.filter(c=>c.col==="act").length
     const withCtx=s.agents.filter(a=>a.ctxPct>0)
     const ctxAvg=withCtx.length?Math.round(withCtx.reduce((x,a)=>x+a.ctxPct,0)/withCtx.length):0
     const tpm=Math.round(s.agents.reduce((x,a)=>x+a.tps,0)*60/1000*10)/10
@@ -272,7 +286,8 @@ export function createOpsView(root, handlers) {
         row.innerHTML='<div class="r-top"><div class="av"></div><span class="r-name"></span><span class="r-state"></span></div>'+
           '<div class="r-status"><span class="gitchip"></span><span class="mdl"></span><span class="acct"></span><span class="ctx"></span></div>'+
           '<div class="meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'+
-          '<div class="r-meterlab"><b>output · tok/s</b><span class="mlab"></span></div>'
+          '<div class="r-meterlab"><b>output · tok/s</b><span class="mlab"></span></div>'+
+          '<div class="subs"></div>'
         host.appendChild(row)
       }
       row.classList.toggle("sel",selPane===a.paneId)
@@ -286,6 +301,10 @@ export function createOpsView(root, handlers) {
       ctx.style.color=a.ctxPct===0?"var(--fg3)":a.ctxPct<=50?"var(--g-cyan)":a.ctxPct<=75?"var(--g-yellow)":"var(--red)"
       const meter=row.querySelector(".meter"); meter.classList.toggle("flat",a.state!=="active"); meter.style.setProperty("--mc",col)
       row.querySelector(".mlab").textContent=a.state==="active"?Math.round(a.tps)+" tok/s":(a.state==="waiting"?"0 tok/s · waiting":(a.state==="ready"?"awaiting instruction":"idle"))
+      const subsEl=row.querySelector(".subs"); const subs=a.subagents||[]
+      subsEl.innerHTML=subs.map(function(x){
+        return '<div class="subrow'+(x.done?" done":"")+'"><span class="subglyph">'+(x.done?"●":"○")+'</span>'+
+          '<span class="subname">'+esc(x.name)+'</span><span class="subtag">SUB</span></div>' }).join("")
       agentTps[a.paneId]=a.state==="active"?a.tps:0
     })
     Array.prototype.slice.call(host.querySelectorAll(".r")).forEach(function(row){ const pid=+row.getAttribute("data-pane"); if(!seen[pid]) row.remove() })
@@ -308,15 +327,17 @@ export function createOpsView(root, handlers) {
       })
     })
   }
-  function cardSig(c){ return [c.col,c.tag,c.task,c.file,c.action,c.add,c.del,c.word,c.ask,c.when].join("|") }
+  function cardSig(c){ return [c.col,c.tag,c.task,c.kind,c.sub,c.think,c.durMs,c.tokens,c.err,c.ask,c.when].join("|") }
+  function dur(ms){ if(ms==null) return ""; const s=ms/1000; return s<1?Math.round(ms)+"ms":(s<60?(Math.round(s*10)/10)+"s":Math.floor(s/60)+"m "+Math.round(s%60)+"s") }
   function cardBody(c){
-    // The action line is the live one — it turns over with every tool call, so
-    // it leads when present and the file/diff line stands in when it isn't.
-    if(c.col==="work") return '<div class="updateline"><span class="g">●</span> '+(c.action?esc(c.action):'Update(<span class="fn">'+esc(c.file||"session")+'</span>)')+' <span class="add">+'+(c.add||0)+'</span>'+((c.del)?' <span class="del">−'+c.del+'</span>':'')+'</div>'+
-      '<div class="workline"><span class="sp">✳</span> <span class="wtxt">'+esc(c.word||"Working")+'… (<span class="wel">0s</span> · ↓<span class="wtok">'+(c.tokens||0)+'</span>k tokens)</span></div>'
-    if(c.col==="need") return '<div class="askline">'+esc(c.ask||"waiting for input")+'</div>'
-    if(c.col==="done") return '<div class="doneline">completed · '+esc(c.when||"just now")+'</div>'
-    return '<div class="cmeta">queued — starts when the pane frees up</div>'
+    // Every line here is read off the transcript — reasoning text, real tool
+    // durations, real output_tokens. Nothing on a card is synthesized.
+    const think=c.think?'<div class="thinkline">'+esc(c.think)+'</div>':""
+    if(c.col==="blocked") return '<div class="askline">'+esc(c.ask||"waiting for input")+'</div>'
+    if(c.col==="think") return think+'<div class="workline"><span class="sp">✳</span> <span class="wtxt">composing… (<span class="wel">0s</span>)</span></div>'
+    if(c.col==="act") return think+'<div class="workline"><span class="sp">✳</span> <span class="wtxt">'+(c.kind==="subagent"?"running":"in flight")+'… (<span class="wel">0s</span>'+(c.tokens?' · ↓'+c.tokens+' tok':'')+')</span></div>'
+    // returned
+    return think+'<div class="doneline'+(c.err?" err":"")+'">'+(c.err?"failed":"returned")+(c.durMs!=null?' · '+dur(c.durMs):(c.when?' · '+esc(c.when):''))+(c.tokens?' · ↓'+c.tokens+' tok':'')+'</div>'
   }
   function agentFor(pane){ return (snap&&snap.agents.find(a=>a.paneId===pane))||{pos:pane,name:"pane "+pane} }
   function applyDim(){ for(const id in cardEls){ const c=cardEls[id].el._card; cardEls[id].el.classList.toggle("dim", selPane!==null && c && c.paneId!==selPane) } }
@@ -330,7 +351,7 @@ export function createOpsView(root, handlers) {
       present[c.id]=1; const a=agentFor(c.paneId); const col=ac(a.pos)
       let rec=cardEls[c.id], el
       if(!rec){
-        el=document.createElement("div"); el.className="card"+(c.col==="need"?" wait":"")+(reduced?"":" enter"); el.setAttribute("data-id",c.id)
+        el=document.createElement("div"); el.className="card"+(c.col==="blocked"?" wait":"")+(c.kind==="subagent"?" sub":"")+(reduced?"":" enter"); el.setAttribute("data-id",c.id)
         el.innerHTML='<div class="chead"><span class="whodot"></span><span class="whoname"></span><span class="ctag"></span></div><div class="ct"></div><div class="cbody"></div>'
         cardEls[c.id]={el:el,sig:"",bodyEl:el.querySelector(".cbody")}
         colBodies[c.col].appendChild(el); rec=cardEls[c.id]
@@ -342,7 +363,7 @@ export function createOpsView(root, handlers) {
           moved.push({id:c.id,pane:c.paneId,fromCol:fromCol,toCol:c.col}); colBodies[c.col].appendChild(el)
         }
       }
-      el.classList.toggle("wait",c.col==="need")
+      el.classList.toggle("wait",c.col==="blocked"); el.classList.toggle("sub",c.kind==="subagent"); el.classList.toggle("failed",!!c.err)
       el.querySelector(".whodot").style.background=col
       const wn=el.querySelector(".whoname"); wn.style.color=col; wn.textContent=a.name
       el.querySelector(".ctag").textContent=c.tag||""
@@ -423,8 +444,8 @@ export function createOpsView(root, handlers) {
   function tickNumbers(){
     const since=snap?(Date.now()-lastSnapAt):0
     for(const id in cardEls){
-      const c=cardEls[id].el._card; if(!c||c.col!=="work") continue
-      const el=cardEls[id].el.querySelector(".wel"); if(el&&c.elapsedMs!=null){ const ms=c.elapsedMs+since; const sec=Math.floor(ms/1000); el.textContent=sec<60?sec+"s":(Math.floor(sec/60)+"m "+(sec%60)+"s") }
+      const c=cardEls[id].el._card; if(!c||(c.col!=="act"&&c.col!=="think")) continue
+      const el=cardEls[id].el.querySelector(".wel"); if(el&&c.startedAt){ const ms=Date.now()-c.startedAt; const sec=Math.floor(ms/1000); el.textContent=sec<60?sec+"s":(Math.floor(sec/60)+"m "+(sec%60)+"s") }
     }
   }
   function render(s){
