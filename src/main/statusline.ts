@@ -232,6 +232,22 @@ if [ "$show_usage" = "1" ]; then
       printf '{"fiveHourPct":%s,"weeklyPct":%s,"weeklyResetEpoch":%s,"at":%s}\n' \
         "\${utilization:-0}" "\${weekly_util:-0}" "\${weekly_reset_epoch:-0}" "$(date +%s)" \
         > "$HOME/.quadclaude/acct-usage-$QC_ACCOUNT_ID.json" 2>/dev/null
+
+      # The snapshot above is overwritten every poll, so utilization has no history
+      # and nothing can plot how a run burned through the window. Append the same
+      # reading to a sampled log: at most one row per minute, trimmed by size, so a
+      # statusline that renders on every prompt can't grow this without bound.
+      qc_hist="$HOME/.quadclaude/usage-samples.jsonl"
+      qc_now=$(date +%s)
+      qc_last=$(tail -n 1 "$qc_hist" 2>/dev/null | sed -n 's/.*"at":\\([0-9]*\\).*/\\1/p')
+      if [ -z "$qc_last" ] || [ "$((qc_now - qc_last))" -ge 60 ]; then
+        printf '{"acct":"%s","fiveHourPct":%s,"weeklyPct":%s,"weeklyResetEpoch":%s,"at":%s}\n' \
+          "$QC_ACCOUNT_ID" "\${utilization:-0}" "\${weekly_util:-0}" "\${weekly_reset_epoch:-0}" "$qc_now" \
+          >> "$qc_hist" 2>/dev/null
+        if [ "$(wc -c < "$qc_hist" 2>/dev/null || echo 0)" -gt 2000000 ]; then
+          tail -n 20000 "$qc_hist" > "$qc_hist.tmp" 2>/dev/null && mv "$qc_hist.tmp" "$qc_hist" 2>/dev/null
+        fi
+      fi
     fi
 
     if [ -n "$utilization" ] && [ "$utilization" != "ERROR" ]; then
