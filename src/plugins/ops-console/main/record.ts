@@ -110,6 +110,10 @@ export class RecordScript {
         branch: a.branch, dirty: a.dirty, ahead: 0, ctxPct: a.ctx, tps,
         tokens: tk,
         tokPerMin: state === 'active' ? 900 + Math.round(jitter * 1400) : 0,
+        // Record mode is avowedly synthetic, but the meter still has to move like
+        // the real one: bursty, not a smooth wave. Deterministic so the loop seams.
+        outSeries: Array.from({ length: 9 }, (_, i) =>
+          state === 'active' ? [40, 620, 180, 0, 460, 95, 780, 30, 340][(i + b + a.pos) % 9] : 0),
         subagents: SUBS[a.paneId] ? SUBS[a.paneId].map((x) => ({ ...x, spawnedAt: now - 167000, done: b >= 3 && b <= 5 })) : undefined,
       }
     })

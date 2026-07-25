@@ -30,6 +30,8 @@ export interface OpsAgent {
   subagents?: OpsSubagent[] // forks this agent has running, shown nested in the rail
   tokens?: TokenTotals      // exact session totals, deduped
   tokPerMin?: number        // REAL output tokens/min (not a bytes proxy)
+  outSeries?: number[]      // real output tokens per 2s bucket, newest last — the meter's actual data
+  queued?: number           // prompts stacked behind the current turn (queue-operation)
 }
 
 export interface OpsCard {

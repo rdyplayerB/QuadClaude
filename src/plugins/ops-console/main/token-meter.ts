@@ -24,12 +24,21 @@ import { TokenTotals } from '../types'
 
 const ZERO: TokenTotals = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, total: 0 }
 const RATE_WINDOW_MS = 45000 // window for the live output-tokens/min figure
+// The roster meter used to be a sine wave whose amplitude tracked PTY bytes — it
+// could never show a gap, because a wave has no zero. These fixed-width buckets
+// are the real thing: a bucket in which the agent produced nothing reports 0, so
+// the meter goes flat exactly when the agent does.
+const BUCKET_MS = 2000
+const SERIES_MAX = 9 // one per bar
 
 interface FileState {
   offset: number
   seen: Set<string>
   totals: TokenTotals
   samples: { at: number; output: number }[] // for the real rate, not a bytes proxy
+  bucketAt: number      // start of the bucket currently filling
+  bucketBase: number    // totals.output as of that bucket's start
+  series: number[]      // closed buckets, oldest first
 }
 
 export class TokenMeter {
@@ -38,11 +47,14 @@ export class TokenMeter {
   /** Exact deduped totals for one transcript, parsing only newly-appended bytes. */
   read(file: string): TokenTotals {
     let st = this.files.get(file)
-    if (!st) { st = { offset: 0, seen: new Set(), totals: { ...ZERO }, samples: [] }; this.files.set(file, st) }
+    if (!st) { st = { offset: 0, seen: new Set(), totals: { ...ZERO }, samples: [], bucketAt: 0, bucketBase: 0, series: [] }; this.files.set(file, st) }
     try {
       const stat = fs.statSync(file)
       // Truncated or replaced → the offset and id set no longer describe it.
-      if (stat.size < st.offset) { st.offset = 0; st.seen.clear(); st.totals = { ...ZERO }; st.samples = [] }
+      if (stat.size < st.offset) {
+        st.offset = 0; st.seen.clear(); st.totals = { ...ZERO }; st.samples = []
+        st.series = []; st.bucketAt = 0; st.bucketBase = 0
+      }
       if (stat.size > st.offset) {
         const len = stat.size - st.offset
         const fd = fs.openSync(file, 'r')
@@ -64,8 +76,25 @@ export class TokenMeter {
       const now = Date.now()
       st.samples.push({ at: now, output: st.totals.output })
       while (st.samples.length > 2 && now - st.samples[0].at > RATE_WINDOW_MS) st.samples.shift()
+
+      // Close every bucket the clock has passed. A `while`, not an `if`: an idle
+      // stretch must emit its real zeroes so the series stays time-aligned with
+      // the bars — otherwise a pause would silently compress into one bucket.
+      if (!st.bucketAt) { st.bucketAt = now; st.bucketBase = st.totals.output }
+      while (now - st.bucketAt >= BUCKET_MS) {
+        st.series.push(st.totals.output - st.bucketBase)
+        if (st.series.length > SERIES_MAX) st.series.shift()
+        st.bucketAt += BUCKET_MS
+        st.bucketBase = st.totals.output
+      }
     } catch { /* transcript vanished or unreadable — keep the last good totals */ }
     return { ...st.totals }
+  }
+
+  /** Real output tokens per 2s bucket, oldest first. [] if the file is unknown. */
+  series(file: string): number[] {
+    const st = this.files.get(file)
+    return st ? st.series.slice() : []
   }
 
   /** Real output tokens/min over the recent window (0 when there's no movement). */
