@@ -69,7 +69,7 @@ busy detection and terminal-buffer prompt scraping.
 stream. Instrument names found in the binary:
 
 ```
-claude_code.cost.usage              ← actual dollars
+claude_code.cost.usage              ← imputed list-price, NOT billed spend (§2.1)
 claude_code.token.usage
 claude_code.lines_of_code.count     ← lines added / removed
 claude_code.commit.count
