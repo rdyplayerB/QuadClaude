@@ -9,7 +9,8 @@
 
 import { PluginContext, WorkspaceSnapshot } from '../../../shared/plugins'
 import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, OpsSubagent, AgentState } from '../types'
-import { readTranscript, TranscriptInfo } from './transcript-tailer'
+import { readTranscript, newestTranscript, TranscriptInfo } from './transcript-tailer'
+import { TokenMeter } from './token-meter'
 
 const RETURN_TTL = 20000     // how long a finished step stays on the board
 const SUB_DONE_TTL = 60000   // a finished subagent lingers longer — rarer, bigger news
@@ -36,6 +37,7 @@ export class OpsService {
   // and one big Write can push a spawn out of it while the fork is still
   // running — so once seen, a subagent is remembered here until it reports back.
   private subsByPane = new Map<number, Map<string, OpsSubagent>>()
+  private tokenMeter = new TokenMeter()
   private transcriptCache = new Map<string, { info: TranscriptInfo; at: number }>()
   private ctxCache = new Map<number, { v: { contextPct: number; model: string } | null; at: number }>()
   private disposed = false
@@ -141,9 +143,16 @@ export class OpsService {
       const c = await this.ctxFor(p.id) // cached ~5s (getContextUsage spawns pgrep)
       if (c) { ctxPct = Math.round(c.contextPct); if (c.model) model = c.model }
 
+      // Exact, deduped session tokens — and a REAL output rate to go with them.
+      // `tps` stays a terminal-throughput figure (bytes/4) and only drives the
+      // sparkline's smoothness; it is never shown as a token count.
+      const tfile = newestTranscript(p.cwd)
+      const tokens = tfile ? this.tokenMeter.read(tfile) : undefined
+      const tokPerMin = tfile ? this.tokenMeter.rate(tfile) : 0
+
       agents.push({
         paneId: p.id, pos: p.pos, name: p.folder, proj: p.proj, state: st,
-        model, account: p.account, branch, dirty, ahead, ctxPct, tps,
+        model, account: p.account, branch, dirty, ahead, ctxPct, tps, tokens, tokPerMin,
       })
 
       // ---- cards from transcript + state ----

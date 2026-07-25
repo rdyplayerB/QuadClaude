@@ -103,9 +103,13 @@ export class RecordScript {
       else if (mine.some((c) => c.col === 'act' || c.col === 'think')) state = 'active'
       else if (mine.length) state = 'ready'
       const tps = state === 'active' ? 45 + Math.round(jitter * 95) : 0
+      const tk = { input: 300 + a.pos * 40, output: 42000 + a.pos * 9000 + b * 800, cacheCreate: 120000, cacheRead: 3100000 + a.pos * 220000, total: 0 }
+      tk.total = tk.input + tk.output + tk.cacheCreate + tk.cacheRead
       return {
         paneId: a.paneId, pos: a.pos, name: a.name, proj: a.proj, state, model: a.model, account: a.account,
         branch: a.branch, dirty: a.dirty, ahead: 0, ctxPct: a.ctx, tps,
+        tokens: tk,
+        tokPerMin: state === 'active' ? 900 + Math.round(jitter * 1400) : 0,
         subagents: SUBS[a.paneId] ? SUBS[a.paneId].map((x) => ({ ...x, spawnedAt: now - 167000, done: b >= 3 && b <= 5 })) : undefined,
       }
     })

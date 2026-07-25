@@ -72,7 +72,7 @@ function slugForCwd(cwd: string): string {
   return cwd.replace(/\//g, '-')
 }
 
-function newestTranscript(cwd: string): string | null {
+export function newestTranscript(cwd: string): string | null {
   try {
     const dir = path.join(PROJECTS_DIR, slugForCwd(cwd))
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'))

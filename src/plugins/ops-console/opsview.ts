@@ -214,6 +214,8 @@ export function createOpsView(root, handlers) {
   const PANE_COLORS = ["#22d3ee","#4ade80","#fbbf24","#a78bfa","#f472b6","#fb923c","#38bdf8","#34d399","#f59e0b","#c084fc","#fb7185","#2dd4bf"]
   const COLS = [{k:"think",name:"thinking",c:"var(--fg3)"},{k:"act",name:"acting",c:"var(--teal)"},{k:"return",name:"returned",c:"var(--green)"},{k:"blocked",name:"blocked",c:"var(--amber)"}]
   const ac = (pos) => PANE_COLORS[((pos%12)+12)%12]
+  // 1234 -> "1.2k", 1234567 -> "1.2M"
+  const fmtTok = (n) => { n=+n||0; return n>=1e6?(Math.round(n/1e5)/10)+"M":(n>=1000?(Math.round(n/100)/10)+"k":String(n)) }
   const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
   const initial = (n) => (n||"?").slice(0,1).toUpperCase()
 
@@ -244,13 +246,16 @@ export function createOpsView(root, handlers) {
     const work=s.cards.filter(c=>c.col==="act").length
     const withCtx=s.agents.filter(a=>a.ctxPct>0)
     const ctxAvg=withCtx.length?Math.round(withCtx.reduce((x,a)=>x+a.ctxPct,0)/withCtx.length):0
-    const tpm=Math.round(s.agents.reduce((x,a)=>x+a.tps,0)*60/1000*10)/10
+    // Real: summed output tokens/min from the deduped meter, and exact session
+    // totals. Previously this was PTY bytes/4 — an estimate presented as tokens.
+    const tpm=Math.round(s.agents.reduce((x,a)=>x+(a.tokPerMin||0),0)/100)/10
+    const totOut=s.agents.reduce((x,a)=>x+((a.tokens&&a.tokens.output)||0),0)
     return [
       {k:"agents active",v:active,u:"/"+s.paneCount,sub:"panes running claude"},
       {k:"tasks working",v:work,sub:"in claude-active"},
       {k:"needs input",v:need,warn:need>0,alert:need>0,sub:"in claude-waiting"},
       {k:"avg context",v:ctxAvg,u:"%",sub:"across active panes"},
-      {k:"output",v:tpm,u:"k tok/min",sub:"live across fleet"}
+      {k:"output",v:tpm,u:"k tok/min",sub:fmtTok(totOut)+" written this session"}
     ]
   }
   function renderKpis(s){
@@ -286,7 +291,7 @@ export function createOpsView(root, handlers) {
         row.innerHTML='<div class="r-top"><div class="av"></div><span class="r-name"></span><span class="r-state"></span></div>'+
           '<div class="r-status"><span class="gitchip"></span><span class="mdl"></span><span class="acct"></span><span class="ctx"></span></div>'+
           '<div class="meter"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>'+
-          '<div class="r-meterlab"><b>output · tok/s</b><span class="mlab"></span></div>'+
+          '<div class="r-meterlab"><b class="tkl"></b><span class="mlab"></span></div>'+
           '<div class="subs"></div>'
         host.appendChild(row)
       }
@@ -300,7 +305,10 @@ export function createOpsView(root, handlers) {
       const ctx=row.querySelector(".ctx"); ctx.textContent="Ctx: "+(a.ctxPct?a.ctxPct+"%":"—")
       ctx.style.color=a.ctxPct===0?"var(--fg3)":a.ctxPct<=50?"var(--g-cyan)":a.ctxPct<=75?"var(--g-yellow)":"var(--red)"
       const meter=row.querySelector(".meter"); meter.classList.toggle("flat",a.state!=="active"); meter.style.setProperty("--mc",col)
-      row.querySelector(".mlab").textContent=a.state==="active"?Math.round(a.tps)+" tok/s":(a.state==="waiting"?"0 tok/s · waiting":(a.state==="ready"?"awaiting instruction":"idle"))
+      const tpm=a.tokPerMin||0
+      row.querySelector(".mlab").textContent=a.state==="active"?(tpm?fmtTok(tpm)+" tok/min":"working"):(a.state==="waiting"?"blocked":(a.state==="ready"?"awaiting instruction":"idle"))
+      const tk=a.tokens
+      row.querySelector(".tkl").textContent=tk?("↓"+fmtTok(tk.output)+" out · "+fmtTok(tk.total)+" total"):"terminal output"
       const subsEl=row.querySelector(".subs"); const subs=a.subagents||[]
       subsEl.innerHTML=subs.map(function(x){
         return '<div class="subrow'+(x.done?" done":"")+'"><span class="subglyph">'+(x.done?"●":"○")+'</span>'+

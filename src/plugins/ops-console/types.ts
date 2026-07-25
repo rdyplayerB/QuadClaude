@@ -28,6 +28,8 @@ export interface OpsAgent {
   ctxPct: number       // 0 = unknown
   tps: number          // live output rate, tokens/sec (0 when not active)
   subagents?: OpsSubagent[] // forks this agent has running, shown nested in the rail
+  tokens?: TokenTotals      // exact session totals, deduped
+  tokPerMin?: number        // REAL output tokens/min (not a bytes proxy)
 }
 
 export interface OpsCard {
@@ -48,6 +50,17 @@ export interface OpsCard {
 }
 
 // A forked/backgrounded subagent, from the parent's Agent tool_use record.
+// Exact per-session token accounting. Deduped by message.id — the transcript
+// records one API response several times as it streams, so a naive sum runs ~2.5x
+// high. Validated against ccusage; see main/token-meter.ts.
+export interface TokenTotals {
+  input: number
+  output: number
+  cacheCreate: number
+  cacheRead: number
+  total: number
+}
+
 export interface OpsSubagent {
   id: string
   name: string         // e.g. "tooling-landscape-research"
