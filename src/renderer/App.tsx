@@ -10,7 +10,7 @@ import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
 import { useUiScale, applyUiScale, readUiScale } from './uiScale'
-import { readAppearance, applyAppearance, watchWallpaperAnchor, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
+import { readAppearance, applyAppearance, watchWallpaperAnchor, logAppearanceDiagnostics, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
@@ -82,6 +82,13 @@ function App() {
     // store starts at the fully-opaque default, and pushing that would attach a
     // glass view that startup deliberately skipped — and can never be removed.
     if (prefsLoaded) window.electronAPI?.setAppearance?.(appearance)
+    // Diagnostic for the console-vs-panes colour mismatch. Deferred a beat so
+    // the pane elements exist and the anchor variables have been written.
+    if (prefsLoaded) {
+      setTimeout(() => {
+        logAppearanceDiagnostics('main-window/pane', document.querySelector('.pane-surface .terminal-container')?.parentElement ?? null)
+      }, 1200)
+    }
   }, [groundOpacity, windowTint, windowTintColor, prefsLoaded])
 
   // Cmd +/− targets the frontmost surface. The Activity Console owns its own

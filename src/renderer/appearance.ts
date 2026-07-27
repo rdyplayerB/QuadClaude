@@ -77,6 +77,55 @@ export function applyWallpaperAnchor(root: HTMLElement): void {
 }
 
 /**
+ * Dump what a surface ACTUALLY resolved to, into the main app.log.
+ *
+ * Diagnostic for the long-running "the console is bluer than the panes" bug.
+ * Screenshot pixels said the popped console matched the screen-pinned canvas
+ * exactly while the panes did not, which means one of these surfaces isn't
+ * getting the anchor variables it should. Rather than keep inferring from
+ * screenshots, read the resolved values out of both windows and compare.
+ *
+ * `sample` is a representative painted element — a pane, or a console panel
+ * (which lives in a shadow root, so its own querySelector must find it).
+ */
+export function logAppearanceDiagnostics(surface: string, sample: Element | null): void {
+  try {
+    const root = document.documentElement
+    const rs = getComputedStyle(root)
+    const v = (n: string) => rs.getPropertyValue(n).trim() || '(unset)'
+    window.electronAPI?.logDiag?.(
+      'info',
+      'appearance',
+      `${surface}: window`,
+      `screen=${window.screen.width}x${window.screen.height} dpr=${window.devicePixelRatio} ` +
+        `pos=${window.screenX},${window.screenY} inner=${window.innerWidth}x${window.innerHeight} ` +
+        `outer=${window.outerWidth}x${window.outerHeight}`,
+    )
+    window.electronAPI?.logDiag?.(
+      'info',
+      'appearance',
+      `${surface}: vars`,
+      `tint-rgb=[${v('--window-tint-rgb')}] tint=[${v('--window-tint')}] ` +
+        `ground=[${v('--ground-opacity')}] wp-size=[${v('--wallpaper-size')}] wp-pos=[${v('--wallpaper-pos')}]`,
+    )
+    if (sample) {
+      const cs = getComputedStyle(sample)
+      window.electronAPI?.logDiag?.(
+        'info',
+        'appearance',
+        `${surface}: resolved`,
+        `bg-color=${cs.backgroundColor} size=${cs.backgroundSize} pos=${cs.backgroundPosition} ` +
+          `attach=${cs.backgroundAttachment} image=${cs.backgroundImage.slice(0, 90)}`,
+      )
+    } else {
+      window.electronAPI?.logDiag?.('warn', 'appearance', `${surface}: no sample element found`)
+    }
+  } catch (e) {
+    window.electronAPI?.logDiag?.('warn', 'appearance', `${surface}: diagnostics failed`, String(e))
+  }
+}
+
+/**
  * Keep the anchor correct as the window moves or resizes. Renderers get no
  * event when a window is dragged, so main pushes one; resize we can see
  * ourselves. Returns an unsubscribe.
