@@ -374,7 +374,13 @@ function App() {
   }, [])
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-transparent overflow-hidden relative font-mono">
+    // The window's rounded corners came from the native glass view's
+    // cornerRadius. A see-through window has no such view, so the shape has to
+    // come from the content instead — same 12px, clipped by overflow-hidden.
+    <div
+      className="h-screen w-screen flex flex-col bg-transparent overflow-hidden relative font-mono"
+      style={{ borderRadius: 12 }}
+    >
       {/* Title bar - glass effect */}
       <div className="h-9 titlebar-drag-region border-b border-white/[0.06] flex items-center justify-between px-3 glass-header chrome-legible">
         {/* Left side - after traffic lights */}

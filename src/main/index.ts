@@ -216,25 +216,46 @@ function openLogViewer() {
   logger.info('app', 'Log viewer opened')
 }
 
+// Attach the native liquid-glass material that backs the whole window. Kept
+// separate from createWindow so the transparency setting can decide whether it
+// gets attached at all.
+function attachGlassView(win: BrowserWindow) {
+  glassViewId = liquidGlass.addView(win.getNativeWindowHandle(), {
+    cornerRadius: 12,
+    tintColor: '#20000000',
+    opaque: false,
+  })
+  logger.info('window', 'Liquid glass enabled', `viewId: ${glassViewId}`)
+}
+
 // Match the native material to how clear the user wants the window.
 //
-// `regular` is a frosting material: it blurs AND brightens the desktop behind
-// it, which is why a fully-cleared CSS ground still read as an opaque white
-// sheet. `clear` is the pass-through variant, so the desktop shows for real.
-// Anything short of fully-opaque gets `clear` — the moment the user starts
-// dragging toward transparency they want to see through, not to frost.
+// There is no way to REMOVE a glass view once added, and every variant is
+// still a glass material — even `clear` blurs and brightens what is behind it,
+// which is why a "fully transparent" window read as a milky white sheet. So
+// genuine see-through means never attaching the view in the first place:
+//   - fully opaque  → attach the view (frosted `regular`, the standard look)
+//   - anything less → no view at all, just the transparent window
+// Going clear→opaque attaches live. Going opaque→clear can only soften the
+// material to `clear`, since the view cannot be detached; the window comes up
+// truly clear on next launch (attachGlassView is skipped at startup).
 function applyGlassClarity(groundOpacity: number) {
   lastGroundOpacity = groundOpacity
-  if (glassViewId == null || glassViewId < 0) return
+  const wantsGlass = groundOpacity >= 1
   try {
-    const variant = groundOpacity >= 1
+    if (wantsGlass && (glassViewId == null || glassViewId < 0)) {
+      if (mainWindow && !mainWindow.isDestroyed()) attachGlassView(mainWindow)
+      return
+    }
+    if (glassViewId == null || glassViewId < 0) return
+    const variant = wantsGlass
       ? liquidGlass.GlassMaterialVariant.regular
       : liquidGlass.GlassMaterialVariant.clear
     liquidGlass.unstable_setVariant(glassViewId, variant)
     logger.info('window', 'Glass clarity applied', `groundOpacity: ${groundOpacity}, variant: ${variant}`)
   } catch (err) {
-    // unstable_* is best-effort across macOS builds; a failure here just means
-    // the window stays frosted, never that the app breaks.
+    // Native material calls are best-effort across macOS builds; a failure here
+    // just means the window stays as it is, never that the app breaks.
     logger.info('window', 'Glass clarity not applied', err instanceof Error ? err.message : String(err))
   }
 }
@@ -327,20 +348,20 @@ function createWindow() {
     // Ensure zoom is exactly 1.0 to prevent scaling differences
     mainWindow?.webContents.setZoomFactor(1.0)
 
-    // Enable liquid glass effect (macOS Tahoe+)
+    // Enable liquid glass effect (macOS Tahoe+) — but only if the user hasn't
+    // asked for a see-through window. Read the saved setting rather than
+    // waiting for the renderer, so a clear window never flashes frosted first
+    // (and never gets a view we would then be unable to remove).
     try {
       if (mainWindow) {
         mainWindow.setWindowButtonVisibility(true)
-        glassViewId = liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
-          cornerRadius: 12,
-          tintColor: '#20000000',
-          opaque: false,
-        })
-        logger.info('window', 'Liquid glass enabled', `viewId: ${glassViewId}`)
-        // Re-apply whatever transparency the user last chose. The renderer
-        // pushes this again on mount, but doing it here too means a restart
-        // comes up already clear instead of flashing frosted first.
-        applyGlassClarity(lastGroundOpacity)
+        const savedGround = workspaceManager?.load().preferences.groundOpacity ?? 1
+        lastGroundOpacity = savedGround
+        if (savedGround >= 1) {
+          attachGlassView(mainWindow)
+        } else {
+          logger.info('window', 'Liquid glass skipped for transparency', `groundOpacity: ${savedGround}`)
+        }
       }
     } catch (err) {
       logger.info('window', 'Liquid glass not available', err instanceof Error ? err.message : String(err))
