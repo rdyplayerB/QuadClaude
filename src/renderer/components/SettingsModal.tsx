@@ -492,6 +492,28 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                     <span className="text-meta text-[--ui-text-muted] tabular-nums w-9 text-right">
                       {Math.round((preferences.windowTint ?? DEFAULT_TINT_ALPHA) * 100)}%
                     </span>
+                    {/* Getting back to the stock near-black shouldn't mean
+                        remembering a hex code. Only rendered once the tint has
+                        actually been changed, so it isn't permanent clutter. */}
+                    {((preferences.windowTintColor ?? DEFAULT_TINT_COLOR).toLowerCase() !== DEFAULT_TINT_COLOR ||
+                      (preferences.windowTint ?? DEFAULT_TINT_ALPHA) !== DEFAULT_TINT_ALPHA) && (
+                      <button
+                        onClick={() =>
+                          updatePreferences({
+                            windowTintColor: DEFAULT_TINT_COLOR,
+                            windowTint: DEFAULT_TINT_ALPHA,
+                          })
+                        }
+                        className="shrink-0 text-[--ui-text-muted] hover:text-[--ui-text-primary] transition-colors"
+                        title={`Reset to the default tint (${DEFAULT_TINT_COLOR}, ${Math.round(DEFAULT_TINT_ALPHA * 100)}%)`}
+                        aria-label="Reset window tint to default"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M2.5 8a5.5 5.5 0 1 1 1.7 3.97" />
+                          <path d="M2 4.5v3.2h3.2" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 </SettingRow>
 
