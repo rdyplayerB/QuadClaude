@@ -70,10 +70,14 @@ function App() {
   // brightens the desktop into a flat white sheet — which is exactly what a
   // "fully transparent" window used to look like. Main switches it to `clear`.
   const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
+  const prefsLoaded = useWorkspaceStore((s) => s.isInitialized)
   useEffect(() => {
     document.documentElement.style.setProperty('--ground-opacity', String(groundOpacity))
-    window.electronAPI?.setGroundOpacity?.(groundOpacity)
-  }, [groundOpacity])
+    // Wait for the saved preferences to land before telling main anything. The
+    // store starts at the fully-opaque default, and pushing that would attach a
+    // glass view that startup deliberately skipped — and can never be removed.
+    if (prefsLoaded) window.electronAPI?.setGroundOpacity?.(groundOpacity)
+  }, [groundOpacity, prefsLoaded])
 
   // Cmd +/− targets the frontmost surface. The Activity Console owns its own
   // scale (OpsOverlay), so App only needs to know whether it's showing.
