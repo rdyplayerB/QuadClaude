@@ -238,6 +238,13 @@ export interface WorkspacePreferences {
   // panes float on it. Only the ground changes — pane surfaces keep their own
   // opacity so terminal text stays readable at any setting.
   groundOpacity?: number
+  // How solid the window SURFACES are — terminal panes, Activity Console
+  // panels, in-app and popped out. One number for all of them, so nothing can
+  // drift into looking like a different app. Distinct from groundOpacity, which
+  // is the space BETWEEN windows; this is the windows themselves.
+  // Independent of the wallpaper: with one it tints the photo, without one it
+  // IS the surface colour.
+  windowTint?: number
   // Configurable agents a pane can launch. Seeded with the built-in Claude profile.
   agentProfiles?: AgentProfile[]
   // Global fallback agent when a pane has no agentId assigned yet

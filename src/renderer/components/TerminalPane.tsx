@@ -1525,7 +1525,11 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   return (
     <div
-      className={`group h-full min-h-0 flex flex-col overflow-hidden transition-all relative pane-surface ${isActive ? 'is-active' : ''} ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      className={`group h-full min-h-0 flex flex-col overflow-hidden transition-all relative pane-surface ${isActive ? 'is-active' : ''} ${getBorderClass()} ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      // The surface colour comes from the shared tint, not a fixed
+      // glass-elevated: with a wallpaper the scrim below covers this, without
+      // one this IS the pane. Either way it's the same number as the console.
+      style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
@@ -1566,7 +1570,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         {bgEnabled && (
           <div
             className="absolute inset-0 pointer-events-none z-0"
-            style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity})` }}
+            style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` }}
           />
         )}
         <div

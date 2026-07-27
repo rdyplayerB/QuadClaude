@@ -31,6 +31,10 @@ async function applyWallpaperGround() {
     // already created it with transparent:true when the ground is cleared, so
     // everything here has to stay see-through for that to mean anything.
     root.style.setProperty('--ground-opacity', String(ground))
+    // The popped window is a separate renderer with its own document, so the
+    // shared tint has to be re-published here or its panels would fall back to
+    // the default and stop matching the main window's.
+    root.style.setProperty('--window-tint', String(ws?.preferences?.windowTint ?? 0.85))
     root.style.borderRadius = '12px'
     body.style.background = ground > 0 ? `rgba(26, 26, 28, ${0.86 * ground})` : 'transparent'
 
@@ -47,9 +51,7 @@ async function applyWallpaperGround() {
       host.style.setProperty('--ops-wallpaper', url ? `url(${url})` : 'none')
       host.style.setProperty(
         '--ops-tint',
-        wallpaperOn
-          ? `rgba(30, 30, 30, ${bg!.opacity ?? 0.85})`
-          : `rgba(40, 40, 42, ${0.72 * Math.max(0.75, ground)})`,
+        wallpaperOn ? `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` : 'transparent',
       )
     }
   } catch { /* no wallpaper — the flat ground is a fine fallback */ }

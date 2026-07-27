@@ -103,11 +103,9 @@ export function OpsOverlay() {
     ? (background.image!.startsWith('/') ? `file://${background.image}` : background.image!)
     : null
 
-  // The console is a full-window surface, so it was the one place transparency
-  // stopped dead: a flat #0e1013 (or a full-bleed wallpaper) behind glass
-  // panels. Follow the same slider as everything else, with the same floor the
-  // modals use — its panels are dense and stop being readable below it.
-  const clarity = Math.max(0.75, groundOpacity)
+  // No local clarity floor any more: the panels' own solidity is the shared
+  // Window tint, and the ground behind them follows the transparency slider
+  // exactly like the terminal grid's does. Two controls, no third opinion.
 
   return (
     // Starts BELOW the app's own title bar (h-9 = 36px) instead of covering the
@@ -145,9 +143,12 @@ export function OpsOverlay() {
         style={{
           zoom: scale,
           ['--ops-wallpaper' as string]: img ? `url(${img})` : 'none',
+          // Same tint the panes use — one value, one appearance. When there is
+          // no wallpaper the panel's own background colour already carries it,
+          // so this layer contributes nothing rather than double-tinting.
           ['--ops-tint' as string]: wallpaperOn
-            ? `rgba(var(--terminal-bg-rgb), ${background.opacity})`
-            : `rgba(40, 40, 42, ${0.72 * clarity})`,
+            ? `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))`
+            : 'transparent',
         }}
       />
     </div>

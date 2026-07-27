@@ -70,7 +70,15 @@ function App() {
   // brightens the desktop into a flat white sheet — which is exactly what a
   // "fully transparent" window used to look like. Main switches it to `clear`.
   const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
+  // Window tint: how solid the surfaces themselves are. Published as a variable
+  // on the root so every surface reads the SAME number — panes, the Activity
+  // Console's panels (custom properties inherit past its shadow boundary), and
+  // anything added later. That is what keeps them from drifting apart.
+  const windowTint = useWorkspaceStore((s) => s.preferences.windowTint ?? 0.85)
   const prefsLoaded = useWorkspaceStore((s) => s.isInitialized)
+  useEffect(() => {
+    document.documentElement.style.setProperty('--window-tint', String(windowTint))
+  }, [windowTint])
   useEffect(() => {
     document.documentElement.style.setProperty('--ground-opacity', String(groundOpacity))
     // Wait for the saved preferences to land before telling main anything. The

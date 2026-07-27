@@ -164,6 +164,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     // 1 = the standard glass ground. Lower it (Settings → Background) to let
     // the desktop through the gaps between panes.
     groundOpacity: 1,
+    // Matches the wallpaper scrim the panes have always used, so existing
+    // workspaces look identical until the user moves the slider.
+    windowTint: 0.85,
   },
   isInitialized: false,
 

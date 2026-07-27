@@ -457,6 +457,32 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                   </div>
                 </SettingRow>
 
+                {/* Sits with Window transparency, not inside the wallpaper
+                    block: it applies whether or not a wallpaper is on. The two
+                    are a pair — transparency is the space BETWEEN windows, tint
+                    is the windows themselves. */}
+                <SettingRow
+                  title="Window tint"
+                  caption="How solid every window surface is — terminal panes and the Activity Console, in-app and popped out"
+                >
+                  <div className="flex items-center gap-2.5 w-56">
+                    <span className="text-meta text-[--ui-text-muted]">clear</span>
+                    <input
+                      type="range"
+                      min={0.2}
+                      max={1}
+                      step={0.05}
+                      value={preferences.windowTint ?? 0.85}
+                      onChange={(e) => updatePreferences({ windowTint: Number(e.target.value) })}
+                      className="flex-1 accent-[--accent]"
+                      aria-label="Window tint"
+                    />
+                    <span className="text-meta text-[--ui-text-muted] tabular-nums w-9 text-right">
+                      {Math.round((preferences.windowTint ?? 0.85) * 100)}%
+                    </span>
+                  </div>
+                </SettingRow>
+
                 <SettingRow title="Show background" caption="Wallpaper behind every pane">
                   <Toggle
                     on={background.enabled}
@@ -574,24 +600,10 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <span className="text-body text-[--ui-text-primary]" id="bg-opacity-label">Opacity</span>
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.02"
-                          value={background.opacity}
-                          onChange={(e) => updateBackground({ opacity: parseFloat(e.target.value) })}
-                          className="w-40 accent-[--accent]"
-                          aria-labelledby="bg-opacity-label"
-                        />
-                        <span className="text-body text-[--ui-text-muted] w-10 text-right">
-                          {Math.round(background.opacity * 100)}%
-                        </span>
-                      </div>
-                    </div>
+                    {/* The wallpaper-only "Opacity" slider lived here. It was the
+                        same idea as Window tint but applied to one surface, which
+                        is exactly how the console drifted to a different colour
+                        from the panes. One control above now drives both. */}
                   </>
                 )}
               </div>
