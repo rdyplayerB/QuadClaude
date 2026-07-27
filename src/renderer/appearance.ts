@@ -25,7 +25,13 @@ export interface Appearance {
 }
 
 export const DEFAULT_TINT_COLOR = '#1e1e1e'
-export const DEFAULT_TINT_ALPHA = 0.85
+// 0.95, not 0.85. At 85% the wallpaper contributed 15% of every pixel, and
+// since each window sits over a different part of the screen-pinned canvas,
+// that 15% was the entire reason the Activity Console read bluer than the
+// terminal panes — measured, not guessed: every surface matched
+// `0.15*wallpaper + 0.85*tint` to within a few units. At 95% the photo is a
+// faint texture and every surface reads as the tint colour, wherever it sits.
+export const DEFAULT_TINT_ALPHA = 0.95
 
 // "#1e1e1e" | "#1ee" → "30, 30, 30". Falls back to the neutral default rather
 // than throwing: a malformed value in saved preferences should look wrong, not
@@ -88,7 +94,10 @@ export function applyWallpaperAnchor(root: HTMLElement): void {
  * `sample` is a representative painted element — a pane, or a console panel
  * (which lives in a shadow root, so its own querySelector must find it).
  */
+const loggedSurfaces = new Set<string>()
 export function logAppearanceDiagnostics(surface: string, sample: Element | null): void {
+  if (loggedSurfaces.has(surface)) return
+  loggedSurfaces.add(surface)
   try {
     const root = document.documentElement
     const rs = getComputedStyle(root)
