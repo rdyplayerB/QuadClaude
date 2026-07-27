@@ -55,6 +55,17 @@ export interface OpsCard {
   err?: boolean        // tool_result came back is_error
   ask?: string         // prompt text while blocked
   when?: string        // retirement label
+  // LANDED only. The lane shows the RESULT, so `task` carries Claude's own
+  // closing sentence — not the prompt, which every other lane was already
+  // repeating. `re` ties that result back to the ask in one dim line, and
+  // `stat` is the measured shape of the turn (duration, diff).
+  re?: string          // the ask this outcome answers (short)
+  stat?: string        // real per-turn measurements, e.g. "4m 31s · +48/−12"
+  // A parent's forks, GROUPED onto one card. Eight running subagents used to
+  // mean eight full-size cards, and ACTING became a wall of near-identical
+  // boxes. One card per parent keeps the tie to the agent that spawned them
+  // while still naming what each fork is working on, in one row each.
+  forks?: OpsFork[]
   spent?: boolean      // the real work ended, but the card is still serving its
                        // minimum visible dwell — marked, never hidden
 }
@@ -69,6 +80,14 @@ export interface TokenTotals {
   cacheCreate: number
   cacheRead: number
   total: number
+}
+
+// One row inside a grouped fork card.
+export interface OpsFork {
+  id: string
+  label: string        // the description passed at spawn — what it is working on
+  startedAt: number
+  done: boolean
 }
 
 export interface OpsSubagent {
