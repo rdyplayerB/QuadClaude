@@ -368,6 +368,17 @@ function createWindow() {
     }
   })
 
+  // A dragged window fires no event in its renderer, but the screen-pinned
+  // wallpaper anchor depends on where the window IS — so push a nudge and let
+  // the renderer re-read its own position.
+  const pushGeometry = () => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.WINDOW_GEOMETRY_CHANGED)
+    }
+  }
+  mainWindow.on('move', pushGeometry)
+  mainWindow.on('resize', pushGeometry)
+
   // Block browser-like refresh shortcuts to prevent losing terminal state
   mainWindow.webContents.on('before-input-event', (event, input) => {
     // Block Cmd+R, Ctrl+R, F5, Cmd+Shift+R, Ctrl+Shift+R

@@ -55,3 +55,39 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
   root.style.setProperty('--window-tint-rgb', a.tintRgb)
   root.style.setProperty('--window-tint', String(a.tintAlpha))
 }
+
+// Anchor the wallpaper to the SCREEN rather than to each viewport.
+//
+// `background-size: cover` scales the image to fit whatever box it is painted
+// in, so a pane, the console's zoomed Shadow-DOM host, and the popped-out
+// window each got a DIFFERENT scale and a different crop of the same photo —
+// which is why the console read blue (it landed on the sky) and brighter than
+// the panes (sky is brighter than the wall) even at an identical tint.
+//
+// Sizing the image to the screen and offsetting it by the window's position on
+// that screen makes every surface a window onto one canvas pinned to the
+// desktop. Overlapping regions are then pixel-identical, across windows.
+export function applyWallpaperAnchor(root: HTMLElement): void {
+  const { width, height } = window.screen
+  // screenY is the window frame's top; the viewport starts below any native
+  // chrome, and a fixed background is positioned from the viewport's origin.
+  const chrome = Math.max(0, window.outerHeight - window.innerHeight)
+  root.style.setProperty('--wallpaper-size', `${width}px ${height}px`)
+  root.style.setProperty('--wallpaper-pos', `${-window.screenX}px ${-(window.screenY + chrome)}px`)
+}
+
+/**
+ * Keep the anchor correct as the window moves or resizes. Renderers get no
+ * event when a window is dragged, so main pushes one; resize we can see
+ * ourselves. Returns an unsubscribe.
+ */
+export function watchWallpaperAnchor(root: HTMLElement): () => void {
+  const update = () => applyWallpaperAnchor(root)
+  update()
+  window.addEventListener('resize', update)
+  const stopMoved = window.electronAPI?.onWindowGeometryChanged?.(update)
+  return () => {
+    window.removeEventListener('resize', update)
+    stopMoved?.()
+  }
+}

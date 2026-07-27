@@ -117,6 +117,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // rebroadcasts to other windows so the popped-out console follows live.
   setAppearance: (appearance: { groundOpacity: number; tintRgb: string; tintAlpha: number }) =>
     ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_APPEARANCE, appearance) as Promise<void>,
+  onWindowGeometryChanged: (cb: () => void) => {
+    const h = () => cb()
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_GEOMETRY_CHANGED, h)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_GEOMETRY_CHANGED, h)
+  },
   onAppearanceChanged: (cb: (a: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => void) => {
     const h = (_e: unknown, a: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => cb(a)
     ipcRenderer.on(IPC_CHANNELS.WINDOW_APPEARANCE_CHANGED, h)

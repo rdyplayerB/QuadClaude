@@ -10,7 +10,7 @@ import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
 import { useUiScale, applyUiScale, readUiScale } from './uiScale'
-import { readAppearance, applyAppearance, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
+import { readAppearance, applyAppearance, watchWallpaperAnchor, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
@@ -64,12 +64,6 @@ function App() {
   // Mounting the hook applies any persisted scale on load.
   useUiScale()
 
-  // Ground transparency, in two halves that have to move together:
-  //   1. the CSS ground behind the panes (`.glass` in index.css), and
-  //   2. the NATIVE liquid-glass material behind the entire window.
-  // Clearing only (1) exposes (2), whose default `regular` material frosts and
-  // brightens the desktop into a flat white sheet — which is exactly what a
-  // "fully transparent" window used to look like. Main switches it to `clear`.
   // Appearance is defined in exactly one place (renderer/appearance.ts) and
   // published to the document root, where every surface — panes, the Activity
   // Console's Shadow DOM, and the popped-out console's separate document —
@@ -79,6 +73,8 @@ function App() {
   const windowTint = useWorkspaceStore((s) => s.preferences.windowTint ?? DEFAULT_TINT_ALPHA)
   const windowTintColor = useWorkspaceStore((s) => s.preferences.windowTintColor ?? DEFAULT_TINT_COLOR)
   const prefsLoaded = useWorkspaceStore((s) => s.isInitialized)
+  // Keep the wallpaper pinned to the screen as this window moves.
+  useEffect(() => watchWallpaperAnchor(document.documentElement), [])
   useEffect(() => {
     const appearance = readAppearance({ groundOpacity, windowTint, windowTintColor })
     applyAppearance(document.documentElement, appearance)

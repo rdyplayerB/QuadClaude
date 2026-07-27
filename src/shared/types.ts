@@ -384,6 +384,9 @@ export const IPC_CHANNELS = {
   // main → every OTHER window: keep separate renderers (the popped-out console)
   // in step live, instead of only reading appearance when they were created.
   WINDOW_APPEARANCE_CHANGED: 'window:appearance-changed',
+  // main → a window: it moved or resized, so re-anchor the screen-pinned
+  // wallpaper. Renderers get no event for a window being dragged.
+  WINDOW_GEOMETRY_CHANGED: 'window:geometry-changed',
 
   // Usage tracking
   USAGE_UPDATE: 'usage:update',
