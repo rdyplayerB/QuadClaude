@@ -113,6 +113,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) =>
     ipcRenderer.send(IPC_CHANNELS.APP_LOG, level, category, message, details),
 
+  // Window transparency: tell main how clear the ground is so it can switch the
+  // native glass material between frosted and pass-through. CSS alone can't —
+  // that material sits behind the whole web layer.
+  setGroundOpacity: (groundOpacity: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_GROUND_OPACITY, groundOpacity) as Promise<void>,
+
   // Model router (run any model as the real Claude Code TUI)
   routerStatus: () =>
     ipcRenderer.invoke(IPC_CHANNELS.ROUTER_STATUS) as Promise<RouterStatus>,
@@ -151,10 +157,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   clipboardWriteText: (text: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLIPBOARD_WRITE_TEXT, text) as Promise<boolean>,
 
-  // Per-pane Claude accounts (token is write-only from the renderer; never returned)
+  // Per-pane Claude accounts (metadata only — profiles hold their own logins; no secrets pass here)
   claudeAccountsList: () =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST) as Promise<ClaudeAccount[]>,
-  claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) =>
+  claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string }) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, input) as Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>,
   claudeAccountsDelete: (id: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_DELETE, id) as Promise<ClaudeAccount[]>,

@@ -337,6 +337,13 @@ export const IPC_CHANNELS = {
   APP_OPEN_IN_EDITOR: 'app:open-in-editor',
   // Diagnostics — renderer writes a structured entry into the main app.log
   APP_LOG: 'app:log',
+  // Window transparency — the CSS ground is only half the picture. A native
+  // liquid-glass view backs the whole window, and its default `regular`
+  // material frosts and BRIGHTENS whatever is behind it, so clearing the CSS
+  // ground alone just exposes a white sheet. The renderer sends the ground
+  // opacity here so main can switch that material to `clear` and let the
+  // desktop actually read through.
+  WINDOW_SET_GROUND_OPACITY: 'window:set-ground-opacity',
 
   // Usage tracking
   USAGE_UPDATE: 'usage:update',

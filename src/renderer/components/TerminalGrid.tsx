@@ -13,9 +13,11 @@ import {
 } from '../layouts'
 import { MAX_PANES, FOCUS_SMALL_RATIO_DEFAULT, DUO_RATIO_DEFAULT } from '../../shared/types'
 
-// Matches the grid container's `p-2` (8px) padding — the content box the
-// columns actually lay out in is inset by this on each side.
-const GRID_PAD = 8
+// Matches the grid container's `p-4` (16px) padding — the content box the
+// columns actually lay out in is inset by this on each side. Kept generous on
+// purpose: the ground shows through here, so the gutter IS the floating
+// effect. At 8px a cleared ground was a hairline nobody could see.
+const GRID_PAD = 16
 
 export const TerminalGrid = memo(function TerminalGrid() {
   const layout = useWorkspaceStore((s) => s.layout)
@@ -162,7 +164,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
   const tilesVisible = isPipLayout && pipVisible && !pipCollapsed
 
   return (
-    <div ref={containerRef} style={gridStyle} className="p-2 gap-2 glass">
+    <div ref={containerRef} style={gridStyle} className="p-4 gap-4 glass">
       {paneIds.map((id, index) => {
         const tile = pipGeometry && index >= vc ? pipGeometry.tiles[index - vc] : null
         return (

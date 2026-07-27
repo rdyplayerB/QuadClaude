@@ -42,6 +42,7 @@ declare global {
       openExternal: (url: string) => Promise<boolean>
       openInEditor: (paneId: number, filePath: string) => Promise<boolean>
       logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) => void
+      setGroundOpacity: (groundOpacity: number) => Promise<void>
       routerStatus: () => Promise<RouterStatus>
       routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
       routerDeleteProvider: (name: string) => Promise<void>
@@ -61,7 +62,7 @@ declare global {
       delegationExport: (save: boolean) => Promise<{ text: string; path: string | null; canceled: boolean }>
       clipboardWriteText: (text: string) => Promise<boolean>
       claudeAccountsList: () => Promise<ClaudeAccount[]>
-      claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string; token?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
+      claudeAccountsSave: (input: { id?: string; label: string; email?: string; model?: string }) => Promise<{ ok: boolean; error?: string; accounts: ClaudeAccount[] }>
       claudeAccountsDelete: (id: string) => Promise<ClaudeAccount[]>
       claudeAccountsVerify: (id: string) => Promise<{ accounts: ClaudeAccount[]; status: 'ok' | 'needs_pane' }>
       listPlugins: () => Promise<PluginDescriptor[]>

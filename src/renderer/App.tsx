@@ -63,12 +63,16 @@ function App() {
   // Mounting the hook applies any persisted scale on load.
   useUiScale()
 
-  // Ground transparency: one variable drives the surface behind the panes
-  // (see `.glass` in index.css). At 0 the ground is gone and the desktop reads
-  // through the gaps, so the panes float.
+  // Ground transparency, in two halves that have to move together:
+  //   1. the CSS ground behind the panes (`.glass` in index.css), and
+  //   2. the NATIVE liquid-glass material behind the entire window.
+  // Clearing only (1) exposes (2), whose default `regular` material frosts and
+  // brightens the desktop into a flat white sheet — which is exactly what a
+  // "fully transparent" window used to look like. Main switches it to `clear`.
   const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
   useEffect(() => {
     document.documentElement.style.setProperty('--ground-opacity', String(groundOpacity))
+    window.electronAPI?.setGroundOpacity?.(groundOpacity)
   }, [groundOpacity])
 
   // Cmd +/− targets the frontmost surface. The Activity Console owns its own

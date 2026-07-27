@@ -65,7 +65,12 @@ export function getGridStyle(
   focusSmallRatio: number = FOCUS_SMALL_RATIO_DEFAULT,
   duoRatio: number = DUO_RATIO_DEFAULT,
 ): React.CSSProperties {
-  const base: React.CSSProperties = { display: 'grid', gap: '2px', height: '100%' }
+  // The gap is the floating effect: it is where the ground (and, when cleared,
+  // the desktop) shows between panes. 2px read as a hairline seam; this reads
+  // as separate tiles. Set inline, so it wins over the container's gap-* class
+  // — keep it equal to GRID_PAD in TerminalGrid so the outer margin matches the
+  // inner gutters and the tiles sit evenly on the ground.
+  const base: React.CSSProperties = { display: 'grid', gap: '16px', height: '100%' }
 
   // Duo: two panes split the full area at the (draggable, persisted) ratio.
   // Solo: one pane fills everything. Both are position:relative to anchor the

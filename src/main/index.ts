@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, powerMonitor, clipboard } from 'electron'
+import { app, BrowserWindow, shell, powerMonitor, clipboard, ipcMain } from 'electron'
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
@@ -74,6 +74,12 @@ function syncDelegationActive(): void {
   }
 }
 let logWindow: BrowserWindow | null = null
+// Handle for the native liquid-glass view backing the main window, plus the
+// ground opacity last requested by the renderer (so a re-created view comes up
+// matching the user's setting). -1 / null means "no view" — every call below
+// no-ops rather than throwing on machines without the material.
+let glassViewId: number | null = null
+let lastGroundOpacity = 1
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
 let workspaceManager: WorkspaceManager | null = null
@@ -210,6 +216,29 @@ function openLogViewer() {
   logger.info('app', 'Log viewer opened')
 }
 
+// Match the native material to how clear the user wants the window.
+//
+// `regular` is a frosting material: it blurs AND brightens the desktop behind
+// it, which is why a fully-cleared CSS ground still read as an opaque white
+// sheet. `clear` is the pass-through variant, so the desktop shows for real.
+// Anything short of fully-opaque gets `clear` — the moment the user starts
+// dragging toward transparency they want to see through, not to frost.
+function applyGlassClarity(groundOpacity: number) {
+  lastGroundOpacity = groundOpacity
+  if (glassViewId == null || glassViewId < 0) return
+  try {
+    const variant = groundOpacity >= 1
+      ? liquidGlass.GlassMaterialVariant.regular
+      : liquidGlass.GlassMaterialVariant.clear
+    liquidGlass.unstable_setVariant(glassViewId, variant)
+    logger.info('window', 'Glass clarity applied', `groundOpacity: ${groundOpacity}, variant: ${variant}`)
+  } catch (err) {
+    // unstable_* is best-effort across macOS builds; a failure here just means
+    // the window stays frosted, never that the app breaks.
+    logger.info('window', 'Glass clarity not applied', err instanceof Error ? err.message : String(err))
+  }
+}
+
 function createWindow() {
   logger.info('window', 'Creating main window')
 
@@ -302,12 +331,16 @@ function createWindow() {
     try {
       if (mainWindow) {
         mainWindow.setWindowButtonVisibility(true)
-        liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
+        glassViewId = liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
           cornerRadius: 12,
           tintColor: '#20000000',
           opaque: false,
         })
-        logger.info('window', 'Liquid glass enabled')
+        logger.info('window', 'Liquid glass enabled', `viewId: ${glassViewId}`)
+        // Re-apply whatever transparency the user last chose. The renderer
+        // pushes this again on mount, but doing it here too means a restart
+        // comes up already clear instead of flashing frosted first.
+        applyGlassClarity(lastGroundOpacity)
       }
     } catch (err) {
       logger.info('window', 'Liquid glass not available', err instanceof Error ? err.message : String(err))
@@ -459,6 +492,13 @@ app.whenReady().then(() => {
 
   logger.info('ipc', 'Setting up IPC handlers')
   setupIPC()
+  // Window transparency: the renderer owns the preference, but only main can
+  // touch the native glass material behind the window.
+  ipcMain.handle(IPC_CHANNELS.WINDOW_SET_GROUND_OPACITY, async (_evt, groundOpacity: number) => {
+    const clamped = Math.min(1, Math.max(0, Number(groundOpacity)))
+    applyGlassClarity(Number.isFinite(clamped) ? clamped : 1)
+  })
+
   logger.info('ipc', 'IPC handlers registered')
 
   // Performance recording: starts automatically and writes JSONL to
