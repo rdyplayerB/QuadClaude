@@ -62,6 +62,22 @@
      consumers, which is exactly how the Activity Console drifted to 5px panels.
      Don't reintroduce it; use the Tailwind classes, or 2px inside shadow DOM. */
 
+  /* — Elevation: the depth system, which did not previously exist.
+       Panes only read as FLOATING if they cast a shadow onto what's behind
+       them; before this every outline in the app was drawn inset, because the
+       grid cell clipped outer shadows. Two layers per step on purpose: a tight
+       contact shadow for the edge, a wide soft one for the lift.
+       --specular is the top-edge highlight that makes a glass surface read as
+       LIT from above rather than merely tinted — it is the single cheapest
+       thing that separates "translucent rectangle" from "pane of glass". — */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --elev-2: 0 6px 18px rgba(0, 0, 0, 0.40), 0 2px 5px rgba(0, 0, 0, 0.28);
+  --elev-3: 0 16px 44px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.36);
+  --specular: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  /* Panes are cards, not cells. The tailwind radius scale tops out at 12px
+     (3xl) for in-content chrome; a floating pane matches the WINDOW's 12px. */
+  --pane-radius: 12px;
+
   /* — Motion — */
   --ease: cubic-bezier(.2, 0, .2, 1);
   --ease-carry: cubic-bezier(.3, .1, .25, 1);
@@ -90,8 +106,16 @@
   --ui-text-faint: var(--text-4);         /* was #888 (dup) */
   --glass-bg: var(--surface-1);
   --glass-bg-elevated: var(--surface-2);  /* was .25 — MORE transparent than base; un-inverted */
-  --glass-bg-modal: var(--surface-4);
-  --glass-bg-header: rgba(18, 19, 22, 0.72);   /* slightly stronger tint for chrome legibility; still glassy */
+  /* Modals follow the transparency slider but never all the way down: below
+     ~0.72 the terminal text behind them wins and the surface stops being
+     readable, which is why they were made flat-opaque in the first place.
+     The floor keeps that fix while still letting them breathe when clear. */
+  --modal-clarity: max(0.75, var(--ground-opacity, 1));
+  --glass-bg-modal: rgba(26, 26, 28, calc(0.96 * var(--modal-clarity)));
+  /* The title bar is the one surface that sits over WHATEVER is behind the
+     window — at 0.72 you could read another app's tabs straight through it.
+     Chrome legibility beats glassiness here, so this one does NOT scale. */
+  --glass-bg-header: rgba(18, 19, 22, 0.90);
   --glass-bg-pane-header: rgba(20, 20, 20, 0.55);
 
   /* ==================== Type scale ====================

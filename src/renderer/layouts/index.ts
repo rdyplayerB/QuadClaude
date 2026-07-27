@@ -124,7 +124,13 @@ export function getPaneStyle(
   layout: LayoutMode,
   count: number,
 ): React.CSSProperties {
-  const base: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: 'hidden' }
+  // overflow is deliberately NOT hidden here. This wrapper used to clip at its
+  // own edge, which made an outer box-shadow impossible — the reason every pane
+  // outline in the app was drawn inset and nothing ever looked like it floated.
+  // The pane itself still clips its own content (see TerminalPane's rounded
+  // overflow-hidden root), and min-width/height:0 is what actually stops a
+  // terminal from blowing out its grid track.
+  const base: React.CSSProperties = { minWidth: 0, minHeight: 0 }
 
   // Duo/solo place only the visible panes; hidden positions (>= visible count)
   // are styled by TerminalGrid as floating PiP tiles, not by this function.

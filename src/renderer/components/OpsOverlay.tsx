@@ -24,6 +24,7 @@ export function OpsOverlay() {
   const [show, setShow] = useState(false)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const background = useWorkspaceStore((s) => s.preferences.background) ?? DEFAULT_BACKGROUND
+  const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
   const [scale, setScale] = useState(readOpsScale)
   // The view is imperative (shadow DOM), so keep a handle to push Cmd +/−
   // changes into its readout.
@@ -93,6 +94,12 @@ export function OpsOverlay() {
     ? (background.image!.startsWith('/') ? `file://${background.image}` : background.image!)
     : null
 
+  // The console is a full-window surface, so it was the one place transparency
+  // stopped dead: a flat #0e1013 (or a full-bleed wallpaper) behind glass
+  // panels. Follow the same slider as everything else, with the same floor the
+  // modals use — its panels are dense and stop being readable below it.
+  const clarity = Math.max(0.75, groundOpacity)
+
   return (
     // Starts BELOW the app's own title bar (h-9 = 36px) instead of covering the
     // whole window. The main window is `transparent: true`, so anything opaque
@@ -104,17 +111,29 @@ export function OpsOverlay() {
     // console reads as part of the app rather than a takeover.
     <div
       className="fixed inset-x-0 bottom-0 top-9 z-[60]"
-      style={
-        img
-          ? { backgroundImage: `url(${img})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }
-          : { background: '#0e1013' }
-      }
     >
+      {/* Backdrop as its OWN layer rather than the container's background: the
+          container also holds the console content, and fading a parent fades
+          everything inside it. Only the ground is allowed to go clear. */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={
+          img
+            ? {
+                backgroundImage: `url(${img})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundRepeat: 'no-repeat',
+                opacity: clarity,
+              }
+            : { background: `rgba(14, 16, 19, ${clarity})` }
+        }
+      />
       {/* Same opacity overlay the panes use — dims the wallpaper for readability. */}
       {wallpaperOn && (
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity})` }}
+          style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity * clarity})` }}
         />
       )}
       {/* Shadow-DOM host: transparent, so the wallpaper ground shows through

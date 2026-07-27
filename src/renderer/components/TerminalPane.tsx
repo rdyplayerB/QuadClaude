@@ -1492,6 +1492,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   const background = preferences.background ?? DEFAULT_BACKGROUND
   const bgEnabled = background.enabled && !!background.image
+  const groundOpacity = preferences.groundOpacity ?? 1
 
   // Border styling - thin glass-style borders
   const getBorderClass = () => {
@@ -1510,9 +1511,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   const waiting = pane.state === 'claude-waiting'
   const ringShadows: string[] = []
   if (paired) ringShadows.push(`inset 0 0 0 2px ${pane.pairColor}`)
-  if (isActive && !waiting) {
-    ringShadows.push('inset 0 0 0 1.5px rgba(255, 255, 255, 0.7), inset 0 0 12px 1px rgba(255, 255, 255, 0.22)')
-  }
+  // The active pane's own marker moved OUT to .pane-surface.is-active, which
+  // can now cast a real ring + lift instead of painting a white glow on the
+  // inside of the glass. This layer is left to the pair colour and the waiting
+  // pulse, which genuinely belong inside the pane's edge.
   const showRingOverlay = waiting || ringShadows.length > 0
 
   // Background image for this pane (per-pane mode allows different images per pane)
@@ -1524,7 +1526,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   return (
     <div
-      className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      className={`group h-full min-h-0 flex flex-col overflow-hidden transition-all relative pane-surface ${isActive ? 'is-active' : ''} ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
@@ -1537,8 +1539,12 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           above the terminal (z-[5]) so the terminal canvas can't cover them. */}
       {showRingOverlay && (
         <div
-          className={`pointer-events-none absolute inset-0 rounded z-[5] ${waiting ? 'claude-waiting-ring' : ''}`}
-          style={waiting ? undefined : { boxShadow: ringShadows.join(', ') }}
+          className={`pointer-events-none absolute inset-0 z-[5] ${waiting ? 'claude-waiting-ring' : ''}`}
+          style={
+            waiting
+              ? { borderRadius: 'var(--pane-radius)' }
+              : { borderRadius: 'var(--pane-radius)', boxShadow: ringShadows.join(', ') }
+          }
         />
       )}
       {/* Terminal wrapper - fills all remaining space */}
@@ -1549,7 +1555,14 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          ...(background.mode === 'unified' ? { backgroundAttachment: 'fixed' } : {}),
+          // `fixed` anchors the image to the viewport, so every pane samples one
+          // continuous photo and the grid reads as a single sheet with slots cut
+          // out of it — the exact opposite of separate floating cards. Keep that
+          // only while the window is solid; once it's see-through, let each pane
+          // crop its own copy so the panes read as independent objects.
+          ...(background.mode === 'unified' && groundOpacity >= 1
+            ? { backgroundAttachment: 'fixed' as const }
+            : {}),
         } : undefined}
       >
         {/* Opacity overlay - controls how much wallpaper shows through */}

@@ -105,6 +105,27 @@ body {
 }
 
 
+/* A pane is a floating CARD, not a grid cell. Three things do the work here:
+   the radius (2px read as a sliced sheet at these gutters), the cast shadow
+   (impossible until the grid wrapper stopped clipping), and the specular top
+   edge that makes the surface read as lit rather than just tinted.
+   The active pane is lifted a full elevation step and picks up the accent —
+   previously "active" was border-white/10 vs /05, a 5% difference nobody
+   could see, on an app whose whole job is watching several panes at once. */
+.pane-surface {
+  border-radius: var(--pane-radius);
+  box-shadow: var(--elev-2), var(--specular);
+  transition: box-shadow var(--motion) var(--ease);
+}
+
+.pane-surface.is-active {
+  box-shadow:
+    var(--elev-3),
+    var(--specular),
+    0 0 0 1px var(--accent-line),
+    0 0 22px -2px rgba(34, 211, 238, 0.28);
+}
+
 /* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */
 /* .glass is the GROUND the panes sit on — the one surface behind everything.
    --ground-opacity scales its tint away entirely (0 = fully clear), which lets
