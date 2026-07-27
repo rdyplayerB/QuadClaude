@@ -27,7 +27,7 @@ const CSS = `
   --ui-scale:1;
   /* Same gutter the terminal grid uses (GRID_PAD / getGridStyle). The console's
      panels are its "windows", so they get the app's spacing, not their own. */
-  --ops-gap:16px; }
+  --ops-gap:20px; }
 *{margin:0;padding:0;box-sizing:border-box}
 .ops-host{height:100%;background:var(--bg);color:var(--fg);font-family:var(--mono);-webkit-font-smoothing:antialiased;
   padding:0;font-size:var(--fs-body);line-height:1.5;font-variant-numeric:tabular-nums;overflow:hidden;display:flex;flex-direction:column}
@@ -53,7 +53,7 @@ const CSS = `
 .recbtn.on{color:var(--red);border-color:rgba(248,113,113,.5);background:rgba(248,113,113,.08)}
 .recbtn.on::before{content:"● ";}
 .kpis{flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);gap:var(--ops-gap);margin:0 0 var(--ops-gap)}
-.kpi{padding:6px 9px;border:1px solid var(--line)}
+.kpi{padding:11px 14px;border:1px solid var(--line)}
 .kpi.alert{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.05)}
 .kpi .lab{font-size:var(--fs-meta);color:var(--fg3)}
 /* The KPI numerals were display-sized: five of them cost ~130px of height that
@@ -75,7 +75,11 @@ const CSS = `
    tint rides as a first background layer over the image. Radius and elevation
    come from the app's tokens so the console can't drift from the main window. */
 .panel,.kpi{
-  background-color:transparent;
+  /* Same neutral base the terminal panes carry UNDER their wallpaper
+     (glass-elevated). Without it the panels were wallpaper + scrim only, so
+     they picked up whatever the photo was doing — reading cool/blue against
+     the panes' warm gray. This is what makes the two surfaces the same color. */
+  background-color:var(--term);
   background-image:linear-gradient(var(--ops-tint),var(--ops-tint)),var(--ops-wallpaper,none);
   background-attachment:scroll,fixed;
   background-size:auto,cover;
@@ -89,14 +93,14 @@ const CSS = `
 /* overflow:hidden so scrolling rows clip to the rounded corners instead of
    squaring them off — the same reason each terminal pane clips its own body. */
 .panel{border:1px solid var(--line);overflow:hidden}
-.phead{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--line-soft)}
+.phead{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line-soft)}
 .phead h3{font-size:var(--fs-body);color:var(--fg2);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
 .phead .sub{color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0;font-size:var(--fs-meta)}
 .live{font-size:var(--fs-meta);letter-spacing:.06em;color:var(--accent);display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;font-weight:600}
 .live::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.6s infinite}
 @keyframes pulse{50%{opacity:.35}}
 #roster{flex:1 1 auto;min-height:0;overflow:auto}
-.r{padding:7px 10px;border-bottom:1px solid var(--line-soft);cursor:pointer}
+.r{padding:8px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer}
 .r:last-child{border-bottom:0} .r:hover,.r.sel{background:rgba(255,255,255,.03)}
 .r-top{display:flex;align-items:center;gap:8px}
 .av{width:24px;height:24px;border-radius:2px;flex:0 0 24px;display:grid;place-items:center;font-size:var(--fs-body);font-weight:700;color:#0a0a0a}
@@ -129,7 +133,7 @@ const CSS = `
 /* Real work ended, card still serving its minimum visible dwell. */
 .card.spent{opacity:.5}
 .card.failed{border-color:rgba(248,113,113,.45)}
-.board{flex:1 1 auto;min-height:0;display:flex;gap:5px;padding:7px;overflow:auto;position:relative}
+.board{flex:1 1 auto;min-height:0;display:flex;gap:7px;padding:12px;overflow:auto;position:relative}
 /* Lanes share the width evenly and are allowed to shrink; card text wraps
    (and breaks inside long tokens), so all six stay readable side by side
    instead of the last one scrolling out of view. */

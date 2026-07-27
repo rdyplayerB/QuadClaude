@@ -6,10 +6,14 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'">
     <title>Activity Console</title>
     <style>
-      html, body { margin: 0; height: 100%; background: #0e1013; overflow: hidden; }
-      /* Positioned + stacked above the wallpaper dimming layer that
-         ops-window.ts inserts as body's first child (that layer is fixed, so a
-         statically-positioned #ops would paint underneath it). */
+      /* No background here. When the user has a see-through window, main creates
+         this one with transparent:true, and any colour painted at this level
+         would sit on top of that and make the whole thing a solid slab.
+         ops-window.ts sets the ground from the saved transparency instead. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      /* Clip to the window's rounded corners: with transparent:true there is no
+         native material shaping the window, so the content defines its shape. */
+      html { border-radius: 12px; }
       #ops { height: 100%; position: relative; z-index: 1; }
     </style>
   </head>

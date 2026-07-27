@@ -129,7 +129,9 @@ export function OpsOverlay() {
       {groundOpacity > 0 && (
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: `rgba(14, 16, 19, ${0.86 * groundOpacity})` }}
+          // Neutral gray (R≈G≈B), not the old #0e1013 — that was blue-biased
+          // and tinted the whole console cool against the panes' warm gray.
+          style={{ background: `rgba(26, 26, 28, ${0.86 * groundOpacity})` }}
         />
       )}
       {/* Shadow-DOM host. The wallpaper is handed in as a custom property (they

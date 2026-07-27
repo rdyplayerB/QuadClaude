@@ -70,7 +70,7 @@ export function getGridStyle(
   // as separate tiles. Set inline, so it wins over the container's gap-* class
   // — keep it equal to GRID_PAD in TerminalGrid so the outer margin matches the
   // inner gutters and the tiles sit evenly on the ground.
-  const base: React.CSSProperties = { display: 'grid', gap: '16px', height: '100%' }
+  const base: React.CSSProperties = { display: 'grid', gap: '20px', height: '100%' }
 
   // Duo: two panes split the full area at the (draggable, persisted) ratio.
   // Solo: one pane fills everything. Both are position:relative to anchor the

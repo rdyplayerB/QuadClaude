@@ -23,17 +23,34 @@ async function applyWallpaperGround() {
   try {
     const ws = await window.electronAPI?.loadWorkspace?.()
     const bg = ws?.preferences?.background
+    const ground = ws?.preferences?.groundOpacity ?? 1
+    const root = document.documentElement
     const body = document.body
-    if (bg?.enabled && bg.image) {
-      const url = bg.image.startsWith('/') ? `file://${bg.image}` : bg.image
-      body.style.backgroundImage = `url(${url})`
-      body.style.backgroundSize = 'cover'
-      body.style.backgroundPosition = 'center'
-      body.style.backgroundRepeat = 'no-repeat'
-      // Same dimming layer the panes use, so panel contrast matches in-app.
-      const dim = document.createElement('div')
-      dim.style.cssText = `position:fixed;inset:0;pointer-events:none;background:rgba(30,30,30,${bg.opacity ?? 0.85})`
-      body.insertBefore(dim, body.firstChild)
+
+    // Popped out, this window gets the SAME transparency as the main one — main
+    // already created it with transparent:true when the ground is cleared, so
+    // everything here has to stay see-through for that to mean anything.
+    root.style.setProperty('--ground-opacity', String(ground))
+    root.style.borderRadius = '12px'
+    body.style.background = ground > 0 ? `rgba(26, 26, 28, ${0.86 * ground})` : 'transparent'
+
+    // The wallpaper is handed to the console's panels as one shared,
+    // viewport-anchored canvas (same as in-app and same as the terminal grid),
+    // NOT painted full-bleed behind everything — that is what keeps the gaps
+    // between panels clear instead of turning the window into a solid slab.
+    const host = document.getElementById('ops')
+    const wallpaperOn = !!(bg?.enabled && bg.image)
+    const url = wallpaperOn
+      ? (bg!.image!.startsWith('/') ? `file://${bg!.image}` : bg!.image!)
+      : null
+    if (host) {
+      host.style.setProperty('--ops-wallpaper', url ? `url(${url})` : 'none')
+      host.style.setProperty(
+        '--ops-tint',
+        wallpaperOn
+          ? `rgba(30, 30, 30, ${bg!.opacity ?? 0.85})`
+          : `rgba(40, 40, 42, ${0.72 * Math.max(0.75, ground)})`,
+      )
     }
   } catch { /* no wallpaper — the flat ground is a fine fallback */ }
 }
