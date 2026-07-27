@@ -95,7 +95,7 @@ export function logAppearanceDiagnostics(surface: string, sample: Element | null
       'appearance',
       `${surface}: vars`,
       `tint-rgb=[${v('--window-tint-rgb')}] tint=[${v('--window-tint')}] ` +
-        `ground=[${v('--ground-opacity')}] wp-size=[${v('--wallpaper-size')}] wp-pos=[${v('--wallpaper-pos')}]`,
+        `ground=[${v('--ground-opacity')}]`,
     )
     if (sample) {
       const cs = getComputedStyle(sample)
