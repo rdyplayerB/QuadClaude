@@ -3,8 +3,7 @@
 // iframe → single-digit MB). Owns the live⇄record producer and streams its
 // snapshots + verification overlay to that overlay over IPC. Zero cost when the
 // overlay is closed (nothing runs).
-import { app, BrowserWindow, ipcMain } from 'electron'
-import fs from 'fs'
+import { BrowserWindow, ipcMain, app } from 'electron'
 import path from 'path'
 import manifest from './plugin.json'
 import { PluginContext, PluginManifest, PluginModule } from '../../shared/plugins'
@@ -52,17 +51,6 @@ function destroyOpsWindow() {
   try { w.destroy() } finally { poppingIn = false }
 }
 
-// The window's transparency has to be decided at CREATION — Electron can't
-// toggle it later — and the plugin context carries no preferences, so read the
-// saved one straight off disk. Any failure falls back to the solid window.
-function savedGroundOpacity(): number {
-  try {
-    const raw = fs.readFileSync(path.join(app.getPath('userData'), 'workspace.json'), 'utf8')
-    const v = JSON.parse(raw)?.workspace?.preferences?.groundOpacity
-    return typeof v === 'number' ? Math.min(1, Math.max(0, v)) : 1
-  } catch { return 1 }
-}
-
 function popOut() {
   if (opsWindow && !opsWindow.isDestroyed()) { opsWindow.focus(); return }
   const wasVisible = visible
@@ -70,15 +58,15 @@ function popOut() {
   // Hand the console off: clear the in-app overlay before the window appears.
   ctx?.services.sendToUi(IPC_CHANNELS.OPS_INAPP_SHOW, false)
 
-  // Popped out, the console IS a window, so it gets the same treatment the main
-  // one does: see-through when the user asked for see-through. A backgroundColor
-  // would paint over that, so it's only set when the window is meant to be solid.
-  const ground = savedGroundOpacity()
-  const clear = ground < 1
+  // ALWAYS transparent, never a backgroundColor. Electron can't toggle
+  // transparency after creation, so a window born opaque could never follow the
+  // slider. Transparent + a CSS ground means appearance is entirely CSS — it
+  // looks solid when the ground is solid, and updates live either way.
   const win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 720, minHeight: 480,
     title: 'Activity Console',
-    ...(clear ? { transparent: true, hasShadow: true } : { backgroundColor: '#0e1013' }),
+    transparent: true,
+    hasShadow: true,
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 15, y: 12 },
     show: false,

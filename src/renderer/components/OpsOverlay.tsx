@@ -129,7 +129,7 @@ export function OpsOverlay() {
           className="absolute inset-0 pointer-events-none"
           // Neutral gray (R≈G≈B), not the old #0e1013 — that was blue-biased
           // and tinted the whole console cool against the panes' warm gray.
-          style={{ background: `rgba(26, 26, 28, ${0.86 * groundOpacity})` }}
+          style={{ background: `rgba(var(--window-tint-rgb, 30, 30, 30), ${0.86 * groundOpacity})` }}
         />
       )}
       {/* Shadow-DOM host. The wallpaper is handed in as a custom property (they
@@ -147,7 +147,7 @@ export function OpsOverlay() {
           // no wallpaper the panel's own background colour already carries it,
           // so this layer contributes nothing rather than double-tinting.
           ['--ops-tint' as string]: wallpaperOn
-            ? `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))`
+            ? `rgba(var(--window-tint-rgb, 30, 30, 30), var(--window-tint, 0.85))`
             : 'transparent',
         }}
       />

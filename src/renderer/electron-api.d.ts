@@ -42,7 +42,8 @@ declare global {
       openExternal: (url: string) => Promise<boolean>
       openInEditor: (paneId: number, filePath: string) => Promise<boolean>
       logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) => void
-      setGroundOpacity: (groundOpacity: number) => Promise<void>
+      setAppearance: (appearance: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => Promise<void>
+      onAppearanceChanged: (cb: (a: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => void) => () => void
       routerStatus: () => Promise<RouterStatus>
       routerSaveProvider: (input: RouterProviderInput) => Promise<RouterSaveResult>
       routerDeleteProvider: (name: string) => Promise<void>

@@ -1,26 +1,21 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ClaudeAccount, DEFAULT_ACCOUNT_MODEL } from '../../shared/types'
+import { ClaudeAccount, DEFAULT_ACCOUNT_MODEL, CLAUDE_MODELS } from '../../shared/types'
 
-// Models a pane can pin per account. A fresh token session otherwise starts on Sonnet, so
-// we default to Opus 4.8 1M. 'default' opts out of pinning (Claude Code's own default).
-const MODEL_OPTIONS: { value: string; label: string }[] = [
-  { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M context)' },
-  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-  { value: 'default', label: 'Claude Code default' },
-]
+// Models a pane can pin per account. The list is the app-wide catalog — this
+// component used to keep its own copy, which is how it ended up offering
+// Opus 4.8 as the newest model. 'default' opts out of pinning entirely.
+const MODEL_OPTIONS = CLAUDE_MODELS
 
-// Manage saved Claude subscription accounts. Each account stores a label and a long-lived
-// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), encrypted by the main process. A pane
-// can then be bound to an account (via its agent badge) to authenticate as that account —
-// letting two panes run two different Max subscriptions side-by-side.
+// Manage saved Claude subscription accounts. Each account is a profile DIRECTORY
+// (~/.quadclaude/profiles/<id>) injected as CLAUDE_CONFIG_DIR at pane spawn, giving it its
+// own separate login, history, and sessions. The user binds a pane to an account (via its
+// agent badge) and runs /login there once — no tokens or credentials pass through, or are
+// stored by, QuadClaude. Two panes can run two different Max subscriptions side-by-side.
 export function ClaudeAccountsSettings() {
   const [accounts, setAccounts] = useState<ClaudeAccount[]>([])
   const [label, setLabel] = useState('')
   const [email, setEmail] = useState('')
   const [model, setModel] = useState(DEFAULT_ACCOUNT_MODEL)
-  const [token, setToken] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -31,18 +26,16 @@ export function ClaudeAccountsSettings() {
   }, [])
   useEffect(() => { reload() }, [reload])
 
-  const resetForm = () => { setLabel(''); setEmail(''); setModel(DEFAULT_ACCOUNT_MODEL); setToken(''); setEditingId(null); setErr(null) }
+  const resetForm = () => { setLabel(''); setEmail(''); setModel(DEFAULT_ACCOUNT_MODEL); setEditingId(null); setErr(null) }
 
   const save = async () => {
     if (!label.trim()) { setErr('Give the account a label (e.g. "Work").'); return }
-    if (!editingId && !token.trim()) { setErr('Paste the token from `claude setup-token`.'); return }
     setBusy(true); setErr(null)
     const res = await window.electronAPI.claudeAccountsSave({
       id: editingId || undefined,
       label: label.trim(),
       email: email.trim() || undefined,
       model,
-      token: token.trim() || undefined,
     }).catch(() => ({ ok: false, error: 'Save failed', accounts }))
     setBusy(false)
     if (!res.ok) { setErr(res.error || 'Save failed'); return }
@@ -51,7 +44,7 @@ export function ClaudeAccountsSettings() {
   }
 
   const startEdit = (a: ClaudeAccount) => {
-    setEditingId(a.id); setLabel(a.label); setEmail(a.email || ''); setModel(a.model || DEFAULT_ACCOUNT_MODEL); setToken(''); setErr(null)
+    setEditingId(a.id); setLabel(a.label); setEmail(a.email || ''); setModel(a.model || DEFAULT_ACCOUNT_MODEL); setErr(null)
   }
 
   // Inline model change from a list row — saves immediately (no token touched).
@@ -97,17 +90,18 @@ export function ClaudeAccountsSettings() {
         <p className="text-body text-[--ui-text-dimmed] mt-1 leading-relaxed">
           Bind a terminal pane to a specific Claude subscription so two panes can run two different accounts
           at once. Add an account here, then pick it from a pane&apos;s agent menu (the caret next to the
-          model name). Tokens are stored encrypted on this Mac and never leave it.
+          model name). Each account keeps its own separate login and chat history — no tokens or
+          credentials are stored by QuadClaude.
         </p>
       </div>
 
-      {/* How to get a token */}
+      {/* How it works */}
       <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3.5 py-3 text-body text-[--ui-text-secondary] leading-relaxed">
-        <div className="font-medium text-[--ui-text-primary] mb-1">How to get a token</div>
+        <div className="font-medium text-[--ui-text-primary] mb-1">How it works</div>
         <ol className="list-decimal ml-4 space-y-1">
-          <li>In any terminal, sign into the account you want: <code className="font-mono text-[--ui-text-primary]">claude</code> → <code className="font-mono text-[--ui-text-primary]">/login</code>.</li>
-          <li>Run <code className="font-mono text-[--ui-text-primary]">claude setup-token</code> — it prints a long-lived token (requires a Pro/Max plan).</li>
-          <li>Copy that token and paste it below. Repeat for your other account.</li>
+          <li>Add an account below — just a label, no credentials.</li>
+          <li>Pick it from a pane&apos;s agent menu (the caret next to the model name) and launch Claude Code there.</li>
+          <li>Run <code className="font-mono text-[--ui-text-primary]">/login</code> once in that pane — the login sticks to this account&apos;s own profile from then on.</li>
         </ol>
       </div>
 
@@ -122,17 +116,17 @@ export function ClaudeAccountsSettings() {
               <div className="min-w-0 flex-1">
                 <div className="text-heading text-[--ui-text-primary] font-medium truncate">{a.label}</div>
                 <div className="text-body text-[--ui-text-dimmed] truncate">
-                  {a.hasToken
-                    ? <span className="text-[--success]/90">token saved ✓</span>
-                    : <span className="text-[--warning]">no token — add one</span>}
+                  {a.loggedIn
+                    ? <span className="text-[--success]/90">logged in ✓</span>
+                    : <span className="text-[--warning]">not logged in — launch a pane on this account, then run /login once</span>}
                 </div>
-                {/* Identity fingerprint: which account this token actually reaches, captured
-                    by a bound pane's status line (no API poll). */}
-                {a.hasToken && (
+                {/* Identity fingerprint: which account this profile's login actually reaches,
+                    captured by a bound pane's status line (no API poll). */}
+                {a.loggedIn && (
                   <div className="text-body mt-0.5 truncate">
                     {vu ? (
                       isDup ? (
-                        <span className="text-[--danger]">⚠️ same account as another slot (both reset {fmtReset(vu.weeklyResetEpoch)}) — one token is wrong. Replace it.</span>
+                        <span className="text-[--danger]">⚠️ same account as another slot (both reset {fmtReset(vu.weeklyResetEpoch)}) — one profile is logged into the wrong account. Re-run /login there.</span>
                       ) : (
                         <span className="text-[--success]/90">✓ reaches account: weekly {vu.weeklyPct}% · resets {fmtReset(vu.weeklyResetEpoch)} <button onClick={() => verify(a.id)} className="text-[--ui-text-dimmed] hover:text-[--ui-text-primary] ml-1">↻</button></span>
                       )
@@ -179,11 +173,6 @@ export function ClaudeAccountsSettings() {
             className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded px-2.5 py-1.5 text-heading text-[--ui-text-primary] placeholder:text-[--ui-text-dimmed] focus:outline-none focus:border-[--accent]/50"
           />
         </div>
-        <input
-          value={token} onChange={(e) => setToken(e.target.value)} type="password"
-          placeholder={editingId ? 'Paste a new token to replace it (leave blank to keep)' : 'Paste token from `claude setup-token`'}
-          className="w-full bg-black/30 border border-white/10 rounded px-2.5 py-1.5 text-heading font-mono text-[--ui-text-primary] placeholder:text-[--ui-text-dimmed] placeholder:font-sans focus:outline-none focus:border-[--accent]/50"
-        />
         <label className="flex items-center gap-2 text-body text-[--ui-text-secondary]">
           <span className="shrink-0">Model</span>
           <select
@@ -204,7 +193,7 @@ export function ClaudeAccountsSettings() {
       </div>
 
       <p className="text-body text-[--ui-text-dimmed] leading-relaxed">
-        Note: a pane bound to an account ignores the global <code className="font-mono">/login</code> and uses that account&apos;s token (subscription billing, not metered API). Running two of your own Max subscriptions this way is supported by the official CLI; tokens last ~1 year, then regenerate with <code className="font-mono">claude setup-token</code>.
+        Note: a pane bound to an account runs in that account&apos;s own profile directory — separate login, history, and sessions (subscription billing, not metered API). Sign in once per account with <code className="font-mono">/login</code>; Claude Code keeps that login fresh itself.
       </p>
     </div>
   )

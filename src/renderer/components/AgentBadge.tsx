@@ -168,11 +168,13 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                 Row(`${p.id}:global`, undefined, 'global login', claudeCurrent && !pane.claudeAccountId, false, 'Run Claude Code as the globally signed-in account (claude /login)'),
               ]
               for (const a of accounts) {
+                // Never disabled: a not-yet-logged-in profile is still launchable — binding
+                // a pane and running /login there IS how the profile gets its login.
                 rows.push(Row(
                   `${p.id}:${a.id}`, a.id, a.label,
                   claudeCurrent && pane.claudeAccountId === a.id,
-                  !a.hasToken,
-                  a.hasToken ? `Run Claude Code as ${a.email || a.label}` : `${a.label} — no token yet (add it in Settings → Accounts)`,
+                  false,
+                  a.loggedIn ? `Run Claude Code as ${a.email || a.label}` : `${a.label} — not logged in yet: launch it here, then run /login once`,
                 ))
               }
               return rows

@@ -14,6 +14,7 @@
 // type — visibly different from the in-app one.
 import './tokens.css'
 import { createOpsView } from '../plugins/ops-console/opsview'
+import { readAppearance, applyAppearance, type Appearance } from './appearance'
 
 // Paint the same ground the in-app overlay uses: the user's wallpaper, dimmed by
 // their opacity setting. Without this the popped-out window is a flat dark slab
@@ -23,20 +24,9 @@ async function applyWallpaperGround() {
   try {
     const ws = await window.electronAPI?.loadWorkspace?.()
     const bg = ws?.preferences?.background
-    const ground = ws?.preferences?.groundOpacity ?? 1
     const root = document.documentElement
     const body = document.body
-
-    // Popped out, this window gets the SAME transparency as the main one — main
-    // already created it with transparent:true when the ground is cleared, so
-    // everything here has to stay see-through for that to mean anything.
-    root.style.setProperty('--ground-opacity', String(ground))
-    // The popped window is a separate renderer with its own document, so the
-    // shared tint has to be re-published here or its panels would fall back to
-    // the default and stop matching the main window's.
-    root.style.setProperty('--window-tint', String(ws?.preferences?.windowTint ?? 0.85))
     root.style.borderRadius = '12px'
-    body.style.background = ground > 0 ? `rgba(26, 26, 28, ${0.86 * ground})` : 'transparent'
 
     // The wallpaper is handed to the console's panels as one shared,
     // viewport-anchored canvas (same as in-app and same as the terminal grid),
@@ -47,13 +37,25 @@ async function applyWallpaperGround() {
     const url = wallpaperOn
       ? (bg!.image!.startsWith('/') ? `file://${bg!.image}` : bg!.image!)
       : null
-    if (host) {
-      host.style.setProperty('--ops-wallpaper', url ? `url(${url})` : 'none')
-      host.style.setProperty(
+    host?.style.setProperty('--ops-wallpaper', url ? `url(${url})` : 'none')
+
+    // This is a separate renderer with its own document, so it publishes the
+    // SAME appearance the main window does — out of the same module, so the two
+    // cannot drift — and then follows it live. Main rebroadcasts every change,
+    // which is what makes dragging the slider move this window too instead of
+    // it keeping whatever appearance it was born with.
+    const paint = (a: Appearance) => {
+      applyAppearance(root, a)
+      body.style.background =
+        a.groundOpacity > 0 ? `rgba(${a.tintRgb}, ${0.86 * a.groundOpacity})` : 'transparent'
+      host?.style.setProperty(
         '--ops-tint',
-        wallpaperOn ? `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` : 'transparent',
+        wallpaperOn ? `rgba(${a.tintRgb}, ${a.tintAlpha})` : 'transparent',
       )
     }
+
+    paint(readAppearance(ws?.preferences))
+    window.electronAPI?.onAppearanceChanged?.(paint)
   } catch { /* no wallpaper — the flat ground is a fine fallback */ }
 }
 applyWallpaperGround()

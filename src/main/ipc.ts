@@ -4,7 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { logger } from './logger'
-import { accountStore } from './accountStore'
+import { accountStore, ensureProfileDir } from './accountStore'
 import { delegationLog } from './delegationLog'
 import { listPlugins, togglePlugin, setPluginSetting, openPlugin, receiveWorkspaceSnapshot } from './pluginHost'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
@@ -51,12 +51,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         ? { QC_DELEGATION: '1', QC_DELEGATION_MODEL: delegationModelRoute() }
         : { QC_DELEGATION: '' }
       // Per-pane Claude account: the renderer passes the bound account id as a non-secret
-      // env HINT (QC_ACCOUNT_ID). We decrypt that account's long-lived subscription token
-      // and inject it as CLAUDE_CODE_OAUTH_TOKEN so `claude` authenticates as that account,
-      // overriding the shared Keychain login. We also blank ANTHROPIC_API_KEY for this pane
-      // — it outranks the OAuth token in precedence, so a stray global API key would
-      // silently switch the pane to metered billing. QC_ACCOUNT_LABEL feeds the statusline.
-      // The hint itself is stripped so it never lingers in the pane env.
+      // env HINT (QC_ACCOUNT_ID). We point the pane at that account's own profile dir via
+      // CLAUDE_CONFIG_DIR, so `claude` uses that profile's separate Keychain login, history,
+      // and sessions — the user signs in once per profile with /login. No token is stored or
+      // injected. We also blank ANTHROPIC_API_KEY for this pane — it outranks the OAuth
+      // login in precedence, so a stray global API key would silently switch the pane to
+      // metered billing. QC_ACCOUNT_LABEL feeds the statusline.
       let accountEnv: Record<string, string> = {}
       // Prefer the env HINT from launchAgent (timing-safe right after picking an account,
       // before the debounced workspace save lands). On a COLD pane spawn (e.g. app restart)
@@ -67,11 +67,13 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       const baseEnv = { ...(env || {}) }
       delete baseEnv.QC_ACCOUNT_ID
       if (accountId) {
-        const token = accountStore.getToken(accountId)
         const label = accountStore.getLabel(accountId)
-        if (token) {
+        if (label !== null) {
+          // Create/seed the profile dir if needed — idempotent, cheap on the warm path.
+          const dir = ensureProfileDir(accountId)
           accountEnv = {
-            CLAUDE_CODE_OAUTH_TOKEN: token,
+            CLAUDE_CODE_OAUTH_TOKEN: '', // clear any inherited token — the profile dir owns auth now
+            CLAUDE_CONFIG_DIR: dir,
             ANTHROPIC_API_KEY: '',
             QC_ACCOUNT_LABEL: label || '',
             // Keep the account id in the pane's env so the status line can stamp this
@@ -81,12 +83,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
             // weekly numbers) instead of the global login's.
             QC_USAGE_CACHE: path.join(app.getPath('home'), '.claude', `.statusline-usage-${accountId}`),
           }
-          // Pin the model for this account (a fresh token session otherwise starts on
-          // Sonnet). Default to Opus 4.8 1M; the sentinel 'default' opts out of pinning.
+          // Pin the model for this account (a fresh profile session otherwise starts on
+          // Claude Code's default). Default Opus 4.8 1M; sentinel 'default' opts out.
           const model = accountStore.getModel(accountId) ?? DEFAULT_ACCOUNT_MODEL
           if (model && model !== 'default') accountEnv.ANTHROPIC_MODEL = model
         } else {
-          logger.warn('accounts', `Pane ${paneId} bound to account ${accountId} but no token available — using global login`)
+          logger.warn('accounts', `Pane ${paneId} bound to unknown account ${accountId} — using global login`)
         }
       }
       const mergedEnv = { ...baseEnv, ...iso, QC_PANE: String(paneId), ...delegationEnv, ...accountEnv }
@@ -232,19 +234,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     return true
   })
 
-  // Per-pane Claude accounts. The renderer only ever receives metadata (label/email/hasToken)
-  // — the token is write-only from the renderer's side and never returned.
+  // Per-pane Claude accounts. Metadata only — accounts are profile DIRS now; there is no
+  // credential to receive or store (the user runs /login once inside a bound pane).
   ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_LIST, async () => accountStore.list())
-  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, async (_, input: { id?: string; label: string; email?: string; model?: string; token?: string }) => {
+  ipcMain.handle(IPC_CHANNELS.CLAUDE_ACCOUNTS_SAVE, async (_, input: { id?: string; label: string; email?: string; model?: string }) => {
     try {
-      const accounts = accountStore.save(input)
-      // When a token was provided, resolve which account it REALLY is so the UI can flag a
-      // wrong/swapped token immediately. Find the (possibly new) record by matching input.
-      if (input.token) {
-        const saved = accounts.find((a) => a.id === input.id) || accounts.find((a) => a.label === input.label.trim())
-        if (saved) { const v = await accountStore.verify(saved.id); return { ok: true, accounts: v.accounts } }
-      }
-      return { ok: true, accounts }
+      return { ok: true, accounts: accountStore.save(input) }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error), accounts: accountStore.list() }
     }

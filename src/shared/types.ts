@@ -78,18 +78,19 @@ export interface AgentProfile {
 export const CLAUDE_PROFILE_ID = 'claude'
 
 // A saved Claude subscription account the user can bind a pane to. Lets two panes run two
-// DIFFERENT Max subscriptions side-by-side by injecting each account's long-lived
-// CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) into that pane's env at spawn — which
-// takes precedence over the shared macOS Keychain login. The TOKEN ITSELF is never stored
-// here (or in workspace.json); only this non-secret metadata is. The token lives encrypted
-// via Electron safeStorage (OS-Keychain-backed) in the main process — see accountStore.ts.
+// DIFFERENT Max subscriptions side-by-side: each account maps to its own profile directory
+// (~/.quadclaude/profiles/<id>) injected as CLAUDE_CONFIG_DIR into that pane's env at spawn,
+// so Claude Code keeps a fully separate login, history, and session store per account. The
+// user signs in once per profile with /login inside a bound pane; Claude Code owns and
+// refreshes the credential in that profile's own Keychain entry. QuadClaude stores NO
+// secrets — only this metadata. See accountStore.ts.
 export interface ClaudeAccount {
   id: string
   label: string // user-facing name, e.g. "Work" / "Personal"
-  email?: string // optional, for display/disambiguation only
-  hasToken?: boolean // whether an encrypted token is on file (set by main, never persisted with a value)
+  email?: string // display only; auto-filled from the profile's login once it exists
+  loggedIn?: boolean // whether the profile's /login has happened (its Keychain entry exists)
   // Model to pin for panes using this account (injected as ANTHROPIC_MODEL). A fresh
-  // token-auth session otherwise starts on Claude Code's default (Sonnet). Defaults to
+  // profile session otherwise starts on Claude Code's default (Sonnet). Defaults to
   // Opus 4.8 1M-context; the sentinel 'default' means "don't pin — use Claude Code's default".
   model?: string
   // A usage fingerprint of the account a bound pane's token ACTUALLY reaches — captured by
@@ -104,8 +105,32 @@ export interface ClaudeAccount {
   }
 }
 
-// The model a pane gets when no per-account model is set. Opus 4.8, 1M-context variant.
-export const DEFAULT_ACCOUNT_MODEL = 'claude-opus-4-8[1m]'
+// The ONE model catalog. Every model dropdown in the app reads this list, so a
+// new release is a single edit here rather than a hunt through components that
+// have each drifted their own copy.
+//
+// It is the baseline, not the last word: on startup the main process refreshes
+// it from the Models API when an ANTHROPIC_API_KEY is available and caches the
+// result (see refreshModelCatalog). Subscription auth has no equivalent
+// endpoint, so without a key this list is what you get.
+//
+// `[1m]` selects a model's 1M-context variant — a Claude Code suffix, not part
+// of the API model ID.
+export interface ClaudeModelOption { value: string; label: string }
+
+export const CLAUDE_MODELS: ClaudeModelOption[] = [
+  { value: 'claude-opus-5[1m]', label: 'Opus 5 (1M context)' },
+  { value: 'claude-opus-5', label: 'Opus 5' },
+  { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M context)' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: 'default', label: 'Claude Code default' },
+]
+
+// The model a pane gets when no per-account model is set. Opus 5, 1M-context variant.
+export const DEFAULT_ACCOUNT_MODEL = 'claude-opus-5[1m]'
 
 // Ring hues for paired panes. Each active pair claims the first free color, so
 // multiple pairs across the grid stay visually distinct. Sized for up to six
@@ -245,6 +270,11 @@ export interface WorkspacePreferences {
   // Independent of the wallpaper: with one it tints the photo, without one it
   // IS the surface colour.
   windowTint?: number
+  // The COLOUR that tint is made of, as a hex string. Neutral near-black by
+  // default (matching the terminal background); set it to anything and every
+  // surface takes the hue at once. Paired with windowTint, which is how much
+  // of it there is.
+  windowTintColor?: string
   // Configurable agents a pane can launch. Seeded with the built-in Claude profile.
   agentProfiles?: AgentProfile[]
   // Global fallback agent when a pane has no agentId assigned yet
@@ -350,7 +380,10 @@ export const IPC_CHANNELS = {
   // ground alone just exposes a white sheet. The renderer sends the ground
   // opacity here so main can switch that material to `clear` and let the
   // desktop actually read through.
-  WINDOW_SET_GROUND_OPACITY: 'window:set-ground-opacity',
+  WINDOW_SET_APPEARANCE: 'window:set-appearance',
+  // main → every OTHER window: keep separate renderers (the popped-out console)
+  // in step live, instead of only reading appearance when they were created.
+  WINDOW_APPEARANCE_CHANGED: 'window:appearance-changed',
 
   // Usage tracking
   USAGE_UPDATE: 'usage:update',
@@ -387,7 +420,7 @@ export const IPC_CHANNELS = {
   CLIPBOARD_WRITE_TEXT: 'clipboard:write-text',
   // Per-pane Claude accounts: manage the saved-account list + their encrypted tokens.
   CLAUDE_ACCOUNTS_LIST: 'claude-accounts:list',
-  CLAUDE_ACCOUNTS_SAVE: 'claude-accounts:save', // upsert {id?,label,email,token?}
+  CLAUDE_ACCOUNTS_SAVE: 'claude-accounts:save', // upsert {id?,label,email,model?} — metadata only, no secrets
   CLAUDE_ACCOUNTS_DELETE: 'claude-accounts:delete',
   CLAUDE_ACCOUNTS_VERIFY: 'claude-accounts:verify', // fetch a token's real account (id)
 

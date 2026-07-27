@@ -79,7 +79,7 @@ const CSS = `
      (glass-elevated). Without it the panels were wallpaper + scrim only, so
      they picked up whatever the photo was doing — reading cool/blue against
      the panes' warm gray. This is what makes the two surfaces the same color. */
-  background-color:rgba(var(--terminal-bg-rgb,30,30,30),var(--window-tint,.85));
+  background-color:rgba(var(--window-tint-rgb,30,30,30),var(--window-tint,.85));
   background-image:linear-gradient(var(--ops-tint),var(--ops-tint)),var(--ops-wallpaper,none);
   background-attachment:scroll,fixed;
   background-size:auto,cover;

@@ -1529,7 +1529,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // The surface colour comes from the shared tint, not a fixed
       // glass-elevated: with a wallpaper the scrim below covers this, without
       // one this IS the pane. Either way it's the same number as the console.
-      style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` }}
+      style={{ backgroundColor: `rgba(var(--window-tint-rgb, 30, 30, 30), var(--window-tint, 0.85))` }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
@@ -1570,7 +1570,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         {bgEnabled && (
           <div
             className="absolute inset-0 pointer-events-none z-0"
-            style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), var(--window-tint, 0.85))` }}
+            style={{ backgroundColor: `rgba(var(--window-tint-rgb, 30, 30, 30), var(--window-tint, 0.85))` }}
           />
         )}
         <div

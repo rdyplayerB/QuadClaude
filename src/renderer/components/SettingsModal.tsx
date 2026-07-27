@@ -6,6 +6,7 @@ import { ClaudeAccountsSettings } from './ClaudeAccountsSettings'
 import { PluginsSettings } from './PluginsSettings'
 import { ModelRouterSettings } from './ModelRouterSettings'
 import { useUiScale, applyUiScale } from '../uiScale'
+import { DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from '../appearance'
 
 interface SettingsModalProps {
   isOpen: boolean
@@ -461,24 +462,35 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
                     block: it applies whether or not a wallpaper is on. The two
                     are a pair — transparency is the space BETWEEN windows, tint
                     is the windows themselves. */}
+                {/* ONE control: the colour and how much of it are the same
+                    setting, so they can't drift apart. Both feed the single
+                    --window-tint-rgb / --window-tint pair that every surface
+                    reads (see renderer/appearance.ts). */}
                 <SettingRow
                   title="Window tint"
-                  caption="How solid every window surface is — terminal panes and the Activity Console, in-app and popped out"
+                  caption="The colour every window surface is made of — terminal panes and the Activity Console, in-app and popped out"
                 >
-                  <div className="flex items-center gap-2.5 w-56">
-                    <span className="text-meta text-[--ui-text-muted]">clear</span>
+                  <div className="flex items-center gap-2.5 w-56 glass-control rounded-lg px-2.5 py-1.5">
+                    <input
+                      type="color"
+                      value={preferences.windowTintColor ?? DEFAULT_TINT_COLOR}
+                      onChange={(e) => updatePreferences({ windowTintColor: e.target.value })}
+                      className="w-6 h-6 rounded cursor-pointer bg-transparent border border-white/15 p-0 shrink-0"
+                      aria-label="Window tint colour"
+                      title="Window tint colour"
+                    />
                     <input
                       type="range"
                       min={0.2}
                       max={1}
                       step={0.05}
-                      value={preferences.windowTint ?? 0.85}
+                      value={preferences.windowTint ?? DEFAULT_TINT_ALPHA}
                       onChange={(e) => updatePreferences({ windowTint: Number(e.target.value) })}
-                      className="flex-1 accent-[--accent]"
-                      aria-label="Window tint"
+                      className="flex-1 accent-[--accent] min-w-0"
+                      aria-label="Window tint strength"
                     />
                     <span className="text-meta text-[--ui-text-muted] tabular-nums w-9 text-right">
-                      {Math.round((preferences.windowTint ?? 0.85) * 100)}%
+                      {Math.round((preferences.windowTint ?? DEFAULT_TINT_ALPHA) * 100)}%
                     </span>
                   </div>
                 </SettingRow>

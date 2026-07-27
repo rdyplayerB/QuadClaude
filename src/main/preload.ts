@@ -113,11 +113,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logDiag: (level: 'info' | 'warn' | 'error', category: string, message: string, details?: string) =>
     ipcRenderer.send(IPC_CHANNELS.APP_LOG, level, category, message, details),
 
-  // Window transparency: tell main how clear the ground is so it can switch the
-  // native glass material between frosted and pass-through. CSS alone can't —
-  // that material sits behind the whole web layer.
-  setGroundOpacity: (groundOpacity: number) =>
-    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_GROUND_OPACITY, groundOpacity) as Promise<void>,
+  // Appearance: main owns the native glass material (CSS can't reach it) and
+  // rebroadcasts to other windows so the popped-out console follows live.
+  setAppearance: (appearance: { groundOpacity: number; tintRgb: string; tintAlpha: number }) =>
+    ipcRenderer.invoke(IPC_CHANNELS.WINDOW_SET_APPEARANCE, appearance) as Promise<void>,
+  onAppearanceChanged: (cb: (a: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => void) => {
+    const h = (_e: unknown, a: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => cb(a)
+    ipcRenderer.on(IPC_CHANNELS.WINDOW_APPEARANCE_CHANGED, h)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.WINDOW_APPEARANCE_CHANGED, h)
+  },
 
   // Model router (run any model as the real Claude Code TUI)
   routerStatus: () =>

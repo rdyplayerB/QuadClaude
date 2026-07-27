@@ -515,9 +515,16 @@ app.whenReady().then(() => {
   setupIPC()
   // Window transparency: the renderer owns the preference, but only main can
   // touch the native glass material behind the window.
-  ipcMain.handle(IPC_CHANNELS.WINDOW_SET_GROUND_OPACITY, async (_evt, groundOpacity: number) => {
-    const clamped = Math.min(1, Math.max(0, Number(groundOpacity)))
+  ipcMain.handle(IPC_CHANNELS.WINDOW_SET_APPEARANCE, async (evt, appearance: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => {
+    const clamped = Math.min(1, Math.max(0, Number(appearance?.groundOpacity)))
     applyGlassClarity(Number.isFinite(clamped) ? clamped : 1)
+    // Fan out to every OTHER window. The popped-out console is its own renderer
+    // with its own document, so without this it keeps whatever appearance it was
+    // born with and drifts from the main window the moment the slider moves.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || win.webContents.id === evt.sender.id) continue
+      win.webContents.send(IPC_CHANNELS.WINDOW_APPEARANCE_CHANGED, appearance)
+    }
   })
 
   logger.info('ipc', 'IPC handlers registered')

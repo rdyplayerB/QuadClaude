@@ -167,6 +167,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     // Matches the wallpaper scrim the panes have always used, so existing
     // workspaces look identical until the user moves the slider.
     windowTint: 0.85,
+    // Neutral near-black, matching --terminal-bg. Changing this re-hues every
+    // surface at once rather than per-window.
+    windowTintColor: '#1e1e1e',
   },
   isInitialized: false,
 

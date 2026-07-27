@@ -10,6 +10,7 @@ import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
 import { useUiScale, applyUiScale, readUiScale } from './uiScale'
+import { readAppearance, applyAppearance, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
@@ -69,23 +70,23 @@ function App() {
   // Clearing only (1) exposes (2), whose default `regular` material frosts and
   // brightens the desktop into a flat white sheet — which is exactly what a
   // "fully transparent" window used to look like. Main switches it to `clear`.
+  // Appearance is defined in exactly one place (renderer/appearance.ts) and
+  // published to the document root, where every surface — panes, the Activity
+  // Console's Shadow DOM, and the popped-out console's separate document —
+  // reads the same values. Main rebroadcasts them so other windows stay in
+  // step live instead of only picking them up at launch.
   const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
-  // Window tint: how solid the surfaces themselves are. Published as a variable
-  // on the root so every surface reads the SAME number — panes, the Activity
-  // Console's panels (custom properties inherit past its shadow boundary), and
-  // anything added later. That is what keeps them from drifting apart.
-  const windowTint = useWorkspaceStore((s) => s.preferences.windowTint ?? 0.85)
+  const windowTint = useWorkspaceStore((s) => s.preferences.windowTint ?? DEFAULT_TINT_ALPHA)
+  const windowTintColor = useWorkspaceStore((s) => s.preferences.windowTintColor ?? DEFAULT_TINT_COLOR)
   const prefsLoaded = useWorkspaceStore((s) => s.isInitialized)
   useEffect(() => {
-    document.documentElement.style.setProperty('--window-tint', String(windowTint))
-  }, [windowTint])
-  useEffect(() => {
-    document.documentElement.style.setProperty('--ground-opacity', String(groundOpacity))
+    const appearance = readAppearance({ groundOpacity, windowTint, windowTintColor })
+    applyAppearance(document.documentElement, appearance)
     // Wait for the saved preferences to land before telling main anything. The
     // store starts at the fully-opaque default, and pushing that would attach a
     // glass view that startup deliberately skipped — and can never be removed.
-    if (prefsLoaded) window.electronAPI?.setGroundOpacity?.(groundOpacity)
-  }, [groundOpacity, prefsLoaded])
+    if (prefsLoaded) window.electronAPI?.setAppearance?.(appearance)
+  }, [groundOpacity, windowTint, windowTintColor, prefsLoaded])
 
   // Cmd +/− targets the frontmost surface. The Activity Console owns its own
   // scale (OpsOverlay), so App only needs to know whether it's showing.
