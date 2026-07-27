@@ -106,8 +106,13 @@ body {
 
 
 /* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */
+/* .glass is the GROUND the panes sit on — the one surface behind everything.
+   --ground-opacity scales its tint away entirely (0 = fully clear), which lets
+   the native liquid-glass material, and through it the desktop, read between
+   the panes. Pane surfaces are untouched, so terminal text never loses its
+   backdrop. Set from Settings → Background; defaults to the standard tint. */
 .glass {
-  background: var(--glass-bg);
+  background: color-mix(in srgb, var(--glass-bg) calc(var(--ground-opacity, 1) * 100%), transparent);
 }
 
 .glass-elevated {

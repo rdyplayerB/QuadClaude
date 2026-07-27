@@ -63,6 +63,14 @@ function App() {
   // Mounting the hook applies any persisted scale on load.
   useUiScale()
 
+  // Ground transparency: one variable drives the surface behind the panes
+  // (see `.glass` in index.css). At 0 the ground is gone and the desktop reads
+  // through the gaps, so the panes float.
+  const groundOpacity = useWorkspaceStore((s) => s.preferences.groundOpacity ?? 1)
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ground-opacity', String(groundOpacity))
+  }, [groundOpacity])
+
   // Cmd +/− targets the frontmost surface. The Activity Console owns its own
   // scale (OpsOverlay), so App only needs to know whether it's showing.
   const isOpsOpenRef = useRef(false)
@@ -374,7 +382,7 @@ function App() {
             QuadClaude
           </span>
           <span className="text-[--ui-text-faint]">│</span>
-          <span className="text-meta text-[--ui-text-secondary]">v1.31.12</span>
+          <span className="text-meta text-[--ui-text-secondary]">v1.31.13</span>
         </div>
 
         {/* Center - layout selector + add pane */}

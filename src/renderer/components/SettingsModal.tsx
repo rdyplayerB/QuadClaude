@@ -433,6 +433,30 @@ export const SettingsModal = memo(function SettingsModal({ isOpen, onClose }: Se
 
             {tab === 'background' && (
               <div className="space-y-4">
+                {/* Left end is fully clear on purpose: dragging left takes the
+                    ground away, which is the direction of the effect. */}
+                <SettingRow
+                  title="Window transparency"
+                  caption="Clears the ground behind the panes — drag left and the desktop shows through the gaps, so the panes float"
+                >
+                  <div className="flex items-center gap-2.5 w-56">
+                    <span className="text-meta text-[--ui-text-muted]">clear</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={preferences.groundOpacity ?? 1}
+                      onChange={(e) => updatePreferences({ groundOpacity: Number(e.target.value) })}
+                      className="flex-1 accent-[--accent]"
+                      aria-label="Window transparency"
+                    />
+                    <span className="text-meta text-[--ui-text-muted] tabular-nums w-9 text-right">
+                      {Math.round((1 - (preferences.groundOpacity ?? 1)) * 100)}%
+                    </span>
+                  </div>
+                </SettingRow>
+
                 <SettingRow title="Show background" caption="Wallpaper behind every pane">
                   <Toggle
                     on={background.enabled}

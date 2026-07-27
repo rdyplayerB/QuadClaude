@@ -233,6 +233,11 @@ export interface WorkspacePreferences {
   dangerouslySkipPermissions?: boolean
   // When false, suppress the chime played when a pane starts waiting on a decision (default: enabled)
   decisionSoundEnabled?: boolean
+  // How solid the ground BEHIND the panes is: 1 = the standard glass tint,
+  // 0 = fully clear, so the desktop reads straight through the gaps and the
+  // panes float on it. Only the ground changes — pane surfaces keep their own
+  // opacity so terminal text stays readable at any setting.
+  groundOpacity?: number
   // Configurable agents a pane can launch. Seeded with the built-in Claude profile.
   agentProfiles?: AgentProfile[]
   // Global fallback agent when a pane has no agentId assigned yet

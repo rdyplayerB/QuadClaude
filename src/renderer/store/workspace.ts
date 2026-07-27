@@ -161,6 +161,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     background: DEFAULT_BACKGROUND,
     agentProfiles: DEFAULT_AGENT_PROFILES,
     defaultAgentId: CLAUDE_PROFILE_ID,
+    // 1 = the standard glass ground. Lower it (Settings → Background) to let
+    // the desktop through the gaps between panes.
+    groundOpacity: 1,
   },
   isInitialized: false,
 
