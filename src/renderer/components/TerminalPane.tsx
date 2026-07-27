@@ -1492,7 +1492,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   const background = preferences.background ?? DEFAULT_BACKGROUND
   const bgEnabled = background.enabled && !!background.image
-  const groundOpacity = preferences.groundOpacity ?? 1
 
   // Border styling - thin glass-style borders
   const getBorderClass = () => {
@@ -1555,14 +1554,12 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          // `fixed` anchors the image to the viewport, so every pane samples one
-          // continuous photo and the grid reads as a single sheet with slots cut
-          // out of it — the exact opposite of separate floating cards. Keep that
-          // only while the window is solid; once it's see-through, let each pane
-          // crop its own copy so the panes read as independent objects.
-          ...(background.mode === 'unified' && groundOpacity >= 1
-            ? { backgroundAttachment: 'fixed' as const }
-            : {}),
+          // `fixed` anchors the image to the VIEWPORT, not to each pane, which
+          // is the whole point: every pane is a window onto one shared canvas,
+          // so the picture lines up across the grid while the gutters between
+          // them stay clear. Panes are cut-outs on a single backdrop — not
+          // separate tiles each holding their own copy of the photo.
+          ...(background.mode === 'unified' ? { backgroundAttachment: 'fixed' as const } : {}),
         } : undefined}
       >
         {/* Opacity overlay - controls how much wallpaper shows through */}

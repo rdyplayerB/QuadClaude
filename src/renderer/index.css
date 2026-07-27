@@ -105,25 +105,47 @@ body {
 }
 
 
+/* The Activity Console is an overlay inside the same window, so once its own
+   gutters went clear they revealed the terminal grid underneath rather than the
+   desktop — the console looked like it was floating on top of the panes instead
+   of replacing them. Hide the grid while it's open so the console's gaps read
+   exactly like the grid's do.
+   visibility, never display:none: the terminals must keep their geometry, or
+   the fit paths bail at offsetWidth 0 and panes come back blank. */
+:root[data-ops-open='1'] .terminal-grid-root { visibility: hidden; }
+
 /* A pane is a floating CARD, not a grid cell. Three things do the work here:
    the radius (2px read as a sliced sheet at these gutters), the cast shadow
    (impossible until the grid wrapper stopped clipping), and the specular top
    edge that makes the surface read as lit rather than just tinted.
    The active pane is lifted a full elevation step and picks up the accent —
    previously "active" was border-white/10 vs /05, a 5% difference nobody
-   could see, on an app whose whole job is watching several panes at once. */
+   could see, on an app whose whole job is watching several panes at once.
+
+   A cast shadow needs a SURFACE to fall on. Over a solid ground it reads as
+   depth; over a cleared one it just tints the user's desktop, and a soft wide
+   shadow against bright content behind the window reads as a grey bubble
+   around every pane. So the shadow fades out with the ground it would land on,
+   and the edge takes over as the definition — crisp at full transparency,
+   where fog would be. */
 .pane-surface {
+  --shade: var(--ground-opacity, 1);
   border-radius: var(--pane-radius);
-  box-shadow: var(--elev-2), var(--specular);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, calc(0.40 * var(--shade))),
+    0 2px 5px rgba(0, 0, 0, calc(0.28 * var(--shade))),
+    var(--specular);
   transition: box-shadow var(--motion) var(--ease);
 }
 
 .pane-surface.is-active {
   box-shadow:
-    var(--elev-3),
+    0 16px 44px rgba(0, 0, 0, calc(0.55 * var(--shade))),
+    0 4px 12px rgba(0, 0, 0, calc(0.36 * var(--shade))),
     var(--specular),
-    0 0 0 1px var(--accent-line),
-    0 0 22px -2px rgba(34, 211, 238, 0.28);
+    /* The ring is a hard 1px edge, not a glow — it stays exact at any
+       transparency, where a soft halo would smear onto the desktop. */
+    0 0 0 1px var(--accent-line);
 }
 
 /* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */

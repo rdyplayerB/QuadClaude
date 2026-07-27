@@ -24,13 +24,16 @@ const CSS = `
      the rest of the app instead of drifting on its own hardcoded px.
      --ui-scale is pinned to 1 here because the console carries its own zoom
      (OpsOverlay), which would otherwise compound with the chrome zoom. */
-  --ui-scale:1; }
+  --ui-scale:1;
+  /* Same gutter the terminal grid uses (GRID_PAD / getGridStyle). The console's
+     panels are its "windows", so they get the app's spacing, not their own. */
+  --ops-gap:16px; }
 *{margin:0;padding:0;box-sizing:border-box}
 .ops-host{height:100%;background:var(--bg);color:var(--fg);font-family:var(--mono);-webkit-font-smoothing:antialiased;
   padding:0;font-size:var(--fs-body);line-height:1.5;font-variant-numeric:tabular-nums;overflow:hidden;display:flex;flex-direction:column}
 ::selection{background:var(--sel)}
 .wrap{width:100%;margin:0 auto;flex:1;min-height:0;display:flex;flex-direction:column}
-.content{flex:1;min-height:0;display:flex;flex-direction:column;padding:12px 14px 14px}
+.content{flex:1;min-height:0;display:flex;flex-direction:column;padding:var(--ops-gap)}
 /* Console title bar. In-app it sits directly under the app's own title bar, so
    it needs no traffic-light safe area; popped out the console IS the window, so
    .ops-host.popped re-adds the 84px inset for that window's controls. */
@@ -49,25 +52,51 @@ const CSS = `
 .recbtn{border:1px solid var(--line);background:var(--term);color:var(--fg3);font-family:var(--mono);font-size:var(--fs-meta);padding:4px 9px;border-radius:var(--r);cursor:pointer;letter-spacing:.04em}
 .recbtn.on{color:var(--red);border-color:rgba(248,113,113,.5);background:rgba(248,113,113,.08)}
 .recbtn.on::before{content:"● ";}
-.kpis{flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:0 0 10px}
-.kpi{padding:9px 11px;background:var(--pane);border:1px solid var(--line);border-radius:var(--rp)}
+.kpis{flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);gap:var(--ops-gap);margin:0 0 var(--ops-gap)}
+.kpi{padding:6px 9px;border:1px solid var(--line)}
 .kpi.alert{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.05)}
 .kpi .lab{font-size:var(--fs-meta);color:var(--fg3)}
-.kpi .val{font-size:var(--fs-display);font-weight:600;margin-top:3px;color:var(--bright)}
+/* The KPI numerals were display-sized: five of them cost ~130px of height that
+   the board needed more. Still the biggest thing on screen, just not by 3x. */
+.kpi .val{font-size:calc(var(--fs-display) * .68);font-weight:600;margin-top:0;color:var(--bright);line-height:1.15}
 .kpi .val.warn{color:var(--amber)} .kpi .val .u{font-size:var(--fs-body);color:var(--fg3);margin-left:2px}
-.kpi .sub{font-size:var(--fs-meta);color:var(--fg3);margin-top:3px}
-.stage{flex:1 1 auto;min-height:0;display:grid;gap:8px;grid-template-columns:270px 1fr 322px;grid-template-rows:minmax(0,1fr)}
-.stage>.panel{min-height:0;display:flex;flex-direction:column}
+.kpi .sub{font-size:var(--fs-meta);color:var(--fg3);margin-top:1px}
+.stage{flex:1 1 auto;min-height:0;display:grid;gap:var(--ops-gap);grid-template-columns:246px minmax(0,1fr) 300px;grid-template-rows:minmax(0,1fr)}
+/* min-width:0 is load-bearing: a grid item defaults to min-width:auto, so the
+   board's min-content width (six lanes) refused to shrink and shoved the feed
+   off the right edge instead. With this the middle track yields and every panel
+   stays on screen. */
+.stage>.panel{min-height:0;min-width:0;display:flex;flex-direction:column}
 .stage>.panel>.phead{flex:0 0 auto}
-.panel{background:var(--pane);border:1px solid var(--line);border-radius:var(--rp)}
-.phead{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
+/* Panels are WINDOWS onto the same canvas the terminal panes show, not tinted
+   boxes sitting on a full-bleed sheet. background-attachment:fixed anchors the
+   image to the viewport, so the picture runs continuously across every panel
+   while the gaps between them stay clear — exactly how the grid behaves. The
+   tint rides as a first background layer over the image. Radius and elevation
+   come from the app's tokens so the console can't drift from the main window. */
+.panel,.kpi{
+  background-color:transparent;
+  background-image:linear-gradient(var(--ops-tint),var(--ops-tint)),var(--ops-wallpaper,none);
+  background-attachment:scroll,fixed;
+  background-size:auto,cover;
+  background-position:center,center;
+  background-repeat:no-repeat,no-repeat;
+  border-radius:var(--pane-radius,12px);
+  box-shadow:0 6px 18px rgba(0,0,0,calc(.40 * var(--ground-opacity,1))),
+             0 2px 5px rgba(0,0,0,calc(.28 * var(--ground-opacity,1))),
+             var(--specular,inset 0 1px 0 rgba(255,255,255,.09));
+}
+/* overflow:hidden so scrolling rows clip to the rounded corners instead of
+   squaring them off — the same reason each terminal pane clips its own body. */
+.panel{border:1px solid var(--line);overflow:hidden}
+.phead{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--line-soft)}
 .phead h3{font-size:var(--fs-body);color:var(--fg2);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
 .phead .sub{color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0;font-size:var(--fs-meta)}
 .live{font-size:var(--fs-meta);letter-spacing:.06em;color:var(--accent);display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;font-weight:600}
 .live::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.6s infinite}
 @keyframes pulse{50%{opacity:.35}}
 #roster{flex:1 1 auto;min-height:0;overflow:auto}
-.r{padding:10px 12px;border-bottom:1px solid var(--line-soft);cursor:pointer}
+.r{padding:7px 10px;border-bottom:1px solid var(--line-soft);cursor:pointer}
 .r:last-child{border-bottom:0} .r:hover,.r.sel{background:rgba(255,255,255,.03)}
 .r-top{display:flex;align-items:center;gap:8px}
 .av{width:24px;height:24px;border-radius:2px;flex:0 0 24px;display:grid;place-items:center;font-size:var(--fs-body);font-weight:700;color:#0a0a0a}
@@ -76,34 +105,43 @@ const CSS = `
 .s-active{color:var(--g-green);background:rgba(74,222,128,.14)}
 .s-waiting{color:var(--amber);background:rgba(251,191,36,.14)}
 .s-idle{color:var(--fg3);background:rgba(255,255,255,.06)}
-.r-status{display:flex;align-items:center;gap:7px;margin-top:6px;font-size:var(--fs-meta);color:var(--fg3);flex-wrap:wrap}
+.r-status{display:flex;align-items:center;gap:7px;margin-top:4px;font-size:var(--fs-meta);color:var(--fg3);flex-wrap:wrap}
 .gitchip{display:inline-flex;align-items:center;gap:3px;color:var(--g-green)}
 .gitchip .dirty{color:var(--g-orange)}
 .acct{color:var(--green)} .ctx{margin-left:auto}
-.meter{display:flex;align-items:flex-end;gap:2px;height:20px;margin-top:8px}
+.meter{display:flex;align-items:flex-end;gap:2px;height:15px;margin-top:5px}
 .meter i{flex:1;background:var(--mc,var(--g-green));border-radius:1px;height:2px;min-height:2px;transition:height .45s cubic-bezier(.4,0,.2,1)}
 .meter.flat i{background:var(--faint)}
 .r-meterlab{display:flex;justify-content:space-between;font-size:var(--fs-meta);color:var(--faint);margin-top:3px}
 .r-meterlab b{color:var(--fg3)}
-/* Forks nest under the agent that spawned them, and are never stylable as a
-   main agent: dimmer, indented, and carrying an explicit SUB tag. */
-.subs{margin-top:6px}
-.subrow{display:flex;align-items:center;gap:6px;padding:3px 0 3px 10px;border-left:1px solid var(--line);margin-left:3px;font-size:var(--fs-meta);color:var(--fg3)}
-.subrow .subglyph{color:var(--g-cyan)}
-.subrow.done{opacity:.55} .subrow.done .subglyph{color:var(--g-green)}
-.subrow .subname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subrow .subtag{margin-left:auto;font-size:9px;letter-spacing:.08em;color:var(--faint);border:1px solid var(--line);border-radius:1px;padding:0 3px}
+/* The rail only COUNTS a parent's forks — the board names them. One row per
+   fork here spent four lines restating what the grouped card already says. */
+.subs:not(:empty){margin-top:5px}
+.subchip{display:inline-flex;align-items:center;gap:5px;font-size:var(--fs-meta);color:var(--g-cyan);
+  background:rgba(34,211,238,.10);border-radius:2px;padding:1px 6px}
+.subchip.done{color:var(--fg3);background:rgba(255,255,255,.05)}
+.subchip .subglyph{opacity:.8}
 /* Reasoning text pulled straight from the transcript's thinking blocks. */
-.thinkline{color:var(--fg3);font-style:italic;line-height:1.45;margin-bottom:4px;
+.thinkline{color:var(--fg3);font-style:italic;line-height:1.45;margin-bottom:4px;overflow-wrap:anywhere;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .doneline.err{color:var(--red)}
 .card.sub{border-left:2px solid var(--g-cyan)}
 /* Real work ended, card still serving its minimum visible dwell. */
 .card.spent{opacity:.5}
 .card.failed{border-color:rgba(248,113,113,.45)}
-.board{flex:1 1 auto;min-height:0;display:flex;gap:8px;padding:10px;overflow:auto;position:relative}
-.col{flex:1;min-width:150px;display:flex;flex-direction:column;gap:7px}
-.col.rail{flex:0 0 132px;min-width:132px}
+.board{flex:1 1 auto;min-height:0;display:flex;gap:5px;padding:7px;overflow:auto;position:relative}
+/* Lanes share the width evenly and are allowed to shrink; card text wraps
+   (and breaks inside long tokens), so all six stay readable side by side
+   instead of the last one scrolling out of view. */
+.col{flex:1 1 0;min-width:118px;display:flex;flex-direction:column;gap:5px}
+/* The shared side column: QUEUED over BLOCKED, each with its own head and body.
+   Fixed and narrow, so the four flow lanes split everything that's left. */
+.col.stack{flex:0 0 172px;min-width:172px;gap:8px}
+.col.stack .half{flex:1 1 50%;min-height:0;display:flex;flex-direction:column;gap:5px}
+.col.stack .half .colbody{flex:1 1 auto;min-height:0;overflow:auto}
+/* The alarm half is separated by a rule rather than a border box — empty is the
+   healthy state and should not look like a container waiting to be filled. */
+.col.stack .half.alarm{border-top:1px solid var(--line-soft);padding-top:6px}
 .colhead{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft);cursor:help}
 .colhead .cdot{width:7px;height:7px;border-radius:1px}
 .colhead .lft{display:flex;align-items:center;gap:6px;font-weight:600}
@@ -125,19 +163,36 @@ const CSS = `
 .board-empty svg{width:26px;height:26px;opacity:.5;stroke:var(--fg3)}
 .board-empty .bq-t{font-size:var(--fs-body);color:var(--fg2);letter-spacing:.01em}
 .board-empty .bq-s{font-size:var(--fs-meta);color:var(--faint);max-width:260px;line-height:1.5}
-.colbody{display:flex;flex-direction:column;gap:7px;min-height:20px}
-.card{background:var(--term);border:1px solid var(--line);border-radius:var(--r);padding:8px 9px;will-change:transform}
+.colbody{display:flex;flex-direction:column;gap:5px;min-height:20px}
+.card{background:var(--term);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;will-change:transform;overflow:hidden}
 .card.dim{opacity:.3}
 .card.enter{animation:pop .3s ease}
 @keyframes pop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
 .card.leaving{opacity:0;transform:scale(.96);transition:.25s}
 .card.wait{border-color:rgba(251,191,36,.5);animation:waitglow 1.4s ease-in-out infinite}
 @keyframes waitglow{0%,100%{box-shadow:inset 0 0 0 1px rgba(251,191,36,.35)}50%{box-shadow:inset 0 0 0 1px rgba(251,191,36,.7),inset 0 0 10px rgba(251,191,36,.18)}}
-.chead{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.chead{display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .whodot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
 .whoname{font-size:var(--fs-meta);font-weight:600}
 .ctag{margin-left:auto;font-size:var(--fs-meta);text-transform:uppercase;letter-spacing:.03em;color:var(--fg3);border:1px solid var(--line);padding:1px 5px;border-radius:2px}
-.ct{font-size:var(--fs-body);color:var(--fg);font-weight:500;line-height:1.35}
+/* A card headline is arbitrary text from a transcript — a URL, a path, a shell
+   command — so it can be one unbreakable token far wider than the lane. Break
+   anywhere and clamp, or it bleeds out over the next column. */
+.ct{font-size:var(--fs-body);color:var(--fg);font-weight:500;line-height:1.35;
+  overflow-wrap:anywhere;word-break:break-word;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* LANDED: the ask this outcome answers, kept dim and to one line — the result
+   is the headline, this is only the tie-back. */
+.reline{font-size:var(--fs-meta);color:var(--fg3);margin-bottom:4px;line-height:1.4;
+  overflow-wrap:anywhere;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reline::before{content:"re: ";color:var(--faint)}
+/* Grouped forks: one row per subagent, each with its own clock. */
+.fk{display:flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--fg2);line-height:1.5;min-width:0}
+.fk .fkg{color:var(--g-cyan);flex:0 0 auto}
+.fk.done{color:var(--fg3)} .fk.done .fkg{color:var(--g-green)}
+.fk .fkn{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fk .fke{flex:0 0 auto;margin-left:auto;color:var(--faint);font-variant-numeric:tabular-nums}
+.fkmore{font-size:var(--fs-meta);color:var(--faint);padding-top:2px}
 .updateline{font-size:var(--fs-meta);margin-top:5px;color:var(--fg3)}
 .updateline .g{color:var(--green)} .updateline .add{color:var(--green)} .updateline .del{color:var(--red)} .updateline .fn{color:var(--teal)}
 .workline{font-size:var(--fs-meta);color:var(--g-orange);margin-top:6px;display:flex;align-items:center;gap:5px}
@@ -153,7 +208,7 @@ const CSS = `
 .carry svg{width:14px;height:14px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
 .carry .pill{font-size:var(--fs-meta);font-weight:700;color:#0a0a0a;padding:1px 6px;border-radius:2px;white-space:nowrap;font-family:var(--mono)}
 .feed{flex:1 1 auto;min-height:0;overflow:auto}
-.fi{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line-soft)}
+.fi{display:flex;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line-soft)}
 .fi:last-child{border-bottom:0}
 .fi.new{animation:fin .5s ease}
 @keyframes fin{from{opacity:0;transform:translateY(-6px);background:rgba(78,201,176,.06)}to{opacity:1;transform:none}}
@@ -256,12 +311,32 @@ export function createOpsView(root, handlers) {
   let verifyOn=false, prevMissedPhantom=0
   let rafId=0, destroyed=false
 
+  // QUEUED and BLOCKED are the two lanes that are empty most of the time — one
+  // is a backlog you rarely let build, the other an alarm. Neither earns a full
+  // lane, so they share one narrow column split top/bottom and the four lanes
+  // where work actually moves take the width back.
+  const SIDE = ["queued","blocked"]
+  const FLOW = ["think","act","return","landed"]
+  const colOf = (k) => COLS.filter(function(c){ return c.k===k })[0]
+  const headHtml = (c) =>
+    '<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span>'+
+    '<span class="cn" id="cn-'+c.k+'">0</span><div class="coltip">'+c.tip+'</div></div>'
+
   function buildShell(){
     const board=gid("board"); board.innerHTML=""
-    COLS.forEach(function(c){
-      const col=document.createElement("div"); col.className="col"+(c.k==="blocked"?" rail":"")
-      col.innerHTML='<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span><span class="cn" id="cn-'+c.k+'">0</span>'+
-        '<div class="coltip">'+c.tip+'</div></div>'
+    const stack=document.createElement("div"); stack.className="col stack"
+    SIDE.forEach(function(k){
+      const c=colOf(k); if(!c) return
+      const half=document.createElement("div"); half.className="half"+(k==="blocked"?" alarm":"")
+      half.innerHTML=headHtml(c)
+      const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
+      half.appendChild(body); stack.appendChild(half); colBodies[c.k]=body
+    })
+    board.appendChild(stack)
+    FLOW.forEach(function(k){
+      const c=colOf(k); if(!c) return
+      const col=document.createElement("div"); col.className="col"
+      col.innerHTML=headHtml(c)
       const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
       col.appendChild(body); board.appendChild(col); colBodies[c.k]=body
     })
@@ -345,10 +420,14 @@ export function createOpsView(root, handlers) {
       row.querySelector(".mlab").textContent=(a.state==="active"?(tpm?fmtTok(tpm)+" tok/min":"working"):(a.state==="waiting"?"blocked":(a.state==="ready"?"awaiting instruction":"idle")))+qd
       const tk=a.tokens
       row.querySelector(".tkl").textContent=tk?("↓"+fmtTok(tk.output)+" out · "+fmtTok(tk.total)+" total"):"terminal output"
+      // Forks are NAMED on the board (one grouped card, one row each). Here the
+      // rail only has to say the parent has some out — a row per fork cost four
+      // lines to repeat what the board already spelled out.
       const subsEl=row.querySelector(".subs"); const subs=a.subagents||[]
-      subsEl.innerHTML=subs.map(function(x){
-        return '<div class="subrow'+(x.done?" done":"")+'"><span class="subglyph">'+(x.done?"●":"○")+'</span>'+
-          '<span class="subname">'+esc(x.name)+'</span><span class="subtag">SUB</span></div>' }).join("")
+      const runN=subs.filter(function(x){return !x.done}).length, doneN=subs.length-runN
+      subsEl.innerHTML=subs.length?('<div class="subchip'+(runN?"":" done")+'"><span class="subglyph">⑂</span>'+
+        (runN?runN+" fork"+(runN===1?"":"s")+" running":doneN+" fork"+(doneN===1?"":"s")+" back")+
+        (runN&&doneN?" · "+doneN+" back":"")+'</div>'):""
       agentSeries[a.paneId]=a.outSeries||[]
     })
     Array.prototype.slice.call(host.querySelectorAll(".r")).forEach(function(row){ const pid=+row.getAttribute("data-pane"); if(!seen[pid]) row.remove() })
@@ -375,15 +454,38 @@ export function createOpsView(root, handlers) {
       })
     })
   }
-  function cardSig(c){ return [c.col,c.tag,c.task,c.kind,c.sub,c.think,c.durMs,c.tokens,c.err,c.ask,c.when].join("|") }
+  function cardSig(c){ return [c.col,c.tag,c.task,c.kind,c.sub,c.think,c.durMs,c.tokens,c.err,c.ask,c.when,c.re,c.stat].join("|") }
   function dur(ms){ if(ms==null) return ""; const s=ms/1000; return s<1?Math.round(ms)+"ms":(s<60?(Math.round(s*10)/10)+"s":Math.floor(s/60)+"m "+Math.round(s%60)+"s") }
+  function since(t){ const sec=Math.max(0,Math.floor((Date.now()-t)/1000)); return sec<60?sec+"s":Math.floor(sec/60)+"m "+(sec%60)+"s" }
+  // A parent's forks as rows on ONE card: the tie to the agent is the card
+  // itself (its header is the parent), and each row still says what that fork
+  // is working on. Eight forks used to be eight cards filling the lane.
+  const FORK_ROWS=7
+  function forkBody(c){
+    const list=c.forks||[]
+    const rows=list.slice(0,FORK_ROWS).map(function(f){
+      return '<div class="fk'+(f.done?" done":"")+'" data-since="'+(f.startedAt||0)+'">'+
+        '<span class="fkg">'+(f.done?"●":"○")+'</span>'+
+        '<span class="fkn">'+esc(f.label)+'</span>'+
+        '<span class="fke">'+(f.done?"back":since(f.startedAt||Date.now()))+'</span></div>'
+    }).join("")
+    const more=list.length-FORK_ROWS
+    return rows+(more>0?'<div class="fkmore">+'+more+' more</div>':"")
+  }
   function cardBody(c){
     // Every line here is read off the transcript — reasoning text, real tool
     // durations, real output_tokens. Nothing on a card is synthesized.
     const think=c.think?'<div class="thinkline">'+esc(c.think)+'</div>':""
+    const re=c.re?'<div class="reline">'+esc(c.re)+'</div>':""
     if(c.col==="blocked") return '<div class="askline">'+esc(c.ask||"waiting for input")+'</div>'
-    if(c.col==="think") return think+'<div class="workline"><span class="sp">✳</span> <span class="wtxt">composing… (<span class="wel">0s</span>)</span></div>'
+    if(c.forks&&c.forks.length) return forkBody(c)
+    if(c.col==="think") return think+re+'<div class="workline"><span class="sp">✳</span> <span class="wtxt">composing… (<span class="wel">0s</span>)</span></div>'
     if(c.col==="act") return think+'<div class="workline"><span class="sp">✳</span> <span class="wtxt">'+(c.kind==="subagent"?"running":"in flight")+'… (<span class="wel">0s</span>'+(c.tokens?' · ↓'+c.tokens+' tok':'')+')</span></div>'
+    // LANDED reads as an outcome, not another copy of the prompt: the headline
+    // is what Claude said when it finished, `re:` names the ask it answers, and
+    // the footer carries the turn's measured shape.
+    if(c.col==="landed") return re+
+      '<div class="doneline'+(c.err?" err":"")+'">'+(c.when?esc(c.when):"landed")+(c.stat?' · '+esc(c.stat):"")+'</div>'
     // returned
     return think+'<div class="doneline'+(c.err?" err":"")+'">'+(c.err?"failed":"returned")+(c.durMs!=null?' · '+dur(c.durMs):(c.when?' · '+esc(c.when):''))+(c.tokens?' · ↓'+c.tokens+' tok':'')+'</div>'
   }
@@ -415,7 +517,9 @@ export function createOpsView(root, handlers) {
       el.querySelector(".whodot").style.background=col
       const wn=el.querySelector(".whoname"); wn.style.color=col; wn.textContent=a.name
       el.querySelector(".ctag").textContent=c.tag||""
-      el.querySelector(".ct").textContent=c.task||""
+      // A grouped fork card has no headline of its own — its rows are the
+      // content — so the empty slot must not reserve a line.
+      const ct=el.querySelector(".ct"); ct.textContent=c.task||""; ct.style.display=c.task?"":"none"
       const sig=cardSig(c)
       if(rec.sig!==sig){ rec.bodyEl.innerHTML=cardBody(c); rec.sig=sig }
       el._card=c
@@ -490,9 +594,19 @@ export function createOpsView(root, handlers) {
     })
   }
   function tickNumbers(){
-    const since=snap?(Date.now()-lastSnapAt):0
     for(const id in cardEls){
-      const c=cardEls[id].el._card; if(!c||(c.col!=="act"&&c.col!=="think")) continue
+      const c=cardEls[id].el._card; if(!c) continue
+      // Each fork row runs its own clock — they were spawned at different times.
+      if(c.forks&&c.forks.length){
+        const rows=cardEls[id].el.querySelectorAll(".fk[data-since]")
+        Array.prototype.forEach.call(rows,function(r){
+          if(r.classList.contains("done")) return
+          const t=+r.getAttribute("data-since"); const e=r.querySelector(".fke")
+          if(e&&t) e.textContent=since(t)
+        })
+        continue
+      }
+      if(c.col!=="act"&&c.col!=="think") continue
       const el=cardEls[id].el.querySelector(".wel"); if(el&&c.startedAt){ const ms=Date.now()-c.startedAt; const sec=Math.floor(ms/1000); el.textContent=sec<60?sec+"s":(Math.floor(sec/60)+"m "+(sec%60)+"s") }
     }
   }

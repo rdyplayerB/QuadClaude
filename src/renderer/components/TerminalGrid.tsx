@@ -164,7 +164,7 @@ export const TerminalGrid = memo(function TerminalGrid() {
   const tilesVisible = isPipLayout && pipVisible && !pipCollapsed
 
   return (
-    <div ref={containerRef} style={gridStyle} className="p-4 gap-4 glass">
+    <div ref={containerRef} style={gridStyle} className="p-4 gap-4 glass terminal-grid-root">
       {paneIds.map((id, index) => {
         const tile = pipGeometry && index >= vc ? pipGeometry.tiles[index - vc] : null
         return (
@@ -185,6 +185,9 @@ export const TerminalGrid = memo(function TerminalGrid() {
                     minWidth: 0,
                     minHeight: 0,
                     overflow: 'hidden',
+                    // This wrapper clips the tile, so a square clip would shear
+                    // the corners off the rounded pane inside it. Match the pane.
+                    borderRadius: 'var(--pane-radius)',
                   }
                 : getPaneStyle(index, layout, count)
             }

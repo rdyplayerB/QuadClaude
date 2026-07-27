@@ -30,6 +30,15 @@ export function OpsOverlay() {
   // changes into its readout.
   const viewRef = useRef<{ setScale?: (n: number) => void } | null>(null)
 
+  // Flag the document while the console is up so the terminal grid can step
+  // aside (see :root[data-ops-open] in index.css). An attribute rather than
+  // prop-drilling: nothing between App and the grid needs to know about this.
+  useEffect(() => {
+    if (show) document.documentElement.dataset.opsOpen = '1'
+    else delete document.documentElement.dataset.opsOpen
+    return () => { delete document.documentElement.dataset.opsOpen }
+  }, [show])
+
   useEffect(() => {
     const unsub = window.electronAPI.onOpsInappShow?.((v: boolean) => setShow(v))
     // Pull current visibility on mount — recovers a show-push that was dropped
@@ -112,34 +121,33 @@ export function OpsOverlay() {
     <div
       className="fixed inset-x-0 bottom-0 top-9 z-[60]"
     >
-      {/* Backdrop as its OWN layer rather than the container's background: the
-          container also holds the console content, and fading a parent fades
-          everything inside it. Only the ground is allowed to go clear. */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={
-          img
-            ? {
-                backgroundImage: `url(${img})`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center',
-                backgroundRepeat: 'no-repeat',
-                opacity: clarity,
-              }
-            : { background: `rgba(14, 16, 19, ${clarity})` }
-        }
-      />
-      {/* Same opacity overlay the panes use — dims the wallpaper for readability. */}
-      {wallpaperOn && (
+      {/* Ground behind the console, matching the main grid's: it fades with the
+          same slider, so at full transparency there is nothing between the
+          console's panels and whatever is behind the window. Its own layer
+          rather than the container's background — fading a parent would fade
+          the console's content along with it. */}
+      {groundOpacity > 0 && (
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity * clarity})` }}
+          style={{ background: `rgba(14, 16, 19, ${0.86 * groundOpacity})` }}
         />
       )}
-      {/* Shadow-DOM host: transparent, so the wallpaper ground shows through
-          its glass panels. `zoom` scales type and layout together, the same
-          way the delegation dashboard scales. */}
-      <div ref={hostRef} className="absolute inset-0" style={{ zoom: scale }} />
+      {/* Shadow-DOM host. The wallpaper is handed in as a custom property (they
+          inherit past the shadow boundary) so the console's PANELS can paint it
+          as one shared, viewport-anchored canvas — same as the terminal panes —
+          instead of it being a full-bleed sheet behind everything. That is what
+          keeps the gaps between panels clear. */}
+      <div
+        ref={hostRef}
+        className="absolute inset-0"
+        style={{
+          zoom: scale,
+          ['--ops-wallpaper' as string]: img ? `url(${img})` : 'none',
+          ['--ops-tint' as string]: wallpaperOn
+            ? `rgba(var(--terminal-bg-rgb), ${background.opacity})`
+            : `rgba(40, 40, 42, ${0.72 * clarity})`,
+        }}
+      />
     </div>
   )
 }

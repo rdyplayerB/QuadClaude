@@ -214,13 +214,16 @@ export const PipStripChrome = memo(function PipStripChrome({
       {/* Strip frame: background + border the terminal tiles sit on (z-29,
           UNDER the pane wrappers at z-30). */}
       <div
-        className="absolute glass-modal rounded-lg border border-white/12 shadow-2xl"
+        className="absolute glass-modal border border-white/12 shadow-2xl"
         style={{
           left: geometry.strip.left,
           top: geometry.strip.top,
           width: geometry.strip.width,
           height: geometry.strip.height,
           zIndex: 29,
+          // The strip frames tiles that are real panes, so it carries the pane
+          // radius too — a 4px frame around 12px tiles read as a mismatch.
+          borderRadius: 'var(--pane-radius)',
         }}
       />
       {/* Strip header: drag handle + count + collapse (z-31, above tiles). */}
@@ -300,10 +303,16 @@ export const PipStripChrome = memo(function PipStripChrome({
             </div>
             {/* Tile outline (pane color, amber while waiting) + hover ring. */}
             <div
-              className="absolute inset-0 rounded pointer-events-none"
-              style={{ boxShadow: `inset 0 0 0 1px ${waiting ? '#fbbf24aa' : color + '55'}` }}
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                borderRadius: 'var(--pane-radius)',
+                boxShadow: `inset 0 0 0 1px ${waiting ? '#fbbf24aa' : color + '55'}`,
+              }}
             />
-            <div className="absolute inset-0 rounded pointer-events-none border border-transparent group-hover:border-white/50 transition-colors" />
+            <div
+              className="absolute inset-0 pointer-events-none border border-transparent group-hover:border-white/50 transition-colors"
+              style={{ borderRadius: 'var(--pane-radius)' }}
+            />
           </div>
         )
       })}
