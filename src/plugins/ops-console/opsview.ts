@@ -82,8 +82,8 @@ const CSS = `
   background-color:rgba(var(--window-tint-rgb,30,30,30),var(--window-tint,.85));
   background-image:linear-gradient(var(--ops-tint),var(--ops-tint)),var(--ops-wallpaper,none);
   background-attachment:scroll,fixed;
-  background-size:auto,var(--wallpaper-size,cover);
-  background-position:center,var(--wallpaper-pos,center);
+  background-size:auto,cover;
+  background-position:center,center;
   background-repeat:no-repeat,no-repeat;
   border-radius:var(--pane-radius,12px);
   box-shadow:0 6px 18px rgba(0,0,0,calc(.40 * var(--ground-opacity,1))),

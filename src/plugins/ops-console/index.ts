@@ -78,16 +78,6 @@ function popOut() {
   if (isDev) win.loadURL('http://localhost:5173/ops.html').catch(() => { /* dev server down */ })
   else win.loadFile(path.join(__dirname, '../renderer/ops.html')).catch((e) => ctx?.logger.warn('ops window load failed', String(e)))
 
-  // Same screen-pinned wallpaper anchor as the main window: tell this window
-  // when it moves so its panels keep showing the right slice of the canvas.
-  const pushGeometry = () => {
-    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.WINDOW_GEOMETRY_CHANGED)
-    }
-  }
-  win.on('move', pushGeometry)
-  win.on('resize', pushGeometry)
-
   win.on('closed', () => {
     opsWindow = null
     if (poppingIn) return // our own teardown (pop-in / close) — already handled

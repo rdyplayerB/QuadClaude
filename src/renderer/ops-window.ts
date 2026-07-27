@@ -14,7 +14,7 @@
 // type — visibly different from the in-app one.
 import './tokens.css'
 import { createOpsView } from '../plugins/ops-console/opsview'
-import { readAppearance, applyAppearance, watchWallpaperAnchor, logAppearanceDiagnostics, type Appearance } from './appearance'
+import { readAppearance, applyAppearance, logAppearanceDiagnostics, type Appearance } from './appearance'
 
 // Paint the same ground the in-app overlay uses: the user's wallpaper, dimmed by
 // their opacity setting. Without this the popped-out window is a flat dark slab
@@ -59,7 +59,6 @@ async function applyWallpaperGround() {
     // Same screen-pinned canvas as the main window — this is what makes the
     // popped console show the SAME crop, and therefore the same colour and
     // darkness, as the panes it sits next to.
-    watchWallpaperAnchor(root)
 
     // Same diagnostic as the main window, so the two can be compared directly
     // in app.log. The panel lives inside the shadow root.

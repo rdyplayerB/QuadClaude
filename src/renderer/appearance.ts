@@ -25,13 +25,13 @@ export interface Appearance {
 }
 
 export const DEFAULT_TINT_COLOR = '#1e1e1e'
-// 0.95, not 0.85. At 85% the wallpaper contributed 15% of every pixel, and
-// since each window sits over a different part of the screen-pinned canvas,
-// that 15% was the entire reason the Activity Console read bluer than the
-// terminal panes — measured, not guessed: every surface matched
-// `0.15*wallpaper + 0.85*tint` to within a few units. At 95% the photo is a
-// faint texture and every surface reads as the tint colour, wherever it sits.
-export const DEFAULT_TINT_ALPHA = 0.95
+// Back to 0.85, which shows the wallpaper. 0.95 was a workaround for the
+// screen-pinned canvas, where each window sat over a different REGION of the
+// photo and the 15% it contributed diverged by rgb(-7.6,-3.5,+0.9) between
+// windows. With each window covering itself with the whole image instead, that
+// gap measures (-0.7,-0.5,-0.4) — under a unit — so the tint no longer has to
+// hide the picture to keep surfaces matching.
+export const DEFAULT_TINT_ALPHA = 0.85
 
 // "#1e1e1e" | "#1ee" → "30, 30, 30". Falls back to the neutral default rather
 // than throwing: a malformed value in saved preferences should look wrong, not
@@ -60,26 +60,6 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
   root.style.setProperty('--ground-opacity', String(a.groundOpacity))
   root.style.setProperty('--window-tint-rgb', a.tintRgb)
   root.style.setProperty('--window-tint', String(a.tintAlpha))
-}
-
-// Anchor the wallpaper to the SCREEN rather than to each viewport.
-//
-// `background-size: cover` scales the image to fit whatever box it is painted
-// in, so a pane, the console's zoomed Shadow-DOM host, and the popped-out
-// window each got a DIFFERENT scale and a different crop of the same photo —
-// which is why the console read blue (it landed on the sky) and brighter than
-// the panes (sky is brighter than the wall) even at an identical tint.
-//
-// Sizing the image to the screen and offsetting it by the window's position on
-// that screen makes every surface a window onto one canvas pinned to the
-// desktop. Overlapping regions are then pixel-identical, across windows.
-export function applyWallpaperAnchor(root: HTMLElement): void {
-  const { width, height } = window.screen
-  // screenY is the window frame's top; the viewport starts below any native
-  // chrome, and a fixed background is positioned from the viewport's origin.
-  const chrome = Math.max(0, window.outerHeight - window.innerHeight)
-  root.style.setProperty('--wallpaper-size', `${width}px ${height}px`)
-  root.style.setProperty('--wallpaper-pos', `${-window.screenX}px ${-(window.screenY + chrome)}px`)
 }
 
 /**
@@ -131,21 +111,5 @@ export function logAppearanceDiagnostics(surface: string, sample: Element | null
     }
   } catch (e) {
     window.electronAPI?.logDiag?.('warn', 'appearance', `${surface}: diagnostics failed`, String(e))
-  }
-}
-
-/**
- * Keep the anchor correct as the window moves or resizes. Renderers get no
- * event when a window is dragged, so main pushes one; resize we can see
- * ourselves. Returns an unsubscribe.
- */
-export function watchWallpaperAnchor(root: HTMLElement): () => void {
-  const update = () => applyWallpaperAnchor(root)
-  update()
-  window.addEventListener('resize', update)
-  const stopMoved = window.electronAPI?.onWindowGeometryChanged?.(update)
-  return () => {
-    window.removeEventListener('resize', update)
-    stopMoved?.()
   }
 }

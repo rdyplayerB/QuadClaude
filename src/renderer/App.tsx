@@ -10,7 +10,7 @@ import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
 import { useUiScale, applyUiScale, readUiScale } from './uiScale'
-import { readAppearance, applyAppearance, watchWallpaperAnchor, logAppearanceDiagnostics, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
+import { readAppearance, applyAppearance, logAppearanceDiagnostics, DEFAULT_TINT_ALPHA, DEFAULT_TINT_COLOR } from './appearance'
 import { MenuAction, SavedPrompt, MAX_PANES } from '../shared/types'
 
 // Toolbar "+" to add a pane — works in every layout (the in-grid ghost tile
@@ -73,8 +73,6 @@ function App() {
   const windowTint = useWorkspaceStore((s) => s.preferences.windowTint ?? DEFAULT_TINT_ALPHA)
   const windowTintColor = useWorkspaceStore((s) => s.preferences.windowTintColor ?? DEFAULT_TINT_COLOR)
   const prefsLoaded = useWorkspaceStore((s) => s.isInitialized)
-  // Keep the wallpaper pinned to the screen as this window moves.
-  useEffect(() => watchWallpaperAnchor(document.documentElement), [])
   useEffect(() => {
     const appearance = readAppearance({ groundOpacity, windowTint, windowTintColor })
     applyAppearance(document.documentElement, appearance)

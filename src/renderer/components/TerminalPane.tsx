@@ -1555,9 +1555,8 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         className="flex-1 min-h-0 relative"
         style={paneBgImage ? {
           backgroundImage: `url(${paneBgImage?.startsWith('/') ? `file://${paneBgImage}` : paneBgImage})`,
-          // Screen-pinned, not viewport-covered — see applyWallpaperAnchor.
-          backgroundSize: 'var(--wallpaper-size, cover)',
-          backgroundPosition: 'var(--wallpaper-pos, center)',
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
           // `fixed` anchors the image to the VIEWPORT, not to each pane, which
           // is the whole point: every pane is a window onto one shared canvas,
