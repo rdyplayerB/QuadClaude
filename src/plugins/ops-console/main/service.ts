@@ -28,6 +28,12 @@ const SUB_STALE_MS = 600000
 const MIN_DWELL_MS = 3000
 const LANDED_TTL = 150000  // an outcome is worth keeping on screen
 
+// How long a pane must stay quiet before the board accepts the turn is over.
+// Generous on purpose: it only has to exceed Claude's natural thinking pauses,
+// and the cost of being late is a card lingering a few seconds, while the cost
+// of being early is a phantom turn in the feed.
+const IDLE_DWELL_MS = 30_000
+
 const stateOf = (s: string): AgentState =>
   s === 'claude-active' ? 'active' : s === 'claude-waiting' ? 'waiting' : s === 'claude-idle' ? 'ready' : 'idle'
 
@@ -94,12 +100,45 @@ export class OpsService {
   // Where the turn in flight began, so its outcome can be MEASURED (elapsed,
   // diff) rather than described in the same words as the prompt that started it.
   private turnStart = new Map<number, { at: number; adds: number; dels: number; said: number }>()
+  // The pane's own busy detector calls a turn over after 3s of output silence
+  // (TerminalPane's OUTPUT_QUIET_MS) — right for a status badge, wrong for turn
+  // accounting, because Claude routinely goes quiet for longer than that while
+  // thinking between tool calls. Left alone, the board watched one turn flap
+  // active → ready → active every ~10s and announced a "new turn" each time.
+  //
+  // So the console keeps its OWN settled view: going busy (or blocked) is
+  // believed at once, but going idle has to hold. The pane badge stays snappy;
+  // only the board's idea of a turn is damped.
+  private settledState = new Map<number, AgentState>()
+  private idleSince = new Map<number, number>()
+  // The prompt the last announced turn was for, so the same one is never
+  // announced twice however the state moves underneath it.
+  private lastTurnTitle = new Map<number, string>()
   private carrierSeq = 0
   private tokenMeter = new TokenMeter()
   private transcriptCache = new Map<string, { info: TranscriptInfo; at: number }>()
   private ctxCache = new Map<number, { v: { contextPct: number; model: string } | null; at: number }>()
   private disposed = false
   private unsubExit: (() => void) | null = null
+
+  // Believe 'active'/'waiting' immediately; make 'ready'/'idle' prove itself by
+  // holding for IDLE_DWELL_MS. Anything shorter is Claude thinking, not a turn
+  // ending. Returns the state the board should use.
+  private settle(paneId: number, raw: AgentState, now: number): AgentState {
+    const prev = this.settledState.get(paneId)
+    if (prev === undefined || raw === 'active' || raw === 'waiting') {
+      this.settledState.set(paneId, raw)
+      this.idleSince.delete(paneId)
+      return raw
+    }
+    if (raw === prev) { this.idleSince.delete(paneId); return raw }
+    const since = this.idleSince.get(paneId)
+    if (since === undefined) { this.idleSince.set(paneId, now); return prev }
+    if (now - since < IDLE_DWELL_MS) return prev
+    this.idleSince.delete(paneId)
+    this.settledState.set(paneId, raw)
+    return raw
+  }
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx
@@ -164,6 +203,12 @@ export class OpsService {
 
   private onExit(paneId: number, code: number) {
     if (this.disposed) return
+    // The process is gone, so the settled view and the announced turn are stale.
+    // Clearing them means a respawned pane's first turn is announced normally
+    // instead of being swallowed as "same prompt as last time".
+    this.settledState.delete(paneId)
+    this.idleSince.delete(paneId)
+    this.lastTurnTitle.delete(paneId)
     if (code !== 0) this.pushFeed(paneId, `pane <b>#${paneId}</b> process exited (code ${code}) — respawning`, 'shell recovered', true)
   }
 
@@ -196,7 +241,7 @@ export class OpsService {
     const cards: OpsCard[] = []
 
     for (const p of panes) {
-      const st = stateOf(p.state)
+      const st = this.settle(p.id, stateOf(p.state), now)
       // output rate: bytes delta / dt / ~4 bytes-per-token, clamp to a realistic range
       const cur = Number(stats.perPaneBytesOut?.[String(p.id)] ?? 0)
       const prev = this.prevBytes.get(p.id) ?? cur
@@ -365,7 +410,14 @@ export class OpsService {
         if (st === 'active') this.turnStart.set(p.id, { at: now, adds: t.adds, dels: t.dels, said: t.lastSaidAt })
         if (st === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> is <b class="wait">waiting for input</b>`, (t.lastAssistantText?.slice(0, 90) || '') + ' · blocked on a prompt')
         else if (st === 'active' && prevSt === 'waiting') this.pushFeed(p.id, `<b>${p.folder}</b> resumed <b>${esc(title)}</b>`, 'you answered · back to work')
-        else if (st === 'active') this.pushFeed(p.id, `<b>${p.folder}</b> started <b>${esc(title)}</b>`, prevSt === 'ready' ? 'new turn' : 'shell → claude')
+        else if (st === 'active' && this.lastTurnTitle.get(p.id) !== title) {
+          // Guard the announcement on the PROMPT, not just the state edge. A
+          // turn that dips idle and comes back is the same turn; without this
+          // the feed filled with "started <same thing> · new turn" every time
+          // Claude paused to think.
+          this.lastTurnTitle.set(p.id, title)
+          this.pushFeed(p.id, `<b>${p.folder}</b> started <b>${esc(title)}</b>`, prevSt === 'ready' ? 'new turn' : 'shell → claude')
+        }
         else if (prevSt === 'active') {
           // The turn ended: Claude either parked at its prompt ('ready') or the
           // process exited ('idle').
