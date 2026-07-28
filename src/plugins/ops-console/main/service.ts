@@ -322,6 +322,15 @@ export class OpsService {
         // back to the raw argument. The tag chip still names the tool, so the
         // system identity is never lost — only the headline becomes readable.
         const say = s.desc || s.target || s.name
+        // Decide whether this step still belongs on the board BEFORE touching
+        // the carrier. The transcript window keeps handing us steps that
+        // finished long ago; if one of those claims the carrier on its way to
+        // being dropped, it takes the composing card's identity with it — and
+        // since it claims again every tick, the THINKING card was rebuilt under
+        // a new id once a second and visibly flickered in place.
+        const expired = !!s.endedAt && now - s.endedAt > RETURN_TTL
+        const stale = !s.endedAt && !(st === 'active' && now - s.startedAt < STALE_STEP_MS)
+        if (expired || stale) { this.stepCard.delete(s.id); continue }
         // Claim the pane's carrier the first time we see this step, so the card
         // that was composing becomes the call it produced.
         let cardId = this.stepCard.get(s.id)
@@ -340,12 +349,11 @@ export class OpsService {
             })
             continue
           }
-          if (now - s.endedAt > RETURN_TTL) { this.stepCard.delete(s.id); continue }
           cards.push({
             id: cardId, paneId: p.id, col: 'return', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, durMs: s.endedAt - s.startedAt, tokens: s.tokens, err: s.err,
           })
-        } else if (st === 'active' && now - s.startedAt < STALE_STEP_MS) {
+        } else {
           cards.push({
             id: cardId, paneId: p.id, col: 'act', kind: 'step', tag: s.name, task: say,
             think: s.think, startedAt: s.startedAt, tokens: s.tokens,
