@@ -50,12 +50,6 @@
       "type": "boolean",
       "default": false,
       "label": "Card pipeline logging (lane occupancy + churn → ops-cards.jsonl)"
-    },
-    {
-      "key": "boardRecording",
-      "type": "boolean",
-      "default": false,
-      "label": "Board recording (replayable session → View › Console Replay)"
     }
   ],
   "minAppVersion": "1.30.0"

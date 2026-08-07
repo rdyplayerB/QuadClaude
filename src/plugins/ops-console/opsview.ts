@@ -245,7 +245,7 @@ const CSS = `
 .dvr.past .dvrbar{accent-color:#fbbf24}
 .dvr.past .dvrtime{color:#fbbf24}
 .dvr.past .dvrlive{color:#fbbf24;border-color:#fbbf2455;cursor:pointer}
-.foot{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;margin-top:9px;color:var(--faint);font-size:var(--fs-meta);padding:0 4px;flex-wrap:wrap;gap:8px}
+.foot{text-shadow:0 1px 3px rgba(0,0,0,.85);flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;margin-top:9px;color:var(--faint);font-size:var(--fs-meta);padding:0 4px;flex-wrap:wrap;gap:8px}
 #verify{position:fixed;top:56px;right:20px;z-index:2147483001;display:none;background:var(--pane);border:1px solid var(--line);border-radius:var(--rp);padding:8px 11px;font-size:var(--fs-meta);color:var(--fg2);min-width:190px}
 #verify.on{display:block}
 #verify .vh{display:flex;align-items:center;gap:6px;color:var(--teal);font-size:var(--fs-meta);letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
