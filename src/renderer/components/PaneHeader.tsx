@@ -1,4 +1,4 @@
-import { DragEvent, memo } from 'react'
+import { DragEvent, memo, useEffect, useState } from 'react'
 import { MIN_PANES } from '../../shared/types'
 import { folderName } from '../util/paths'
 import { useWorkspaceStore } from '../store/workspace'
@@ -33,6 +33,9 @@ export const PANE_COLORS = [
   '#2dd4bf', // Teal (Terminal 12)
 ]
 
+// Port chips shown before the rest fold into a "+N" pill.
+const MAX_SERVER_CHIPS = 2
+
 // Extract folder/repo name from path
 export function getFolderName(path: string): string {
   return folderName(path, 'Terminal')
@@ -46,22 +49,59 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
   const isActive = useWorkspaceStore((s) => s.activePaneId === paneId)
   const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
   const removePane = useWorkspaceStore((s) => s.removePane)
-  // The original four panes (slots 0-3) are permanent; only extras (slot 4+)
-  // can be closed, and the store floor keeps the count from dropping below 4.
-  const canClose = paneIndex >= MIN_PANES
+  const paneCount = useWorkspaceStore((s) => s.panes.length)
+  // Four windows is the floor, not a fixed set of four windows. Any pane can be
+  // closed while we're above MIN_PANES; at exactly four, nobody gets a ✕. Since
+  // panes live in an array, closing an early slot shifts the next extra up into
+  // it — that's how an extra window "takes over" a permanent slot. (removePane
+  // enforces the same floor independently, so a stale click can't undercut it.)
+  const canClose = paneCount > MIN_PANES
+
+  // Closing a pane that's mid-job is the one unrecoverable misclick here, so a
+  // live pane arms first and closes on the second click. Auto-disarms so a
+  // stray click doesn't leave the button primed.
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = setTimeout(() => setArmed(false), 3000)
+    return () => clearTimeout(t)
+  }, [armed])
+  // Disarm the moment closing stops being possible. Otherwise arming a pane and
+  // then dropping to the floor (another pane closes) leaves `armed` set, and if
+  // the count rises again inside the 3s window the button comes back already
+  // primed — one click from killing a live session the user never armed.
+  useEffect(() => {
+    if (!canClose) setArmed(false)
+  }, [canClose])
 
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
 
   const servers = pane.servers ?? []
+  // A pane running three dev servers renders three "Port NNNN | Stop" chips, which
+  // is wider than a third-of-screen header — the overflow used to push Close off
+  // the clipped right edge. Past two, the rest collapse into a "+N" you can hover.
+  const shownServers = servers.slice(0, MAX_SERVER_CHIPS)
+  const hiddenServers = servers.slice(MAX_SERVER_CHIPS)
   const openPort = (port: number) => {
     window.electronAPI.openExternal(`http://localhost:${port}`)
   }
 
-  // Close an extra pane: drop it from the layout, then tear down its PTY and
-  // xterm instance so the slot id can be reused by a future add.
+  // A bare shell has nothing to lose, so it closes on one click; anything
+  // running Claude has to be armed first.
+  const isLive = pane.state !== 'shell'
+  // Dropping to the floor while a pane sits armed would leave a red "Close?"
+  // on a button that can no longer do anything.
+  const showArmed = armed && canClose
+
+  // Close a pane: drop it from the layout, then tear down its PTY and xterm
+  // instance so the slot id can be reused by a future add.
   const closePane = () => {
+    if (isLive && !armed) {
+      setArmed(true)
+      return
+    }
     const removed = removePane(paneId)
     if (removed === null) return
     window.electronAPI.killPty(removed)
@@ -103,18 +143,28 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
 
       {/* Git status + action buttons */}
       <div
-        className="flex items-center gap-1.5 pr-2 shrink-0"
+        className="flex items-center gap-1.5 pr-2 min-w-0"
         style={{ cursor: 'default' }}
         onMouseDown={(e) => e.stopPropagation()}
+        // The pane container's onClick focuses the terminal, and a click on a
+        // header button bubbles up to it. That focus steal blurs the button —
+        // which silently un-armed Close, so a live pane could never be shut:
+        // click one armed it, the bubble disarmed it, forever. Header controls
+        // are their own surface; clicks here don't reach the pane.
+        onClick={(e) => e.stopPropagation()}
         onDragStart={(e) => e.preventDefault()}
         draggable={false}
       >
+        {/* Status that varies with the session — ports, branch. This is the part
+            that gives up space when the header is tight, so the buttons below
+            never get pushed out of a clipped header. */}
+        <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
         {servers.length > 0 && (
-          <div className="flex items-center gap-1.5 font-mono text-meta leading-none">
-            {servers.map((s) => (
+          <div className="flex items-center gap-1.5 font-mono text-meta leading-none min-w-0">
+            {shownServers.map((s) => (
               <div
                 key={s.pid}
-                className="flex items-center gap-0.5 rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1"
+                className="flex items-center gap-0.5 rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1 shrink-0"
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full shrink-0"
@@ -141,17 +191,25 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
                 </button>
               </div>
             ))}
+            {hiddenServers.length > 0 && (
+              <span
+                className="rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1 shrink-0"
+                title={hiddenServers.map((s) => `Port ${s.port} — ${s.command} (pid ${s.pid})`).join('\n')}
+              >
+                +{hiddenServers.length}
+              </span>
+            )}
           </div>
         )}
 
         {/* Git status - compact inline */}
         {pane.gitStatus?.isGitRepo && (
-          <div className="flex items-center gap-1.5 font-mono text-meta mr-1">
+          <div className="flex items-center gap-1.5 font-mono text-meta mr-1 min-w-0">
             <span className="flex items-center gap-1">
               <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-green]">
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
               </svg>
-              <span className="pane-ctl-label text-[--git-green]">{pane.gitStatus.branch}</span>
+              <span className="pane-ctl-label text-[--git-green] truncate">{pane.gitStatus.branch}</span>
             </span>
             {(pane.gitStatus.ahead ?? 0) > 0 && (
               <span className="text-[--git-cyan]">↑{pane.gitStatus.ahead}</span>
@@ -160,10 +218,15 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
               <span className="text-[--git-yellow]">↓{pane.gitStatus.behind}</span>
             )}
             {(pane.gitStatus.dirty ?? 0) > 0 && (
-              <span className="text-[--git-orange]">●{pane.gitStatus.dirty}</span>
+              <span className="text-[--git-orange] shrink-0">●{pane.gitStatus.dirty}</span>
             )}
           </div>
         )}
+        </div>
+
+        {/* Actions. Pinned: whatever else has to give, Stop/Clear/Close stay
+            reachable — a header too crowded to close was the bug. */}
+        <div className="flex items-center gap-1.5 shrink-0">
         <FavoritesDropdown paneId={paneId} currentDirectory={pane.workingDirectory} />
         <OpenInPaneButton paneId={paneId} />
         {pane.pairId && (
@@ -205,20 +268,37 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
           </svg>
           <span className="pane-ctl-label text-meta leading-none">Clear</span>
         </button>
-        {/* Close button — only on extra panes (slot 5+); the original four
-            are permanent. */}
-        {canClose && (
-          <button
-            onClick={closePane}
-            className="flex items-center px-1 py-0.5 text-[--ui-text-dimmed] hover:text-[--danger] transition-colors rounded"
-            title="Close terminal"
-            aria-label="Close terminal"
-          >
-            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round"/>
-            </svg>
-          </button>
-        )}
+        {/* Close button — always rendered so the affordance doesn't blink out of
+            every header at once when the count reaches the floor. At exactly
+            four it sits disabled and says why. */}
+        <button
+          onClick={closePane}
+          onBlur={() => setArmed(false)}
+          disabled={!canClose}
+          className={`flex items-center gap-1 px-1 py-0.5 transition-colors rounded ${
+            !canClose
+              ? 'text-[--ui-text-dimmed] opacity-30 cursor-default'
+              : showArmed
+                ? 'text-[--danger]'
+                : 'text-[--ui-text-dimmed] hover:text-[--danger]'
+          }`}
+          title={
+            !canClose
+              ? `QuadClaude always keeps ${MIN_PANES} windows — add another to close this one`
+              : showArmed
+                ? 'Click again to close — this pane has a live session'
+                : isLive
+                  ? 'Close terminal (has a live session — takes two clicks)'
+                  : 'Close terminal'
+          }
+          aria-label="Close terminal"
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M4 4l8 8M12 4l-8 8" strokeLinecap="round"/>
+          </svg>
+          {showArmed && <span className="pane-ctl-label text-meta leading-none">Close?</span>}
+        </button>
+        </div>
       </div>
     </div>
   )
