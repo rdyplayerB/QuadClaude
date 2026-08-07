@@ -267,7 +267,6 @@ const HTML = `
         <button id="zoomPct" aria-label="Reset zoom">100%</button>
         <button id="zoomIn" aria-label="Zoom in">+</button>
       </div>
-      <button class="recbtn" id="recBtn">REC</button>
       <button class="recbtn" id="popBtn">⇱ pop out</button>
       <button class="recbtn" id="closeBtn">✕ close</button>
     </div>
@@ -778,9 +777,11 @@ export function createOpsView(root, handlers) {
     smoothMeters(); tweenKpis(); tickNumbers()
   }
 
-  // record toggle
-  let recOn=false
-  gid("recBtn").onclick=function(){ recOn=!recOn; this.classList.toggle("on",recOn); if(handlers&&handlers.onRecord) handlers.onRecord(recOn) }
+  // The REC button is gone from the header: it drove the deterministic demo
+  // loop, sat next to the real controls, and read as "record this session" —
+  // which is what the timeline does now. The loop itself is untouched and still
+  // reachable over the ops:set-record channel for building demo material; only
+  // the button that invited a misclick is removed.
   gid("closeBtn").onclick=function(){ if(handlers&&handlers.onClose) handlers.onClose() }
   // Pop out / pop in. The same button flips meaning depending on which surface
   // is hosting the view: the in-app overlay offers "pop out", the standalone
