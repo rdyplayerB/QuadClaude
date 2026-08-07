@@ -4,6 +4,7 @@ import { logger } from './logger'
 import { getPluginMenuItems } from './pluginHost'
 import { addMarker, revealPerfLogs, requestRendererFlush } from './perfMonitor'
 import { openPerfViewer } from './perfViewer'
+import { openDvrViewer } from '../plugins/ops-console/main/dvrViewer'
 
 // Build + install the macOS application menu. The two callbacks are the only
 // things that touch index.ts module state: sendMenuAction (routes an action to
@@ -62,6 +63,14 @@ export function buildApplicationMenu(
     {
       label: 'View',
       submenu: [
+        {
+          label: 'Console Replay',
+          click: () => {
+            const r = openDvrViewer()
+            if (!r.ok) logger.info('ops', 'console replay unavailable', r.reason)
+          }
+        },
+        { type: 'separator' },
         // Explicitly register refresh shortcuts to block Electron's default reload behavior
         // These must be enabled for the accelerator to be "claimed" and prevent default
         {

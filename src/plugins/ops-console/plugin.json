@@ -4,14 +4,59 @@
   "version": "0.1.0",
   "description": "Live ops view of every pane: agent roster, an activity board where cards move on real state changes, and a streaming feed.",
   "kind": "window",
-  "menu": { "parent": "View", "label": "Activity Console", "accelerator": "CmdOrCtrl+Shift+A" },
-  "capabilities": ["read:workspace", "read:pty-stats", "read:transcripts", "read:telemetry"],
+  "menu": {
+    "parent": "View",
+    "label": "Activity Console",
+    "accelerator": "CmdOrCtrl+Shift+A"
+  },
+  "capabilities": [
+    "read:workspace",
+    "read:pty-stats",
+    "read:transcripts",
+    "read:telemetry"
+  ],
   "settings": [
-    { "key": "openAtLaunch", "type": "boolean", "default": false, "label": "Open at launch" },
-    { "key": "showDelegationLane", "type": "boolean", "default": false, "label": "Show delegation events in the feed" },
-    { "key": "pollIntervalMs", "type": "select", "options": [500, 1000, 2000], "default": 1000, "label": "Refresh rate (ms)" },
-    { "key": "verificationMode", "type": "boolean", "default": false, "label": "Verification logging (track accuracy + timing)" },
-    { "key": "cardLogging", "type": "boolean", "default": false, "label": "Card pipeline logging (lane occupancy + churn → ops-cards.jsonl)" }
+    {
+      "key": "openAtLaunch",
+      "type": "boolean",
+      "default": false,
+      "label": "Open at launch"
+    },
+    {
+      "key": "showDelegationLane",
+      "type": "boolean",
+      "default": false,
+      "label": "Show delegation events in the feed"
+    },
+    {
+      "key": "pollIntervalMs",
+      "type": "select",
+      "options": [
+        500,
+        1000,
+        2000
+      ],
+      "default": 1000,
+      "label": "Refresh rate (ms)"
+    },
+    {
+      "key": "verificationMode",
+      "type": "boolean",
+      "default": false,
+      "label": "Verification logging (track accuracy + timing)"
+    },
+    {
+      "key": "cardLogging",
+      "type": "boolean",
+      "default": false,
+      "label": "Card pipeline logging (lane occupancy + churn → ops-cards.jsonl)"
+    },
+    {
+      "key": "boardRecording",
+      "type": "boolean",
+      "default": false,
+      "label": "Board recording (replayable session → View › Console Replay)"
+    }
   ],
   "minAppVersion": "1.30.0"
 }

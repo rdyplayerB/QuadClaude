@@ -12,6 +12,7 @@ import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, OpsSubagent, AgentState } 
 import { readTranscript, newestTranscript, TranscriptInfo } from './transcript-tailer'
 import { TokenMeter } from './token-meter'
 import { CardLog } from './cardlog'
+import { SnapshotLog } from './snapshotlog'
 
 const RETURN_TTL = 20000     // how long a finished step stays on the board
 const SUB_DONE_TTL = 60000   // a finished subagent lingers longer — rarer, bigger news
@@ -142,11 +143,13 @@ export class OpsService {
   }
 
   private cardLog = new CardLog()
+  private snapLog = new SnapshotLog()
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx
     this.intervalMs = Number(ctx.getSetting<number>('pollIntervalMs') ?? 1000) || 1000
     this.cardLog.setEnabled(!!ctx.getSetting<boolean>('cardLogging'))
+    this.snapLog.setEnabled(!!ctx.getSetting<boolean>('boardRecording'))
   }
 
   start(onSnapshot: (s: OpsSnapshot) => void) {
@@ -160,6 +163,12 @@ export class OpsService {
   setCardLogging(on: boolean) {
     this.cardLog.setEnabled(on)
     if (!on) this.ctx.logger.info('card logging stopped', JSON.stringify(this.cardLog.summary()))
+  }
+
+  /** Board recording for replay. Same live-toggle contract as card logging. */
+  setBoardRecording(on: boolean) {
+    this.snapLog.setEnabled(on)
+    if (!on) this.ctx.logger.info('board recording stopped', JSON.stringify(this.snapLog.summary()))
   }
 
   updateInterval(ms: number) {
@@ -177,6 +186,10 @@ export class OpsService {
     if (this.cardLog.isEnabled()) {
       this.ctx.logger.info('card logging summary', JSON.stringify(this.cardLog.summary()))
       this.cardLog.setEnabled(false)
+    }
+    if (this.snapLog.isEnabled()) {
+      this.ctx.logger.info('board recording summary', JSON.stringify(this.snapLog.summary()))
+      this.snapLog.setEnabled(false)
     }
   }
 
@@ -239,6 +252,7 @@ export class OpsService {
       const ageStep = this.intervalMs / 1000
       for (const f of this.feed) f.ageSec += ageStep
       this.cardLog.record(snap)
+      this.snapLog.record(snap)
       this.onSnapshot(snap)
     } catch (e) {
       this.ctx.logger.warn('ops tick failed', String(e))

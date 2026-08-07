@@ -162,6 +162,7 @@ const plugin: PluginModule = {
       // Tracing is a per-session decision — flipping it must take effect on the
       // running service, not on the next app launch.
       if (service) service.setCardLogging(!!context.getSetting<boolean>('cardLogging'))
+      if (service) service.setBoardRecording(!!context.getSetting<boolean>('boardRecording'))
       syncVerify()
     })
     if (context.getSetting<boolean>('openAtLaunch')) this.open!()
