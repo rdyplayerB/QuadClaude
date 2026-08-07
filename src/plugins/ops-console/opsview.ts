@@ -96,9 +96,6 @@ const CSS = `
 .phead{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--line-soft)}
 .phead h3{font-size:var(--fs-body);color:var(--fg2);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
 .phead .sub{color:var(--faint);font-weight:400;text-transform:none;letter-spacing:0;font-size:var(--fs-meta)}
-.live{font-size:var(--fs-meta);letter-spacing:.06em;color:var(--accent);display:inline-flex;align-items:center;gap:5px;text-transform:uppercase;font-weight:600}
-.live::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.6s infinite}
-@keyframes pulse{50%{opacity:.35}}
 #roster{flex:1 1 auto;min-height:0;overflow:auto}
 .r{padding:8px 14px;border-bottom:1px solid var(--line-soft);cursor:pointer}
 .r:last-child{border-bottom:0} .r:hover,.r.sel{background:rgba(255,255,255,.03)}
@@ -137,15 +134,22 @@ const CSS = `
 /* Lanes share the width evenly and are allowed to shrink; card text wraps
    (and breaks inside long tokens), so all six stay readable side by side
    instead of the last one scrolling out of view. */
-.col{flex:1 1 0;min-width:118px;display:flex;flex-direction:column;gap:5px}
-/* The shared side column: QUEUED over BLOCKED, each with its own head and body.
-   Fixed and narrow, so the four flow lanes split everything that's left. */
-.col.stack{flex:0 0 172px;min-width:172px;gap:8px}
+/* Lane widths follow measured load, not symmetry. On a six-pane board RETURNED
+   is occupied in 100% of frames and carries far more cards than anything else,
+   so it takes two lane widths AND lays them out two-up — four times the
+   capacity of a single lane in the same height. LANDED and BLOCKED are both
+   episodic (23% and rare), so they share the last lane stacked. */
+.col{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:5px}
+.col.wide{flex:2 2 0}
+.colbody.grid2{display:grid;grid-template-columns:1fr 1fr;gap:5px;align-content:start}
+/* The shared tail lane: LANDED over BLOCKED, each with its own head and body. */
+.col.stack{gap:8px}
 .col.stack .half{flex:1 1 50%;min-height:0;display:flex;flex-direction:column;gap:5px}
 .col.stack .half .colbody{flex:1 1 auto;min-height:0;overflow:auto}
 /* The alarm half is separated by a rule rather than a border box — empty is the
    healthy state and should not look like a container waiting to be filled. */
 .col.stack .half.alarm{border-top:1px solid var(--line-soft);padding-top:6px}
+.col.stack .half.alarm .colhead{border-bottom-color:rgba(251,191,36,.35)}
 .colhead{position:relative;display:flex;align-items:center;justify-content:space-between;font-size:var(--fs-meta);color:var(--fg2);padding:2px 2px 5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line-soft);cursor:help}
 .colhead .cdot{width:7px;height:7px;border-radius:1px}
 .colhead .lft{display:flex;align-items:center;gap:6px;font-weight:600}
@@ -167,7 +171,10 @@ const CSS = `
 .board-empty svg{width:26px;height:26px;opacity:.5;stroke:var(--fg3)}
 .board-empty .bq-t{font-size:var(--fs-body);color:var(--fg2);letter-spacing:.01em}
 .board-empty .bq-s{font-size:var(--fs-meta);color:var(--faint);max-width:260px;line-height:1.5}
-.colbody{display:flex;flex-direction:column;gap:5px;min-height:20px}
+/* position:relative anchors a departing card, which is pinned out of flow while
+   it fades (see startLeaving) so its column closes the gap immediately and
+   smoothly instead of holding an invisible slot for 250ms and then snapping. */
+.colbody{position:relative;display:flex;flex-direction:column;gap:5px;min-height:20px}
 .card{background:var(--term);border:1px solid var(--line);border-radius:var(--r);padding:6px 8px;will-change:transform;overflow:hidden}
 .card.dim{opacity:.3}
 .card.enter{animation:pop .3s ease}
@@ -235,7 +242,7 @@ const CSS = `
 #verify.flash{animation:vflash .5s ease}
 @keyframes vflash{0%{border-color:var(--red)}100%{border-color:var(--line)}}
 #connecting{position:absolute;inset:0;display:grid;place-items:center;color:var(--fg3);font-size:var(--fs-heading);background:var(--scrim)}
-@media(prefers-reduced-motion:reduce){.card,.carry,.meter i{transition:none!important}.card.wait,.workline .sp,.live::before{animation:none!important}}
+@media(prefers-reduced-motion:reduce){.card,.carry,.meter i{transition:none!important}.card.wait,.workline .sp{animation:none!important}}
 `
 
 const HTML = `
@@ -259,8 +266,8 @@ const HTML = `
     <div class="kpis" id="kpis"></div>
     <div class="stage">
       <div class="panel"><div class="phead"><h3>AI agents <span class="sub">· your panes</span></h3><span id="rcount" class="sub" style="font-size:var(--fs-body)"></span></div><div id="roster"></div></div>
-      <div class="panel"><div class="phead"><h3>activity board <span class="sub">— current state, per agent</span></h3><span class="live">live</span></div><div class="board" id="board"></div></div>
-      <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3><span class="live">live</span></div><div class="feed" id="feed"></div></div>
+      <div class="panel"><div class="phead"><h3>activity board <span class="sub">— current state, per agent</span></h3></div><div class="board" id="board"></div></div>
+      <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3></div><div class="feed" id="feed"></div></div>
     </div>
     <div class="foot">
       <div>output meters = real output tokens per 2s, oldest bar left · a flat meter means the agent produced nothing</div>
@@ -312,15 +319,25 @@ export function createOpsView(root, handlers) {
   let snap=null, prev=null, selPane=null
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches
   let cardEls={}, colBodies={}, agentSeries={}, kpiShown={}, kpiTarget={}, boardBuilt=false, boardRenders=0, lastSnapAt=0
+  // Cards mid-exit, by id. A card can drop out of one snapshot and be back in
+  // the next — a composing card whose pane briefly reports a call in flight does
+  // exactly that — and at a 1s poll against a 250ms fade the old element was
+  // still on screen when the new one was appended. Two elements for one card,
+  // one above the other, the upper vanishing a moment later: the flicker.
+  // Holding them here lets a returning card reclaim its own element instead.
+  let leavingEls={}
   let verifyOn=false, prevMissedPhantom=0
   let rafId=0, destroyed=false
 
-  // QUEUED and BLOCKED are the two lanes that are empty most of the time — one
-  // is a backlog you rarely let build, the other an alarm. Neither earns a full
-  // lane, so they share one narrow column split top/bottom and the four lanes
-  // where work actually moves take the width back.
-  const SIDE = ["queued","blocked"]
-  const FLOW = ["think","act","return","landed"]
+  // Left to right in the order work actually travels. RETURNED is double-width
+  // and two-up because it holds the most cards; LANDED and BLOCKED share the
+  // tail lane, landed on top.
+  const FLOW = ["queued","think","act"]
+  const WIDE = "return"
+  const TAIL = ["landed","blocked"]
+  // Most simultaneous carry arrows drawn for one tick. Measured on six real
+  // panes: 4 moves in a tick happens, 6 happens once in ~90 ticks.
+  const CARRY_MAX = 4
   const colOf = (k) => COLS.filter(function(c){ return c.k===k })[0]
   const headHtml = (c) =>
     '<div class="colhead"><span class="lft"><span class="cdot" style="background:'+c.c+'"></span>'+c.name+'</span>'+
@@ -328,8 +345,18 @@ export function createOpsView(root, handlers) {
 
   function buildShell(){
     const board=gid("board"); board.innerHTML=""
+    const lane=(k,cls,bodyCls)=>{
+      const c=colOf(k); if(!c) return null
+      const col=document.createElement("div"); col.className=cls
+      col.innerHTML=headHtml(c)
+      const body=document.createElement("div"); body.className=bodyCls; body.id="cb-"+c.k
+      col.appendChild(body); colBodies[c.k]=body
+      return col
+    }
+    FLOW.forEach(function(k){ const col=lane(k,"col","colbody"); if(col) board.appendChild(col) })
+    const wide=lane(WIDE,"col wide","colbody grid2"); if(wide) board.appendChild(wide)
     const stack=document.createElement("div"); stack.className="col stack"
-    SIDE.forEach(function(k){
+    TAIL.forEach(function(k){
       const c=colOf(k); if(!c) return
       const half=document.createElement("div"); half.className="half"+(k==="blocked"?" alarm":"")
       half.innerHTML=headHtml(c)
@@ -337,13 +364,6 @@ export function createOpsView(root, handlers) {
       half.appendChild(body); stack.appendChild(half); colBodies[c.k]=body
     })
     board.appendChild(stack)
-    FLOW.forEach(function(k){
-      const c=colOf(k); if(!c) return
-      const col=document.createElement("div"); col.className="col"
-      col.innerHTML=headHtml(c)
-      const body=document.createElement("div"); body.className="colbody"; body.id="cb-"+c.k
-      col.appendChild(body); board.appendChild(col); colBodies[c.k]=body
-    })
     const empty=document.createElement("div"); empty.className="board-empty"
     empty.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>'+
       '<div class="bq-t">All quiet</div>'+
@@ -499,11 +519,15 @@ export function createOpsView(root, handlers) {
   function renderBoard(s){
     if(!boardBuilt) buildShell()
     boardRenders++
+    // Measure departing cards too, so one that comes back animates from where it
+    // actually was rather than popping in at its new slot.
     const first={}; for(const id in cardEls){ first[id]=cardEls[id].el.getBoundingClientRect() }
+    for(const id in leavingEls){ first[id]=leavingEls[id].el.getBoundingClientRect() }
     const present={}; const moved=[]; const appeared=[]
     s.cards.forEach(function(c){
       present[c.id]=1; const a=agentFor(c.paneId); const col=ac(a.pos)
       let rec=cardEls[c.id], el
+      if(!rec && leavingEls[c.id]) rec=cardEls[c.id]=reclaim(c.id)
       if(!rec){
         el=document.createElement("div"); el.className="card"+(c.col==="blocked"?" wait":"")+(c.kind==="subagent"?" sub":"")+(reduced?"":" enter"); el.setAttribute("data-id",c.id)
         el.innerHTML='<div class="chead"><span class="whodot"></span><span class="whoname"></span><span class="ctag"></span></div><div class="ct"></div><div class="cbody"></div>'
@@ -528,18 +552,35 @@ export function createOpsView(root, handlers) {
       if(rec.sig!==sig){ rec.bodyEl.innerHTML=cardBody(c); rec.sig=sig }
       el._card=c
     })
-    for(const cid in cardEls){ if(!present[cid]){ const r=cardEls[cid]; r.el.classList.add("leaving"); (function(el){setTimeout(()=>el.remove(),250)})(r.el); delete cardEls[cid] } }
+    for(const cid in cardEls){ if(!present[cid]){ startLeaving(cid,cardEls[cid].el); delete cardEls[cid] } }
     COLS.forEach(function(c){ const n=s.cards.filter(x=>x.col===c.k).length; const e=gid("cn-"+c.k); if(e) e.textContent=n })
     const board=gid("board"); if(board) board.classList.toggle("quiet", s.cards.length===0)
     applyDim()
     requestAnimationFrame(function(){
+      // Read every destination BEFORE any inverse transform goes on. The old
+      // order measured, transformed, then let carry() measure again — by which
+      // point the card had been shifted back to where it started, so the arrow's
+      // source and destination were the same point and it never travelled.
+      // Batching the reads also stops the read/write/read layout thrash.
+      const dest={}
+      for(const id in cardEls) dest[id]=cardEls[id].el.getBoundingClientRect()
       for(const id in cardEls){
-        const el=cardEls[id].el, f=first[id]; if(!f) continue
-        const l=el.getBoundingClientRect(); const dx=f.left-l.left, dy=f.top-l.top
+        const el=cardEls[id].el, f=first[id], l=dest[id]; if(!f||!l) continue
+        const dx=f.left-l.left, dy=f.top-l.top
         if((dx||dy)&&!reduced){ el.style.transition="none"; el.style.transform="translate("+dx+"px,"+dy+"px)"
           requestAnimationFrame((function(elx){return function(){ elx.style.transition="transform .55s cubic-bezier(.4,0,.2,1)"; elx.style.transform="" }})(el)) }
       }
-      if(moved.length&&!reduced) carry(moved[0], first[moved[0].id])
+      // Every hop earns an arrow, not just the first. On one pane that cost 9%
+      // of moves; on six it was 48% — simultaneous hops are the norm as soon as
+      // several agents are working, which is exactly when the board should look
+      // busiest. Capped so a burst reads as a burst rather than a swarm, and
+      // staggered so the eye can follow them.
+      if(!reduced) moved.slice(0,CARRY_MAX).forEach(function(mv,i){
+        const from=first[mv.id], to=dest[mv.id]
+        if(!from||!to) return
+        if(i===0) carry(mv,from,to)
+        else setTimeout(function(){ carry(mv,from,to) }, i*90)
+      })
     })
     if(verifyOn && handlers && handlers.onMove){
       const all=moved.concat(appeared)
@@ -547,14 +588,50 @@ export function createOpsView(root, handlers) {
         all.forEach(m=>handlers.onMove({cardId:m.id,paneId:m.pane,fromCol:m.fromCol,toCol:m.toCol,tRender:tRender,builtAt:builtAt})) }
     }
   }
-  function carry(mv, firstRect){
-    const el=cardEls[mv.id] && cardEls[mv.id].el; if(!el||!firstRect) return
+  // Pin a departing card to the spot it already occupies and take it out of
+  // flow, so the column reflows in the SAME frame the card leaves. The surviving
+  // cards then close the gap through the FLIP pass below, instead of standing
+  // still for 250ms and jumping when the invisible element is finally removed.
+  function startLeaving(id, el){
+    const parent=el.parentNode
+    if(!parent){ el.remove(); return }
+    const pr=parent.getBoundingClientRect(), r=el.getBoundingClientRect()
+    el.style.position="absolute"
+    el.style.left=(r.left-pr.left+parent.scrollLeft)+"px"
+    el.style.top=(r.top-pr.top+parent.scrollTop)+"px"
+    el.style.width=r.width+"px"
+    el.classList.add("leaving")
+    leavingEls[id]={el:el,t:setTimeout(function(){ el.remove(); delete leavingEls[id] },250)}
+  }
+  // A card that came back before its fade finished: cancel the removal, drop it
+  // back into flow, and hand the caller the same element it had before.
+  function reclaim(id){
+    const lv=leavingEls[id]; delete leavingEls[id]
+    clearTimeout(lv.t)
+    const el=lv.el
+    el.classList.remove("leaving")
+    el.style.position=""; el.style.left=""; el.style.top=""; el.style.width=""
+    return {el:el,sig:"",bodyEl:el.querySelector(".cbody")}
+  }
+  // Takes the source and destination rects outright — measuring them here is
+  // what broke it, since by call time the card is mid-FLIP.
+  function carry(mv, firstRect, last){
+    if(!firstRect||!last) return
     const a=agentFor(mv.pane); const col=ac(a.pos)
-    const last=el.getBoundingClientRect(); const layer=gid("cursorLayer")
+    const layer=gid("cursorLayer"); if(!layer) return
     const cur=document.createElement("div"); cur.className="carry"; cur.style.opacity="0"
     cur.innerHTML='<svg viewBox="0 0 24 24" fill="'+col+'"><path d="M4 2l7 18 2.5-7.5L21 10z"/></svg><span class="pill" style="background:'+col+'">'+esc(a.name)+'</span>'
     layer.appendChild(cur)
-    const sx=firstRect.left+12, sy=firstRect.top+8, ex=last.left+12, ey=last.top+8
+    // The console carries its own zoom (OpsOverlay applies CSS `zoom`), and the
+    // two sides of this sum are in different units: getBoundingClientRect() is
+    // post-zoom viewport pixels, while a translate() inside the zoomed subtree
+    // is multiplied by the zoom on the way out. At 140% every arrow landed 40%
+    // too far. Measure the factor off the layer — its layout width is unzoomed,
+    // its rect width is not — and convert into the layer's own space.
+    const lr=layer.getBoundingClientRect()
+    const z=(lr.width>0 && layer.offsetWidth>0) ? lr.width/layer.offsetWidth : 1
+    const sx=(firstRect.left-lr.left)/z+12, sy=(firstRect.top-lr.top)/z+8
+    const ex=(last.left-lr.left)/z+12,      ey=(last.top-lr.top)/z+8
     cur.style.transform="translate("+sx+"px,"+sy+"px)"
     requestAnimationFrame(function(){ cur.style.opacity="1"; requestAnimationFrame(function(){ cur.style.transform="translate("+ex+"px,"+ey+"px)" }) })
     setTimeout(function(){ cur.style.opacity="0"; setTimeout(()=>cur.remove(),220) }, 760)
@@ -684,6 +761,6 @@ export function createOpsView(root, handlers) {
     setVerify(o){ renderVerify(o) },
     // Reflect a scale set elsewhere (Cmd +/−) without re-emitting it.
     setScale(n){ scale=clampScale(n); gid("zoomPct").textContent=Math.round(scale*100)+"%" },
-    destroy(){ destroyed=true; cancelAnimationFrame(rafId); root.innerHTML="" },
+    destroy(){ destroyed=true; cancelAnimationFrame(rafId); for(const id in leavingEls) clearTimeout(leavingEls[id].t); leavingEls={}; root.innerHTML="" },
   }
 }
