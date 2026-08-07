@@ -231,6 +231,15 @@ const CSS = `
 .fsub{font-size:var(--fs-meta);color:var(--faint);margin-top:2px;line-height:1.4}
 .ftime{font-size:var(--fs-meta);color:var(--faint);margin-top:2px}
 .ftime::before{content:"› "}
+.dvr{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-top:9px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.02)}
+.dvrlive{flex:0 0 auto;font:inherit;font-size:var(--fs-meta);letter-spacing:.06em;color:var(--faint);background:transparent;border:1px solid var(--line);border-radius:999px;padding:2px 9px;cursor:pointer}
+.dvrlive.on{color:#34d399;border-color:#34d39955}
+.dvrlive.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;margin-right:5px;vertical-align:1px;animation:dvrpulse 2s ease-in-out infinite}
+@keyframes dvrpulse{0%,100%{opacity:1}50%{opacity:.35}}
+.dvrbar{flex:1;min-width:0;accent-color:#34d399;cursor:pointer}
+.dvrtime{flex:0 0 auto;font-size:var(--fs-meta);color:var(--faint);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.dvr.past .dvrbar{accent-color:#fbbf24}
+.dvr.past .dvrtime{color:#fbbf24}
 .foot{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;margin-top:9px;color:var(--faint);font-size:var(--fs-meta);padding:0 4px;flex-wrap:wrap;gap:8px}
 #verify{position:fixed;top:56px;right:20px;z-index:2147483001;display:none;background:var(--pane);border:1px solid var(--line);border-radius:var(--rp);padding:8px 11px;font-size:var(--fs-meta);color:var(--fg2);min-width:190px}
 #verify.on{display:block}
@@ -268,6 +277,11 @@ const HTML = `
       <div class="panel"><div class="phead"><h3>AI agents <span class="sub">· your panes</span></h3><span id="rcount" class="sub" style="font-size:var(--fs-body)"></span></div><div id="roster"></div></div>
       <div class="panel"><div class="phead"><h3>activity board <span class="sub">— current state, per agent</span></h3></div><div class="board" id="board"></div></div>
       <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3></div><div class="feed" id="feed"></div></div>
+    </div>
+    <div class="dvr" id="dvr">
+      <button class="dvrlive on" id="dvrLive">live</button>
+      <input type="range" class="dvrbar" id="dvrBar" min="0" max="0" value="0">
+      <span class="dvrtime" id="dvrTime">live</span>
     </div>
     <div class="foot">
       <div>output meters = real output tokens per 2s, oldest bar left · a flat meter means the agent produced nothing</div>
@@ -688,9 +702,51 @@ export function createOpsView(root, handlers) {
         continue
       }
       if(c.col!=="act"&&c.col!=="think") continue
-      const el=cardEls[id].el.querySelector(".wel"); if(el&&c.startedAt){ const ms=Date.now()-c.startedAt; const sec=Math.floor(ms/1000); el.textContent=sec<60?sec+"s":(Math.floor(sec/60)+"m "+(sec%60)+"s") }
+      const el=cardEls[id].el.querySelector(".wel"); if(el&&c.startedAt){ const ms=dvrNow()-c.startedAt; const sec=Math.floor(ms/1000); el.textContent=sec<60?sec+"s":(Math.floor(sec/60)+"m "+(sec%60)+"s") }
     }
   }
+  // --- DVR -------------------------------------------------------------
+  // The board is a live view you can drag backwards, the way a livestream is.
+  // Every snapshot the service sends is kept, so "now" is just the newest frame
+  // and the past is the frames that already arrived — seeking is instant because
+  // nothing is fetched or rebuilt. Releasing at the right edge (or pressing live)
+  // reattaches to the feed.
+  const DVR_MAX=1800 // ~30 min at 1Hz
+  let dvrBuf=[], dvrLive=true, dvrIdx=-1
+  // Anything that ticks against wall-clock time has to ask this instead of
+  // Date.now(), or a paused board would keep counting seconds while you study it.
+  function dvrNow(){ return dvrLive?Date.now():((snap&&snap.ts)||Date.now()) }
+  function dvrLabel(){
+    if(dvrLive) return "live"
+    const back=Math.max(0,Math.round((((dvrBuf[dvrBuf.length-1]||{}).ts||0)-((dvrBuf[dvrIdx]||{}).ts||0))/1000))
+    return back<60?("-"+back+"s"):("-"+Math.floor(back/60)+"m "+(back%60)+"s")
+  }
+  function dvrUi(){
+    gid("dvrLive").classList.toggle("on",dvrLive)
+    gid("dvr").classList.toggle("past",!dvrLive)
+    gid("dvrTime").textContent=dvrLabel()
+  }
+  function dvrSeek(i){
+    if(!dvrBuf.length) return
+    dvrIdx=Math.max(0,Math.min(dvrBuf.length-1,i))
+    dvrLive=(dvrIdx>=dvrBuf.length-1)
+    gid("dvrBar").value=String(dvrIdx)
+    dvrUi()
+    render(dvrBuf[dvrIdx])
+  }
+  function dvrPush(s){
+    dvrBuf.push(s)
+    // Dropping the oldest frame shifts every index down one; a held playhead has
+    // to move with it or it would silently drift forward through the recording.
+    if(dvrBuf.length>DVR_MAX){ dvrBuf.shift(); if(!dvrLive) dvrIdx-- }
+    const bar=gid("dvrBar"); bar.max=String(dvrBuf.length-1)
+    if(dvrLive){ dvrIdx=dvrBuf.length-1; bar.value=String(dvrIdx); render(s) }
+    else if(dvrIdx<0){ dvrSeek(0) }       // scrubbed past the end of what we still keep
+    else { dvrUi() }                       // stay put; only the timeline grew
+  }
+  gid("dvrBar").addEventListener("input",function(){ dvrSeek(+this.value) })
+  gid("dvrLive").onclick=function(){ dvrSeek(dvrBuf.length-1) }
+
   function render(s){
     gid("connecting").style.display="none"; gid("app").style.display=""
     prev=snap; snap=s; lastSnapAt=Date.now()
@@ -757,7 +813,7 @@ export function createOpsView(root, handlers) {
   rafId=requestAnimationFrame(loop)
 
   return {
-    update(s){ try{ render(s) }catch(e){ /* ignore */ } },
+    update(s){ try{ dvrPush(s) }catch(e){ /* ignore */ } },
     setVerify(o){ renderVerify(o) },
     // Reflect a scale set elsewhere (Cmd +/−) without re-emitting it.
     setScale(n){ scale=clampScale(n); gid("zoomPct").textContent=Math.round(scale*100)+"%" },
