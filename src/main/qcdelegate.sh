@@ -178,6 +178,49 @@ out="$(mktemp)"
 rc=0
 cold=0
 
+# --- Baseline check: was this already green before we started? -------------
+# A check that passes AFTER the worker proves nothing if it also passed BEFORE —
+# a worker that does nothing scores a win. Measured across 31 checked runs, 3 of
+# 18 "passes" changed zero lines. Recording the baseline lets analysis separate
+# "proved the work happened" (red -> green) from "didn't break anything"
+# (green -> green), which is a weaker claim and shouldn't be counted the same.
+ckx_before="null"
+if [ -n "$QC_CHECK" ]; then
+  sh -c "$QC_CHECK" >/dev/null 2>&1
+  ckx_before=$?
+  if [ "$ckx_before" = "0" ]; then
+    printf '\033[2mqcdelegate: check already passes before the work — it can only prove nothing broke.\033[0m\n' | tee -a "${feeds[@]}"
+  fi
+fi
+
+# --- Wall-clock cap --------------------------------------------------------
+# macOS ships no timeout(1), so the cap is a watchdog process: sleep, TERM the
+# worker, KILL it if it ignores that. Cancelled the instant the worker exits on
+# its own, so a fast run pays nothing for it. Without a cap a wedged worker just
+# runs — the longest observed was 17,855s (5.0h) of unattended burn.
+# QC_TIMEOUT=0 disables the cap.
+cap="${QC_TIMEOUT:-900}"
+cap_wait() {
+  local pid="$1" w st
+  if [ "$cap" -le 0 ]; then wait "$pid"; return $?; fi
+  ( sleep "$cap"
+    kill -TERM "$pid" 2>/dev/null
+    # Give it a grace period to die politely, then insist.
+    sleep 10
+    pkill -KILL -P "$pid" 2>/dev/null
+    kill -KILL "$pid" 2>/dev/null
+  ) &
+  w=$!
+  wait "$pid"; st=$?
+  # Worker finished first — retire the watchdog before it can fire.
+  kill "$w" 2>/dev/null
+  wait "$w" 2>/dev/null
+  if [ "$st" -ge 143 ]; then
+    printf '\033[2mqcdelegate: hit the %ss wall-clock cap — worker killed.\033[0m\n' "$cap" | tee -a "${feeds[@]}"
+  fi
+  return $st
+}
+
 if [ "$engine" = "aider" ]; then
   # aider drives the model directly over its OpenAI-compatible endpoint (no ccr / no
   # tool-call transformer needed). --architect: a planning pass then an edit pass. With
@@ -201,7 +244,8 @@ if [ "$engine" = "aider" ]; then
       --input-history-file /dev/null \
       --llm-history-file /dev/null \
       "${testargs[@]}" \
-      --message "$prompt" >"$out" 2>&1
+      --message "$prompt" >"$out" 2>&1 &
+  cap_wait $!
   rc=$?
   rm -f "$ahist"
 else
@@ -215,7 +259,8 @@ else
       ANTHROPIC_AUTH_TOKEN="ccr" \
       ANTHROPIC_MODEL="$route" \
       claude -p --dangerously-skip-permissions \
-        --allowedTools "Read Write Edit MultiEdit Bash Glob Grep LS TodoWrite" >"$out" 2>&1
+        --allowedTools "Read Write Edit MultiEdit Bash Glob Grep LS TodoWrite" >"$out" 2>&1 &
+    cap_wait $!
     rc=$?
     if [ "$attempt" -lt 3 ] && grep -qiE "may not exist|may not have access|model.*not found" "$out"; then
       cold=$((cold + 1))
@@ -244,11 +289,19 @@ if [ -n "$before_tree" ] && [ -n "$after_tree" ] && [ "$before_tree" != "$after_
 fi
 
 # --- Ground-truth check: did the delegated change actually work? -----------
+# Read against the baseline taken before the work (ckx_before): only red -> green
+# is evidence the task was done. green -> green means the check never tested the
+# thing, and zero churn on top of that means the worker did nothing at all.
 ckcmd="$QC_CHECK"
 ckx="null"
+proved="null"
 if [ -n "$ckcmd" ]; then
   sh -c "$ckcmd" >/dev/null 2>&1
   ckx=$?
+  if [ "$ckx" = "0" ] && [ "$ckx_before" != "0" ]; then proved="true"; else proved="false"; fi
+  if [ "$ckx" = "0" ] && [ "$ckx_before" = "0" ] && [ "$ins" = "0" ] && [ "$del" = "0" ]; then
+    printf '\033[2mqcdelegate: check green but nothing changed — this run proved nothing.\033[0m\n' | tee -a "${feeds[@]}"
+  fi
 fi
 
 # --- Emit one structured event (dependency-free; the app reads this) -------
@@ -265,7 +318,7 @@ ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 qtask="$QC_TASK"; [ -z "$qtask" ] && qtask="untagged"
 qpane="$QC_PANE"
 if [ -n "$ckcmd" ]; then
-  check_json="{\"command\":\"$(jesc "$ckcmd")\",\"exit\":$ckx}"
+  check_json="{\"command\":\"$(jesc "$ckcmd")\",\"exit\":$ckx,\"exitBefore\":$ckx_before,\"proved\":$proved}"
 else
   check_json="null"
 fi
