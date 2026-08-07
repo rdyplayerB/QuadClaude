@@ -18,7 +18,8 @@
     "start": "electron .",
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "mock:console": "vite --config vite.mock.config.ts"
   },
   "dependencies": {
     "@xterm/addon-canvas": "0.8.0-beta.48",
