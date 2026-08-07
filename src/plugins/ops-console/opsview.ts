@@ -231,7 +231,11 @@ const CSS = `
 .fsub{font-size:var(--fs-meta);color:var(--faint);margin-top:2px;line-height:1.4}
 .ftime{font-size:var(--fs-meta);color:var(--faint);margin-top:2px}
 .ftime::before{content:"› "}
-.dvr{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-top:9px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:rgba(255,255,255,.02)}
+/* The console is an overlay — --bg is transparent, so anything without its own
+   surface is read against whatever window happens to be behind the app. A near
+   -invisible strip left the timeline sitting on top of someone's browser. Uses
+   the same surface as the KPI tiles and cards so it reads as part of the console. */
+.dvr{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-top:9px;padding:6px 10px;border:1px solid var(--line);border-radius:var(--rp,10px);background:var(--term);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .dvrlive{flex:0 0 auto;font:inherit;font-size:var(--fs-meta);letter-spacing:.06em;color:var(--faint);background:transparent;border:1px solid var(--line);border-radius:999px;padding:2px 9px;cursor:pointer}
 .dvrlive.on{color:#34d399;border-color:#34d39955}
 .dvrlive.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;margin-right:5px;vertical-align:1px;animation:dvrpulse 2s ease-in-out infinite}
