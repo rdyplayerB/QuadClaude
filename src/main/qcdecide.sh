@@ -6,10 +6,26 @@
 #   • logged for the delegation dashboard (~/.quadclaude/events.jsonl, type:"decision").
 #
 # Usage:
-#   qcdecide "<group>" keep|delegate "<reason>" ["<check-command>"]
+#   qcdecide "<group>" keep|delegate "<reason>" ["<check-command>"] ["<spec>"]
 # Examples:
 #   qcdecide "combat system" keep "determinism-critical core math"
 #   qcdecide "monster data" delegate "spec-driven JSON" "node test/validate_monsters.mjs"
+#
+# The 5th argument (or $QC_SPEC) is the self-contained instruction you WOULD have
+# handed the worker. Record it on KEEP decisions: without it a decision is only a
+# label like "combat system", which is not enough to ever re-test the call. It is
+# also what makes the counterfactual below possible.
+#
+# QC_SHADOW turns on the counterfactual: on a KEEP that carries both a spec and a
+# check, run that same spec through qwen in an isolated worktree and record whether
+# it could have matched. This has to happen HERE, at decision time, because
+# qcshadow builds its baseline from HEAD — once the work is committed, HEAD already
+# contains it and the question can no longer be asked. That is why it can never be
+# backfilled, and why shadow.jsonl stays empty unless this fires.
+#   QC_SHADOW=off   (default) never run
+#   QC_SHADOW=all             run on every eligible keep
+#   QC_SHADOW=<N>             run on roughly 1 in N eligible keeps
+# Runs detached: it never blocks the orchestrator and never touches your tree.
 set -o pipefail
 qc="$HOME/.quadclaude"; log="$qc/delegation.log"; events="$qc/events.jsonl"; mkdir -p "$qc"
 # Mirror into a per-orchestrator feed file (in addition to the global log) so a pane
@@ -17,7 +33,7 @@ qc="$HOME/.quadclaude"; log="$qc/delegation.log"; events="$qc/events.jsonl"; mkd
 feeds=("$log")
 if [ -n "$QC_PANE" ]; then mkdir -p "$qc/feed"; feeds+=("$qc/feed/$QC_PANE.log"); fi
 
-group="$1"; verdict="$2"; reason="$3"; check="$4"
+group="$1"; verdict="$2"; reason="$3"; check="$4"; spec="${5:-$QC_SPEC}"
 if [ -z "$group" ] || { [ "$verdict" != "keep" ] && [ "$verdict" != "delegate" ]; }; then
   echo 'usage: qcdecide "<group>" keep|delegate "<reason>" ["<check-cmd>"]' >&2
   exit 2
@@ -34,5 +50,28 @@ printf '\n\033[38;5;%sm── %s · decision · %s → %s ──\033[0m\n\033[2m
   "$col" "$(date '+%H:%M:%S')" "$group" "$label" "$reason" "$extra" | tee -a "${feeds[@]}"
 
 jesc() { printf %s "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\r\t' '   '; }
-printf '{"ts":"%s","type":"decision","project":"%s","pane":"%s","group":"%s","verdict":"%s","reason":"%s","check":"%s"}\n' \
-  "$ts" "$(jesc "$project")" "$(jesc "$QC_PANE")" "$(jesc "$group")" "$verdict" "$(jesc "$reason")" "$(jesc "$check")" >> "$events"
+printf '{"ts":"%s","type":"decision","project":"%s","pane":"%s","group":"%s","verdict":"%s","reason":"%s","check":"%s","spec":"%s"}\n' \
+  "$ts" "$(jesc "$project")" "$(jesc "$QC_PANE")" "$(jesc "$group")" "$verdict" "$(jesc "$reason")" "$(jesc "$check")" "$(jesc "$spec")" >> "$events"
+
+# --- Counterfactual: could qwen have matched what we just kept? -------------
+# Only KEEP is interesting (a DELEGATE already produces a real outcome), and only
+# with both a spec to run and a check to judge it by.
+shadow_mode="${QC_SHADOW:-off}"
+if [ "$verdict" = "keep" ] && [ -n "$spec" ] && [ -n "$check" ] && [ "$shadow_mode" != "off" ] \
+   && command -v qcshadow >/dev/null 2>&1; then
+  fire=0
+  case "$shadow_mode" in
+    all) fire=1 ;;
+    ''|*[!0-9]*) fire=0 ;;                       # not a number and not "all" — ignore
+    *) [ "$shadow_mode" -gt 0 ] && [ $((RANDOM % shadow_mode)) -eq 0 ] && fire=1 ;;
+  esac
+  # A run against a dead endpoint just churns a worktree for nothing, so check the
+  # router is actually answering before spending one.
+  if [ "$fire" = "1" ] && ! curl -s -o /dev/null --max-time 3 http://127.0.0.1:3456/ 2>/dev/null; then
+    fire=0
+  fi
+  if [ "$fire" = "1" ]; then
+    printf '\033[2m   ↳ shadow: testing whether qwen could have matched this (background)\033[0m\n' | tee -a "${feeds[@]}"
+    ( nohup qcshadow "$group" "$spec" "$check" >/dev/null 2>&1 & ) >/dev/null 2>&1
+  fi
+fi

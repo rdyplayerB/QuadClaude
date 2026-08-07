@@ -8,6 +8,7 @@ import { WorkspaceManager } from './workspace'
 import { RouterManager } from './router'
 import { delegationLog } from './delegationLog'
 import { logger } from './logger'
+import { stopServerScan } from './serverScan'
 import { IPC_CHANNELS, MenuAction } from '../shared/types'
 import { installStatuslineScript } from './statusline'
 import { buildApplicationMenu } from './menu'
@@ -621,6 +622,7 @@ app.on('before-quit', (e) => {
   logger.info('app', 'App is quitting')
   try { shutdownPlugins() } catch { /* never block quit */ }
   stopPerfMonitor()
+  try { stopServerScan() } catch { /* never block quit */ }
   // Save CWDs before killing PTYs (important when Cmd+Q is used) — synchronous.
   if (ptyManager && workspaceManager) {
     const cwds = ptyManager.getAllCwds()

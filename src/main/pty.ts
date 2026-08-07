@@ -5,6 +5,7 @@ import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { logger } from './logger'
+import { scanServers, stopServerScan } from './serverScan'
 import { markActivity, logPerfEvent } from './perfMonitor'
 
 // Async, non-blocking command runner. Critically, this does NOT block the
@@ -111,12 +112,9 @@ const GIT_STATUS_CACHE_TTL = 10_000 // 10 seconds
 // Server detection cache - one lsof+ps pair is shared across all panes and
 // reused for a few seconds so repeated polls don't re-spawn processes.
 let serverCache: { servers: Map<number, ServerInfo[]>; timestamp: number } | null = null
-// Every genuine main-thread freeze in two months of telemetry came from this
-// pair: 6 of 7 busy-freeze events were the lsof parse (up to 1,070ms at 0.77
-// CPU-busy), the 7th was the ps parse. Both parse system-wide output
-// synchronously, so the exposure scales with how often they run. 10s keeps a
-// newly-started dev server appearing promptly while cutting the window by 60%.
-// The real fix is getting the parse off the main thread.
+// The scan itself now runs in a worker (see serverScan.ts), so this interval no
+// longer trades UI smoothness against freshness — it only limits how often two
+// subprocesses get spawned. 10s is plenty for a port chip to appear promptly.
 const SERVER_CACHE_TTL = 10_000
 
 // One `ps` snapshot: pid -> ppid and pid -> pgid for the whole system.
@@ -481,84 +479,19 @@ export class PtyManager {
     if (serverCache && Date.now() - serverCache.timestamp < SERVER_CACHE_TTL) {
       return serverCache.servers
     }
-    const result = new Map<number, ServerInfo[]>()
     if (os.platform() === 'win32' || this.ptys.size === 0) {
-      serverCache = { servers: result, timestamp: Date.now() }
-      return result
+      const empty = new Map<number, ServerInfo[]>()
+      serverCache = { servers: empty, timestamp: Date.now() }
+      return empty
     }
 
-    // shell pid -> paneId (+ pgid-based lookup for backgrounded processes)
-    const shellPids = new Map<number, number>()
-    const shellPgids = new Map<number, number>()
-    for (const [paneId, inst] of this.ptys) shellPids.set(inst.pty.pid, paneId)
+    // shell pid -> paneId. The worker does the rest: both commands, both parses,
+    // and the ancestry walk. Only the finished mapping crosses back, so no
+    // system-wide output is ever touched on this thread.
+    const shells: Array<[number, number]> = []
+    for (const [paneId, inst] of this.ptys) shells.push([inst.pty.pid, paneId])
 
-    try {
-      const [lsofRes, snap] = await Promise.all([
-        pExecFile('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn'], {
-          encoding: 'utf-8',
-          timeout: 3000,
-          maxBuffer: 4 * 1024 * 1024,
-        }),
-        psSnapshot(),
-      ])
-
-      // Build pgid -> paneId map: the shell's pgid typically matches itself
-      for (const [shellPid, paneId] of shellPids) {
-        const pg = snap.pgid.get(shellPid)
-        if (pg !== undefined) shellPgids.set(pg, paneId)
-      }
-
-      // Synchronous parse of system-wide lsof output (all listening sockets).
-      markActivity('pty:lsof-servers-parse')
-      let curPid = 0
-      let curCmd = ''
-      const seen = new Set<string>() // dedupe paneId:port
-      for (const line of lsofRes.stdout.split('\n')) {
-        if (!line) continue
-        const tag = line[0]
-        const val = line.slice(1)
-        if (tag === 'p') {
-          curPid = parseInt(val, 10) || 0
-          curCmd = ''
-        } else if (tag === 'c') {
-          curCmd = val
-        } else if (tag === 'n') {
-          // val: "127.0.0.1:3000" | "*:5173" | "[::1]:8080"
-          const idx = val.lastIndexOf(':')
-          if (idx < 0) continue
-          const port = parseInt(val.slice(idx + 1), 10)
-          if (!port || isNaN(port)) continue
-          // Walk the listening process's ancestry to a pane's shell
-          let owner: number | undefined
-          let cur = curPid
-          for (let i = 0; i < 40 && cur && cur !== 1; i++) {
-            if (shellPids.has(cur)) {
-              owner = shellPids.get(cur)
-              break
-            }
-            const next = snap.ppid.get(cur)
-            if (next === undefined || next === cur) break
-            cur = next
-          }
-          // Fallback: backgrounded processes get reparented (ppid=1) but
-          // keep the shell's process group ID
-          if (owner === undefined) {
-            const pg = snap.pgid.get(curPid)
-            if (pg !== undefined) owner = shellPgids.get(pg)
-          }
-          if (owner === undefined) continue
-          const key = `${owner}:${port}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          const arr = result.get(owner) ?? []
-          arr.push({ pid: curPid, port, command: curCmd })
-          result.set(owner, arr)
-        }
-      }
-    } catch {
-      // lsof/ps unavailable or timed out - return whatever was resolved
-    }
-
+    const result = await scanServers(shells)
     serverCache = { servers: result, timestamp: Date.now() }
     return result
   }
