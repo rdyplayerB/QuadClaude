@@ -237,9 +237,10 @@ const CSS = `
 .dvrlive.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;margin-right:5px;vertical-align:1px;animation:dvrpulse 2s ease-in-out infinite}
 @keyframes dvrpulse{0%,100%{opacity:1}50%{opacity:.35}}
 .dvrbar{flex:1;min-width:0;accent-color:#34d399;cursor:pointer}
-.dvrtime{flex:0 0 auto;font-size:var(--fs-meta);color:var(--faint);font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
+.dvrtime{flex:0 0 auto;font-size:var(--fs-meta);color:var(--faint);font-variant-numeric:tabular-nums;min-width:76px;text-align:left}
 .dvr.past .dvrbar{accent-color:#fbbf24}
 .dvr.past .dvrtime{color:#fbbf24}
+.dvr.past .dvrlive{color:#fbbf24;border-color:#fbbf2455;cursor:pointer}
 .foot{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;margin-top:9px;color:var(--faint);font-size:var(--fs-meta);padding:0 4px;flex-wrap:wrap;gap:8px}
 #verify{position:fixed;top:56px;right:20px;z-index:2147483001;display:none;background:var(--pane);border:1px solid var(--line);border-radius:var(--rp);padding:8px 11px;font-size:var(--fs-meta);color:var(--fg2);min-width:190px}
 #verify.on{display:block}
@@ -278,9 +279,9 @@ const HTML = `
       <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3></div><div class="feed" id="feed"></div></div>
     </div>
     <div class="dvr" id="dvr">
-      <button class="dvrlive on" id="dvrLive">live</button>
+      <span class="dvrtime" id="dvrTime">—</span>
       <input type="range" class="dvrbar" id="dvrBar" min="0" max="0" value="0">
-      <span class="dvrtime" id="dvrTime">live</span>
+      <button class="dvrlive on" id="dvrLive" title="Jump to now">live</button>
     </div>
     <div class="foot">
       <div>output meters = real output tokens per 2s, oldest bar left · a flat meter means the agent produced nothing</div>
@@ -715,15 +716,30 @@ export function createOpsView(root, handlers) {
   // Anything that ticks against wall-clock time has to ask this instead of
   // Date.now(), or a paused board would keep counting seconds while you study it.
   function dvrNow(){ return dvrLive?Date.now():((snap&&snap.ts)||Date.now()) }
+  function ago(ms){
+    const s=Math.max(0,Math.round(ms/1000))
+    return s<60?("-"+s+"s"):("-"+Math.floor(s/60)+"m "+String(s%60).padStart(2,"0")+"s")
+  }
+  // Right end is always now, so that is where "live" lives — as an indicator
+  // when you are there and a button back when you are not. Saying it at both
+  // ends said the same thing twice and left the timeline itself unlabelled.
+  // The left end therefore carries the time: how far back you COULD go while
+  // live, and how far back you ARE once dragged.
   function dvrLabel(){
-    if(dvrLive) return "live"
-    const back=Math.max(0,Math.round((((dvrBuf[dvrBuf.length-1]||{}).ts||0)-((dvrBuf[dvrIdx]||{}).ts||0))/1000))
-    return back<60?("-"+back+"s"):("-"+Math.floor(back/60)+"m "+(back%60)+"s")
+    if(!dvrBuf.length) return "—"
+    const newest=(dvrBuf[dvrBuf.length-1]||{}).ts||0
+    if(dvrLive) return ago(newest-((dvrBuf[0]||{}).ts||0))
+    return ago(newest-((dvrBuf[dvrIdx]||{}).ts||0))
   }
   function dvrUi(){
-    gid("dvrLive").classList.toggle("on",dvrLive)
+    const b=gid("dvrLive")
+    b.classList.toggle("on",dvrLive)
+    b.textContent=dvrLive?"live":"↦ live"
+    b.title=dvrLive?"Showing now":"Jump back to now"
     gid("dvr").classList.toggle("past",!dvrLive)
-    gid("dvrTime").textContent=dvrLabel()
+    const lab=gid("dvrTime")
+    lab.textContent=dvrLabel()
+    lab.title=dvrLive?"How far back you can drag":"How far back you are"
   }
   function dvrSeek(i){
     if(!dvrBuf.length) return
@@ -739,7 +755,9 @@ export function createOpsView(root, handlers) {
     // to move with it or it would silently drift forward through the recording.
     if(dvrBuf.length>DVR_MAX){ dvrBuf.shift(); if(!dvrLive) dvrIdx-- }
     const bar=gid("dvrBar"); bar.max=String(dvrBuf.length-1)
-    if(dvrLive){ dvrIdx=dvrBuf.length-1; bar.value=String(dvrIdx); render(s) }
+    // dvrUi() on every path: while live the left label reports how far back the
+    // buffer now reaches, and that keeps growing as frames arrive.
+    if(dvrLive){ dvrIdx=dvrBuf.length-1; bar.value=String(dvrIdx); render(s); dvrUi() }
     else if(dvrIdx<0){ dvrSeek(0) }       // scrubbed past the end of what we still keep
     else { dvrUi() }                       // stay put; only the timeline grew
   }
