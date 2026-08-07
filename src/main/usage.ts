@@ -16,6 +16,7 @@ const USAGE_HOST = 'api.anthropic.com'
 // shared per-IP rate-limit budget. This poller only refreshes the GLOBAL fallback cache (for
 // older Claude Code that doesn't pass rate_limits) on the original slow cadence.
 const ROTATION_TICK = 5 * 60_000 // 5 minutes
+const MAX_BACKOFF = 30 * 60_000 // ceiling for the 429 backoff — recovery within half an hour
 
 let cachedToken: string | null = null
 let tokenFetchedAt = 0
@@ -78,7 +79,9 @@ function fetchUsage(token: string): Promise<{ data: UsageData | null; rateLimite
           return
         }
         if (res.statusCode === 429) {
-          logger.warn('usage', 'Rate limited by usage API, backing off')
+          // Logged by the scheduler instead, which knows how long it's actually
+          // waiting — a bare "backing off" line per refusal said nothing and
+          // accounted for 86% of everything this app has ever logged.
           resolve({ data: null, rateLimited: true })
           return
         }
@@ -207,6 +210,12 @@ export class UsagePoller {
   private lastAccountEmail: string | null = null
   private polling = false
   private watching = false
+  // Consecutive 429s. The endpoint refuses in long stretches — one measured run
+  // was 3h20m of unbroken refusals — and rotation used to be what spaced retries
+  // out. Once targets() collapsed to a single entry that spacing vanished, so
+  // every retry landed exactly ROTATION_TICK apart, 38 times, and never yielded.
+  // Each refusal now widens the next gap; a single success collapses it.
+  private rateLimitStreak = 0
 
   start(window: BrowserWindow) {
     this.window = window
@@ -256,6 +265,9 @@ export class UsagePoller {
   private forcePoll() {
     if (this.timeout) { clearTimeout(this.timeout); this.timeout = null }
     this.rotationIndex = 0
+    // A switch means a different token, which may not be the one being refused —
+    // don't make the new account serve out the old one's backoff.
+    this.rateLimitStreak = 0
     void this.tick()
   }
 
@@ -279,24 +291,47 @@ export class UsagePoller {
     return ['global']
   }
 
+  // How long to wait after a tick. Exponential while the endpoint is refusing,
+  // capped so recovery still happens within half an hour; straight back to the
+  // normal cadence on the first success.
+  private nextDelay(rateLimited: boolean): number {
+    if (!rateLimited) {
+      if (this.rateLimitStreak > 0) {
+        logger.info('usage', 'Rate limit cleared', `after ${this.rateLimitStreak} refusal(s)`)
+        this.rateLimitStreak = 0
+      }
+      return ROTATION_TICK
+    }
+    this.rateLimitStreak++
+    const delay = Math.min(ROTATION_TICK * 2 ** this.rateLimitStreak, MAX_BACKOFF)
+    logger.warn(
+      'usage',
+      'Rate limited — backing off',
+      `refusal ${this.rateLimitStreak}, retrying in ${Math.round(delay / 60_000)}m`,
+    )
+    return delay
+  }
+
   private async tick() {
     if (this.polling) return // a forced poll can overlap the scheduled tick — skip the dup
     this.polling = true
+    let rateLimited = false
     try {
       const targets = this.targets()
       const target = targets[this.rotationIndex % targets.length]
       this.rotationIndex = (this.rotationIndex + 1) % Math.max(1, targets.length)
-      if (target === 'global') await this.pollGlobal()
-      else await this.pollAccount(target)
+      if (target === 'global') rateLimited = await this.pollGlobal()
+      else rateLimited = await this.pollAccount(target)
     } finally {
       this.polling = false
-      this.scheduleNext()
+      this.scheduleNext(this.nextDelay(rateLimited))
     }
   }
 
   // Poll the globally signed-in account (Keychain token). Updates the global statusline
   // cache (for unbound panes), the in-memory latest, and detects account switches.
-  private async pollGlobal() {
+  /** Returns true if the endpoint refused, so the scheduler can widen the gap. */
+  private async pollGlobal(): Promise<boolean> {
     // Detect a Claude account switch (re-login): the Keychain token + ~/.claude.json change.
     const account = getCurrentAccountEmail()
     if (account && this.lastAccountEmail && account !== this.lastAccountEmail) {
@@ -309,34 +344,38 @@ export class UsagePoller {
     writeStatuslineAccount(account) // keep the per-pane indicator current
 
     const token = await timeOp('usage:keychain-token', () => getOAuthToken())
-    if (!token) return
+    if (!token) return false
     const result = await timeOp('usage:fetch-api', () => fetchUsage(token))
     if (result.data) {
       this.latestData = result.data
       saveCachedUsage(result.data, account)
       this.window?.webContents.send(IPC_CHANNELS.USAGE_UPDATE, result.data)
     }
-    // On 429/other error: skip this cycle; the next global tick is a full rotation away.
+    // On 429/other error the last good reading stands — it carries fetchedAt, so a
+    // consumer can tell how old it is rather than trusting a stale number silently.
+    return result.rateLimited
   }
 
   // Poll one saved account's usage (its own token) → its own statusline cache, so a pane
   // bound to it shows ITS real session + weekly numbers. The endpoint is metadata-only and
   // does NOT consume inference quota, so this can't eat into the limits it reports.
-  private async pollAccount(id: string) {
+  private async pollAccount(id: string): Promise<boolean> {
     let token: string | null = null
     try {
       token = accountStore.getToken(id)
     } catch {
-      return
+      return false
     }
-    if (!token) return
+    if (!token) return false
     try {
       const res = await fetchUsage(token)
       if (res.data) writeStatuslineCache(statuslineCachePath(id), res.data)
       // 429/no data → leave the prior cache so the pane keeps its last value (not "~");
-      // it retries on the next rotation.
+      // it retries after the backoff.
+      return res.rateLimited
     } catch {
       // ignore one account's failure
+      return false
     }
   }
 }

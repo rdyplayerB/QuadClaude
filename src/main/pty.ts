@@ -111,7 +111,13 @@ const GIT_STATUS_CACHE_TTL = 10_000 // 10 seconds
 // Server detection cache - one lsof+ps pair is shared across all panes and
 // reused for a few seconds so repeated polls don't re-spawn processes.
 let serverCache: { servers: Map<number, ServerInfo[]>; timestamp: number } | null = null
-const SERVER_CACHE_TTL = 4_000
+// Every genuine main-thread freeze in two months of telemetry came from this
+// pair: 6 of 7 busy-freeze events were the lsof parse (up to 1,070ms at 0.77
+// CPU-busy), the 7th was the ps parse. Both parse system-wide output
+// synchronously, so the exposure scales with how often they run. 10s keeps a
+// newly-started dev server appearing promptly while cutting the window by 60%.
+// The real fix is getting the parse off the main thread.
+const SERVER_CACHE_TTL = 10_000
 
 // One `ps` snapshot: pid -> ppid and pid -> pgid for the whole system.
 async function psSnapshot(): Promise<{ ppid: Map<number, number>; pgid: Map<number, number> }> {

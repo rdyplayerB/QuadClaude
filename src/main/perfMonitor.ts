@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { monitorEventLoopDelay, PerformanceObserver } from 'perf_hooks'
+import { logger } from './logger'
 
 /**
  * Performance / resource recorder for the main process.
@@ -256,6 +257,57 @@ export function getPerfLogDir(): string {
   return path.join(app.getPath('userData'), 'perf-logs')
 }
 
+// Diagnostics that nothing ever deletes stop being diagnostics and become a
+// disk leak: two months of unpruned sessions reached 1.97 GB, one of them
+// 367 MB on its own. Newest sessions are kept, oldest dropped, under both a
+// count and a total-size ceiling — size matters because a single long session
+// can outweigh dozens of short ones.
+const PERF_LOG_MAX_FILES = 40
+const PERF_LOG_MAX_BYTES = 500 * 1024 * 1024
+
+function prunePerfLogs(dir: string, keepPath: string) {
+  try {
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => f.startsWith('perf-') && f.endsWith('.jsonl'))
+      .map((f) => {
+        const full = path.join(dir, f)
+        try {
+          const st = fs.statSync(full)
+          return { full, mtime: st.mtimeMs, size: st.size }
+        } catch {
+          return null
+        }
+      })
+      .filter((f): f is { full: string; mtime: number; size: number } => f !== null)
+      // The session being written right now is never a pruning candidate.
+      .filter((f) => f.full !== keepPath)
+      .sort((a, b) => b.mtime - a.mtime) // newest first
+
+    let kept = 0
+    let bytes = 0
+    let removed = 0
+    let freed = 0
+    for (const f of files) {
+      kept++
+      bytes += f.size
+      if (kept <= PERF_LOG_MAX_FILES && bytes <= PERF_LOG_MAX_BYTES) continue
+      try {
+        fs.unlinkSync(f.full)
+        removed++
+        freed += f.size
+      } catch {
+        // a file we can't remove shouldn't stop the rest
+      }
+    }
+    if (removed > 0) {
+      logger.info('perf', 'Pruned old perf logs', `${removed} file(s), ${(freed / 1e6).toFixed(0)} MB freed`)
+    }
+  } catch {
+    // pruning is best-effort — never block startup over it
+  }
+}
+
 function pad(n: number): string {
   return n < 10 ? '0' + n : String(n)
 }
@@ -425,6 +477,7 @@ export function startPerfMonitor(
   }
 
   logFilePath = path.join(dir, `perf-${timestampForFilename()}.jsonl`)
+  prunePerfLogs(dir, logFilePath)
   stream = fs.createWriteStream(logFilePath, { flags: 'a' })
 
   eld.enable()
