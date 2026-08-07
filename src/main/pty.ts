@@ -55,13 +55,38 @@ async function getLoginShellPath(): Promise<string> {
 // Cache the login shell PATH
 let cachedPath: string | null = null
 
+// Launching QuadClaude from inside a Claude Code session — a `claude` pane, a
+// Bash tool call, `open -a QuadClaude` typed into one — leaves that session's
+// identity in our environment, and `...process.env` below would hand it to every
+// pane. A `claude` started in a pane then reads CLAUDE_CODE_CHILD_SESSION, decides
+// it is a subagent of a session that has usually long since exited, and turns off
+// transcript saving — which also blinds the Ops Console, since it works by tailing
+// exactly those transcripts. A pane is a fresh top-level session, so the launcher's
+// identity is dropped here.
+//
+// Only identity is stripped, not preference: CLAUDE_EFFORT and friends are things
+// you chose, and anything your shell profile sets is re-applied by the pane's own
+// zsh a moment later regardless.
+const INHERITED_SESSION_VARS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDECODE',
+  'CLAUDE_PID',
+  'AI_AGENT',
+]
+
 async function getShellEnv(): Promise<NodeJS.ProcessEnv> {
   if (!cachedPath) {
     cachedPath = await getLoginShellPath()
   }
 
+  const inherited = { ...process.env }
+  for (const key of INHERITED_SESSION_VARS) delete inherited[key]
+
   return {
-    ...process.env,
+    ...inherited,
     PATH: cachedPath,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
