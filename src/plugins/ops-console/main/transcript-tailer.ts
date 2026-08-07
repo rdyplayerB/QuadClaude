@@ -47,7 +47,7 @@ export interface TranscriptInfo {
   lastThinking?: string      // newest reasoning text
   prLink?: string            // newest pr-link record in the tail
   prLabel?: string           // human form: "owner/repo #6"
-  queueDepth: number         // prompts stacked behind the current turn (queue-operation)
+  queueDepth: number         // prompts YOU stacked behind the current turn (see isUserPrompt)
   queued: string[]           // their text, oldest first — the QUEUED lane's cards
   lastRecordAt: number       // epoch of the newest record; "composing" = active but nothing new
   lastRecordKind: string     // 'assistant' | 'user' | ''
@@ -56,6 +56,20 @@ export interface TranscriptInfo {
 }
 
 const MAX_STEPS = 24 // only the recent tail ever reaches a column
+
+// Claude pushes its own bookkeeping through the same queue your typed prompts go
+// through. Measured across 5,288 enqueues: 77.6% are observed_from_primary_session
+// and 1.9% task-notification — only 20.5% is anything a person typed. A lane
+// called QUEUED that is four-fifths machine chatter is reporting the wrong thing,
+// so those are held out of the count and the cards.
+//
+// Matched by wrapper NAME rather than by a leading "<": a pasted HTML or JSX
+// snippet is still your prompt, and must not be filtered away as machinery.
+const MACHINE_QUEUE_TAGS =
+  /^<\/?(observed_from_primary_session|task-notification|system-reminder|local-command-stdout|local-command-stderr|command-name|command-message|command-args)\b/
+function isUserPrompt(text: string): boolean {
+  return !!text && !MACHINE_QUEUE_TAGS.test(text)
+}
 
 function tsOf(d: Record<string, unknown>): number {
   const t = d.timestamp
@@ -146,6 +160,9 @@ export function readTranscript(cwd: string): TranscriptInfo {
     const { lines, mtimeMs } = readTail(file)
     const info: TranscriptInfo = { found: true, editedFiles: [], adds: 0, dels: 0, todos: [], steps: [], lastRecordAt: 0, lastRecordKind: '', notifications: [], mtimeMs, lastSaidAt: 0, queueDepth: 0, queued: [] }
     const byId = new Map<string, Step>()
+    // The queue exactly as it stands, machine entries and all. Narrowed to your
+    // own prompts after the scan; see isUserPrompt.
+    const queue: { text: string; user: boolean }[] = []
 
     for (const l of lines) {
       if (!l || typeof l !== 'object') continue
@@ -189,16 +206,16 @@ export function readTranscript(cwd: string): TranscriptInfo {
           info.prLabel = (repo + (Number.isFinite(num) && num > 0 ? ` #${num}` : '')).trim() || undefined
         }
       }
-      // Prompts stacked behind the current turn. Tail-window arithmetic — an
-      // enqueue whose dequeue scrolled out would overcount, so floor at 0.
+      // Prompts stacked behind the current turn. The FULL queue is tracked in
+      // order — machine entries included — because a dequeue pops whatever is at
+      // the head, and dropping them here would shift the wrong prompt off. The
+      // filtering happens once, at the end, where it can't corrupt the ordering.
       if (type === 'queue-operation') {
         const op = String(d.operation ?? d.op ?? '')
         const txt = typeof d.content === 'string' ? d.content.replace(/\s+/g, ' ').trim() : ''
-        if (op === 'enqueue') { info.queueDepth++; if (txt) info.queued.push(txt.slice(0, 90)) }
-        else if (op === 'dequeue' || op === 'remove') {
-          info.queueDepth = Math.max(0, info.queueDepth - 1)
-          info.queued.shift()
-        } else if (op === 'popAll') { info.queueDepth = 0; info.queued = [] }
+        if (op === 'enqueue') queue.push({ text: txt, user: isUserPrompt(txt) })
+        else if (op === 'dequeue' || op === 'remove') queue.shift()
+        else if (op === 'popAll') queue.length = 0
       }
 
       // file-history-delta carries insertion/deletion counts
@@ -293,6 +310,14 @@ export function readTranscript(cwd: string): TranscriptInfo {
         if (txt) { info.lastAssistantText = txt; info.lastSaidAt = tsOf(d) || info.lastSaidAt }
       }
     }
+
+    // Only what YOU stacked reaches the lane, and the roster badge counts the
+    // same thing — a "3 queued" badge over one visible card was the old split.
+    // Tail-window arithmetic: an enqueue whose dequeue scrolled out of the
+    // 256KB tail would overcount, which the shift() above already floors at 0.
+    const mine = queue.filter((q) => q.user && q.text)
+    info.queued = mine.map((q) => q.text.slice(0, 90))
+    info.queueDepth = mine.length
     return info
   } catch {
     return empty
