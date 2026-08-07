@@ -3,6 +3,7 @@ import { MenuAction } from '../shared/types'
 import { logger } from './logger'
 import { getPluginMenuItems } from './pluginHost'
 import { addMarker, revealPerfLogs, requestRendererFlush } from './perfMonitor'
+import { openPerfViewer } from './perfViewer'
 
 // Build + install the macOS application menu. The two callbacks are the only
 // things that touch index.ts module state: sendMenuAction (routes an action to
@@ -253,6 +254,11 @@ export function buildApplicationMenu(
           click: () => sendMenuAction('dump-diagnostics')
         },
         { type: 'separator' },
+        {
+          label: 'Open Performance Timeline',
+          accelerator: 'CmdOrCtrl+Shift+P',
+          click: () => openPerfViewer()
+        },
         {
           label: 'Reveal Performance Logs',
           click: () => revealPerfLogs()
