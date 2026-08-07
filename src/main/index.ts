@@ -494,6 +494,19 @@ app.whenReady().then(() => {
   // Keep delegation telemetry bounded: fold an oversized event log into the cumulative
   // per-project rollup and drop summaries for long-abandoned projects.
   delegationLog.maintain()
+  // Delegation always starts OFF, no matter how the last session left it. Leaving it
+  // armed across launches means a worker can be handed work before you've checked the
+  // box is reachable — and an unreachable worker costs a stalled session, not an error.
+  // Turning it on is a deliberate, per-session act.
+  try {
+    const preferences = workspaceManager?.load().preferences
+    if (preferences?.delegation?.enabled) {
+      workspaceManager?.save({ preferences: { ...preferences, delegation: { ...preferences.delegation, enabled: false } } })
+      logger.info('delegation', 'Reset delegation toggle to OFF for new session')
+    }
+  } catch (error) {
+    logger.error('delegation', 'failed to reset delegation toggle', error instanceof Error ? error.message : String(error))
+  }
   // Publish the current delegation toggle so a Claude session in a pane can detect it.
   syncDelegationActive()
 
