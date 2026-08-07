@@ -1,4 +1,4 @@
-import { app, Menu, shell } from 'electron'
+import { app, Menu, shell, dialog } from 'electron'
 import { MenuAction } from '../shared/types'
 import { logger } from './logger'
 import { getPluginMenuItems } from './pluginHost'
@@ -67,7 +67,18 @@ export function buildApplicationMenu(
           label: 'Console Replay',
           click: () => {
             const r = openDvrViewer()
-            if (!r.ok) logger.info('ops', 'console replay unavailable', r.reason)
+            if (r.ok) return
+            // Nothing recorded yet is the normal first-run state, not an error —
+            // but saying so only in app.log makes the menu item look broken. Tell
+            // the person who clicked it, and point at the switch that fixes it.
+            logger.info('ops', 'console replay unavailable', r.reason)
+            void dialog.showMessageBox({
+              type: 'info',
+              title: 'Console Replay',
+              message: 'No recorded session yet',
+              detail: r.reason,
+              buttons: ['OK'],
+            })
           }
         },
         { type: 'separator' },
