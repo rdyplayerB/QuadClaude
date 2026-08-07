@@ -13,11 +13,15 @@ import { focusTerminal } from './TerminalPane'
 // ---- Geometry ---------------------------------------------------------------
 
 export const PIP_STRIP_W = 252
-const PAD = 6
 const HEADER_H = 24
 const TILE_HEADER_H = 18
 const GAP = 6
-const MARGIN = 12
+// Space between the header label and the first tile.
+const HEADER_GAP = 6
+// Inset from the container edge. Matches the grid's p-5 padding (GRID_PAD=20)
+// so the strip's top-right corner sits flush with the on-stage window's
+// top-right corner instead of overhanging it.
+const MARGIN = 20
 const TILE_MIN_H = 64
 const TILE_MAX_H = 150
 
@@ -60,11 +64,13 @@ export function computePipGeometry(opts: {
   const containerH = opts.containerH > 0 ? opts.containerH : 800
 
   const n = Math.max(1, hiddenCount)
-  const tileW = PIP_STRIP_W - 2 * PAD
+  // Tiles fill the full strip width so their edges land flush over the
+  // on-stage window — there's no outer frame to inset them from anymore.
+  const tileW = PIP_STRIP_W
   const availForContent =
-    containerH - 2 * MARGIN - HEADER_H - 2 * PAD - n * TILE_HEADER_H - (n - 1) * GAP
+    containerH - 2 * MARGIN - HEADER_H - HEADER_GAP - n * TILE_HEADER_H - (n - 1) * GAP
   const tileContentH = Math.max(TILE_MIN_H, Math.min(TILE_MAX_H, availForContent / n))
-  const stripH = HEADER_H + 2 * PAD + n * (TILE_HEADER_H + tileContentH) + (n - 1) * GAP
+  const stripH = HEADER_H + HEADER_GAP + n * (TILE_HEADER_H + tileContentH) + (n - 1) * GAP
 
   let left: number
   let top: number
@@ -81,15 +87,15 @@ export function computePipGeometry(opts: {
 
   const scale = tileW / PIP_VW
   const tiles: PipTileRect[] = []
-  let y = top + HEADER_H + PAD
+  let y = top + HEADER_H + HEADER_GAP
   for (let i = 0; i < n; i++) {
     const contentTop = y + TILE_HEADER_H
     tiles.push({
-      left: left + PAD,
+      left,
       top: y,
       width: tileW,
       height: TILE_HEADER_H + tileContentH,
-      contentLeft: left + PAD,
+      contentLeft: left,
       contentTop,
       contentWidth: tileW,
       contentHeight: tileContentH,
@@ -211,21 +217,9 @@ export const PipStripChrome = memo(function PipStripChrome({
 
   return (
     <>
-      {/* Strip frame: background + border the terminal tiles sit on (z-29,
-          UNDER the pane wrappers at z-30). */}
-      <div
-        className="absolute glass-modal border border-white/12 shadow-2xl"
-        style={{
-          left: geometry.strip.left,
-          top: geometry.strip.top,
-          width: geometry.strip.width,
-          height: geometry.strip.height,
-          zIndex: 29,
-          // The strip frames tiles that are real panes, so it carries the pane
-          // radius too — a 4px frame around 12px tiles read as a mismatch.
-          borderRadius: 'var(--pane-radius)',
-        }}
-      />
+      {/* No outer frame: the stack is just the header label + the tiles, each
+          of which is a real pane carrying its own colored border. An enclosing
+          container reads as a redundant "bubble" around bordered tiles. */}
       {/* Strip header: drag handle + count + collapse (z-31, above tiles). */}
       <div
         onMouseDown={startMove}
@@ -236,6 +230,9 @@ export const PipStripChrome = memo(function PipStripChrome({
           width: geometry.strip.width,
           height: HEADER_H,
           zIndex: 31,
+          // No frame behind the header now, so shadow the text to keep it
+          // legible over whatever window is on stage underneath.
+          textShadow: '0 1px 3px rgba(0,0,0,0.85)',
         }}
         title="Drag to move (snaps to a corner)"
       >
