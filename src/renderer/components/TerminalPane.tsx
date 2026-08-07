@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react
 import { Terminal, type ILink } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { showLinkTip, hideLinkTip, copyLinkTarget, disposeLinkTip } from '../util/linkTooltip'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
@@ -601,6 +602,10 @@ function disposeTerminal(paneId: number) {
       }
     }
     canvasAddons.delete(paneId)
+    // The hover label lives inside terminal.element, so it would go with the
+    // terminal anyway — dropped explicitly to clear the map entry and any
+    // in-flight "Copied" timer.
+    disposeLinkTip(paneId)
     // Cancel the blank-pane watchdog so a deliberately-closed pane never logs a
     // false "blank-detected".
     clearBlankWatchdog(paneId)
@@ -834,9 +839,23 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // session (via the main process → shell.openExternal). The default WebLinksAddon
       // calls window.open(), which Electron turns into a chromeless popup window — not what
       // anyone wants for a localhost preview.
-      const webLinksAddon = new WebLinksAddon((_event, uri) => {
-        void window.electronAPI.openExternal(uri)
-      })
+      //
+      // Hover shows the target first (see linkTooltip) so a link can be read before it's
+      // followed, and ⌥-click copies it instead of opening it.
+      const webLinksAddon = new WebLinksAddon(
+        (event, uri) => {
+          if (event.altKey) {
+            copyLinkTarget(paneId, uri)
+            return
+          }
+          void window.electronAPI.openExternal(uri)
+        },
+        {
+          hover: (event, uri) =>
+            showLinkTip(paneId, terminal.element ?? undefined, event, uri, 'Click to open · ⌥ click to copy'),
+          leave: () => hideLinkTip(paneId),
+        },
+      )
 
       terminal.loadAddon(fitAddon)
       terminal.loadAddon(webLinksAddon)
@@ -866,9 +885,22 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
                 start: { x: startX, y: bufferLineNumber },
                 end: { x: startX + matched.length - 1, y: bufferLineNumber },
               },
-              activate: () => {
+              activate: (event) => {
+                if (event.altKey) {
+                  copyLinkTarget(paneId, matched)
+                  return
+                }
                 void window.electronAPI.openInEditor(paneId, matched)
               },
+              hover: (event) =>
+                showLinkTip(
+                  paneId,
+                  terminal.element ?? undefined,
+                  event,
+                  matched,
+                  'Click to open in editor · ⌥ click to copy',
+                ),
+              leave: () => hideLinkTip(paneId),
             })
           }
           callback(links.length ? links : undefined)

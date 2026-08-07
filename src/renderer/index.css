@@ -219,6 +219,40 @@ textarea:focus-visible {
 }
 
 
+/* Link target preview. Hovering a URL or .md path in a terminal shows where it
+   actually goes before you commit to clicking it. Positioned by linkTooltip.ts;
+   `xterm-hover` (xterm's own contract) keeps the label from swallowing the link
+   underneath it. Sits above the terminal but below the pane header's menus. */
+.qc-link-tip {
+  position: absolute;
+  z-index: 20;
+  display: none;
+  max-width: min(560px, 92%);
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--glass-bg-modal);
+  border: 1px solid var(--ui-border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  /* A long URL must wrap rather than force the label wider than the pane. */
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.qc-link-tip-target {
+  display: block;
+  color: var(--ui-text-primary);
+}
+
+.qc-link-tip-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--ui-text-muted);
+  font-size: 10px;
+}
+
 /* Pane transitions */
 .pane-transition {
   transition: opacity 0.15s ease-out;
