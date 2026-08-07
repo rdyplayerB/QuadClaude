@@ -11,6 +11,7 @@ import { PluginContext, WorkspaceSnapshot } from '../../../shared/plugins'
 import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, OpsSubagent, AgentState } from '../types'
 import { readTranscript, newestTranscript, TranscriptInfo } from './transcript-tailer'
 import { TokenMeter } from './token-meter'
+import { CardLog } from './cardlog'
 
 const RETURN_TTL = 20000     // how long a finished step stays on the board
 const SUB_DONE_TTL = 60000   // a finished subagent lingers longer — rarer, bigger news
@@ -140,9 +141,12 @@ export class OpsService {
     return raw
   }
 
+  private cardLog = new CardLog()
+
   constructor(ctx: PluginContext) {
     this.ctx = ctx
     this.intervalMs = Number(ctx.getSetting<number>('pollIntervalMs') ?? 1000) || 1000
+    this.cardLog.setEnabled(!!ctx.getSetting<boolean>('cardLogging'))
   }
 
   start(onSnapshot: (s: OpsSnapshot) => void) {
@@ -150,6 +154,12 @@ export class OpsService {
     this.unsubExit = this.ctx.services.onPtyExit((paneId, code) => this.onExit(paneId, code))
     this.tick() // immediate first paint
     this.timer = setInterval(() => this.tick(), this.intervalMs)
+  }
+
+  /** Toggled live from the plugin's settings, so a session can be traced without a restart. */
+  setCardLogging(on: boolean) {
+    this.cardLog.setEnabled(on)
+    if (!on) this.ctx.logger.info('card logging stopped', JSON.stringify(this.cardLog.summary()))
   }
 
   updateInterval(ms: number) {
@@ -163,6 +173,11 @@ export class OpsService {
     this.timer = null
     if (this.unsubExit) this.unsubExit()
     this.onSnapshot = null
+    // Writes the session's occupancy + churn totals as the last line of the trace.
+    if (this.cardLog.isEnabled()) {
+      this.ctx.logger.info('card logging summary', JSON.stringify(this.cardLog.summary()))
+      this.cardLog.setEnabled(false)
+    }
   }
 
   private async ctxFor(paneId: number): Promise<{ contextPct: number; model: string } | null> {
@@ -223,6 +238,7 @@ export class OpsService {
       // age the feed by wall time
       const ageStep = this.intervalMs / 1000
       for (const f of this.feed) f.ageSec += ageStep
+      this.cardLog.record(snap)
       this.onSnapshot(snap)
     } catch (e) {
       this.ctx.logger.warn('ops tick failed', String(e))

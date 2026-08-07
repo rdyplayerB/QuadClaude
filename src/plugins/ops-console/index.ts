@@ -159,6 +159,9 @@ const plugin: PluginModule = {
     unsubSettings = context.onSettingsChanged(() => {
       const ms = Number(context.getSetting<number>('pollIntervalMs') ?? 1000) || 1000
       if (service) service.updateInterval(ms)
+      // Tracing is a per-session decision — flipping it must take effect on the
+      // running service, not on the next app launch.
+      if (service) service.setCardLogging(!!context.getSetting<boolean>('cardLogging'))
       syncVerify()
     })
     if (context.getSetting<boolean>('openAtLaunch')) this.open!()
