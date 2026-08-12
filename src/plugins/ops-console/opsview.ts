@@ -240,6 +240,9 @@ const CSS = `
 .dvrlive.on{color:#34d399;border-color:#34d39955}
 .dvrlive.on::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#34d399;margin-right:5px;vertical-align:1px;animation:dvrpulse 2s ease-in-out infinite}
 @keyframes dvrpulse{0%,100%{opacity:1}50%{opacity:.35}}
+.dvrbtn{flex:0 0 auto;font:inherit;font-size:var(--fs-meta);color:var(--fg2);background:transparent;border:1px solid var(--line);border-radius:999px;min-width:26px;height:20px;line-height:1;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;cursor:pointer}
+.dvrbtn:hover{color:var(--fg);border-color:var(--fg2)}
+.dvr.past .dvrbtn{color:#fbbf24;border-color:#fbbf2455}
 .dvrbar{flex:1;min-width:0;accent-color:#34d399;cursor:pointer}
 .dvrtime{flex:0 0 auto;font-size:var(--fs-meta);color:var(--faint);font-variant-numeric:tabular-nums;min-width:76px;text-align:left}
 .dvr.past .dvrbar{accent-color:#fbbf24}
@@ -283,6 +286,7 @@ const HTML = `
       <div class="panel"><div class="phead"><h3>activity feed <span class="sub">— history</span></h3></div><div class="feed" id="feed"></div></div>
     </div>
     <div class="dvr" id="dvr">
+      <button class="dvrbtn" id="dvrPlay" title="Play">▶</button>
       <span class="dvrtime" id="dvrTime">—</span>
       <input type="range" class="dvrbar" id="dvrBar" min="0" max="0" value="0">
       <button class="dvrlive on" id="dvrLive" title="Jump to now">live</button>
@@ -304,6 +308,20 @@ const HTML = `
     <div class="vrow"><span class="vk">transitions</span><span id="v-n">0</span></div>
   </div>
 </div>`
+
+// The recording, deliberately OUTSIDE createOpsView.
+//
+// It used to be a local, which meant closing the console dropped every frame on
+// the floor: reopen, drag back, and there were four near-identical frames to look
+// at, which is indistinguishable from a recorder that does not work. Frames now
+// outlive any one mount.
+//
+// What this does NOT do is record while the console is closed — closeConsole()
+// stops the producer in main (index.ts), so nothing is being generated to keep.
+// A recording can therefore contain a gap where the console was shut; playback
+// caps its step so it crosses one rather than appearing to hang on it.
+const DVR_MAX = 1800 // ~30 min at 1Hz
+const dvrBuf = []
 
 export function createOpsView(root, handlers) {
   root.innerHTML = '<style>' + CSS + '</style>' + HTML
@@ -715,8 +733,11 @@ export function createOpsView(root, handlers) {
   // and the past is the frames that already arrived — seeking is instant because
   // nothing is fetched or rebuilt. Releasing at the right edge (or pressing live)
   // reattaches to the feed.
-  const DVR_MAX=1800 // ~30 min at 1Hz
-  let dvrBuf=[], dvrLive=true, dvrIdx=-1
+  // dvrBuf is module-scoped (see above) so it survives close/reopen; the playhead
+  // is per-mount and starts at now.
+  let dvrLive=true, dvrIdx=dvrBuf.length?dvrBuf.length-1:-1
+  // True only while the pointer is down on the bar — see dvrSyncBar.
+  let dvrDragging=false
   // Anything that ticks against wall-clock time has to ask this instead of
   // Date.now(), or a paused board would keep counting seconds while you study it.
   function dvrNow(){ return dvrLive?Date.now():((snap&&snap.ts)||Date.now()) }
@@ -735,12 +756,34 @@ export function createOpsView(root, handlers) {
     if(dvrLive) return ago(newest-((dvrBuf[0]||{}).ts||0))
     return ago(newest-((dvrBuf[dvrIdx]||{}).ts||0))
   }
+  // Writing max RESCALES the control, so it is only ever written when we are the
+  // ones moving the playhead — live, seeking, or playing.
+  //
+  // Doing it unconditionally every second was two bugs at once. Parked in the
+  // past, max grew while value stayed pinned, so the thumb walked toward the left
+  // edge on its own (position = value/max) while render() was never called — the
+  // marker slid back and the board never changed, which is exactly what a broken
+  // recorder looks like. And mid-drag it rescaled the track under the cursor, so
+  // the frame you were aiming at moved as you reached for it.
+  //
+  // Parked, the thumb now stays where you put it. It does go stale as the
+  // recording grows past it — the offset label is what carries the truth about
+  // how far back you are, and the geometry re-settles on release.
+  function dvrSyncBar(){
+    if(dvrDragging) return
+    const bar=gid("dvrBar")
+    bar.max=String(Math.max(0,dvrBuf.length-1))
+    bar.value=String(Math.max(0,dvrIdx))
+  }
   function dvrUi(){
     const b=gid("dvrLive")
     b.classList.toggle("on",dvrLive)
     b.textContent=dvrLive?"live":"↦ live"
     b.title=dvrLive?"Showing now":"Jump back to now"
     gid("dvr").classList.toggle("past",!dvrLive)
+    const p=gid("dvrPlay")
+    p.textContent=dvrPlaying()?"❚❚":"▶"
+    p.title=dvrPlaying()?"Pause":(dvrLive?"Replay the recording from the start":"Play from here")
     const lab=gid("dvrTime")
     lab.textContent=dvrLabel()
     lab.title=dvrLive?"How far back you can drag":"How far back you are"
@@ -749,24 +792,65 @@ export function createOpsView(root, handlers) {
     if(!dvrBuf.length) return
     dvrIdx=Math.max(0,Math.min(dvrBuf.length-1,i))
     dvrLive=(dvrIdx>=dvrBuf.length-1)
-    gid("dvrBar").value=String(dvrIdx)
+    dvrSyncBar()
     dvrUi()
     render(dvrBuf[dvrIdx])
+  }
+  // Playback. Seeking on its own only ever showed one frozen instant: nothing
+  // advanced the playhead, so a console dragged into the past sat on a single
+  // frame forever — there was no play, only jump-and-freeze.
+  //
+  // Steps on the frames' OWN timestamps rather than a fixed tick, so it replays
+  // at the speed things actually happened even if the capture cadence is changed
+  // (pollIntervalMs) or the recording spans a gap where the console was closed.
+  // The cap is what keeps such a gap from reading as a hang.
+  const PLAY_STEP_MAX=2000
+  let dvrPlayT=0
+  function dvrPlaying(){ return dvrPlayT!==0 }
+  function dvrPause(){ if(dvrPlayT){ clearTimeout(dvrPlayT); dvrPlayT=0; dvrUi() } }
+  function dvrStep(){
+    dvrPlayT=0
+    // At the newest frame there is nothing left to play; dvrSeek has already
+    // reattached to live.
+    if(dvrIdx>=dvrBuf.length-1){ dvrUi(); return }
+    dvrSeek(dvrIdx+1)
+    if(dvrIdx>=dvrBuf.length-1){ dvrUi(); return }
+    const gap=(((dvrBuf[dvrIdx+1]||{}).ts||0)-((dvrBuf[dvrIdx]||{}).ts||0))||1000
+    dvrPlayT=setTimeout(dvrStep,Math.max(60,Math.min(PLAY_STEP_MAX,gap)))
+    dvrUi()
+  }
+  function dvrPlay(){
+    if(dvrPlayT||!dvrBuf.length) return
+    // Pressing play while already at now means "show me what I just missed",
+    // not "do nothing" — start from the oldest frame still kept.
+    if(dvrIdx>=dvrBuf.length-1) dvrSeek(0)
+    dvrStep()
   }
   function dvrPush(s){
     dvrBuf.push(s)
     // Dropping the oldest frame shifts every index down one; a held playhead has
     // to move with it or it would silently drift forward through the recording.
     if(dvrBuf.length>DVR_MAX){ dvrBuf.shift(); if(!dvrLive) dvrIdx-- }
-    const bar=gid("dvrBar"); bar.max=String(dvrBuf.length-1)
-    // dvrUi() on every path: while live the left label reports how far back the
-    // buffer now reaches, and that keeps growing as frames arrive.
-    if(dvrLive){ dvrIdx=dvrBuf.length-1; bar.value=String(dvrIdx); render(s); dvrUi() }
-    else if(dvrIdx<0){ dvrSeek(0) }       // scrubbed past the end of what we still keep
-    else { dvrUi() }                       // stay put; only the timeline grew
+    if(dvrLive){ dvrIdx=dvrBuf.length-1; dvrSyncBar(); render(s); dvrUi() }
+    else if(dvrIdx<0){ dvrSeek(0) }  // scrubbed past the end of what we still keep
+    else { dvrUi() }                 // parked or playing: only the offset label moves
   }
-  gid("dvrBar").addEventListener("input",function(){ dvrSeek(+this.value) })
-  gid("dvrLive").onclick=function(){ dvrSeek(dvrBuf.length-1) }
+  function dvrRelease(){ if(!dvrDragging) return; dvrDragging=false; dvrSyncBar() }
+  const dvrBarEl=gid("dvrBar")
+  dvrBarEl.addEventListener("input",function(){ dvrSeek(+this.value) })
+  // Taking hold of the bar takes over from playback, and freezes the bar's
+  // geometry for the length of the gesture.
+  dvrBarEl.addEventListener("pointerdown",function(){ dvrDragging=true; dvrPause() })
+  // Bound to the window, not the bar: a drag is very often released outside the
+  // control it started in, and a missed release would wedge dvrDragging on and
+  // freeze the geometry for good.
+  window.addEventListener("pointerup",dvrRelease)
+  window.addEventListener("pointercancel",dvrRelease)
+  gid("dvrPlay").onclick=function(){ if(dvrPlaying()) dvrPause(); else dvrPlay() }
+  gid("dvrLive").onclick=function(){ dvrPause(); dvrSeek(dvrBuf.length-1) }
+  // Frames kept from a previous mount mean the bar has a real range before the
+  // next tick arrives — show it rather than an empty track.
+  dvrSyncBar(); dvrUi()
 
   function render(s){
     gid("connecting").style.display="none"; gid("app").style.display=""
@@ -840,6 +924,12 @@ export function createOpsView(root, handlers) {
     setVerify(o){ renderVerify(o) },
     // Reflect a scale set elsewhere (Cmd +/−) without re-emitting it.
     setScale(n){ scale=clampScale(n); gid("zoomPct").textContent=Math.round(scale*100)+"%" },
-    destroy(){ destroyed=true; cancelAnimationFrame(rafId); for(const id in leavingEls) clearTimeout(leavingEls[id].t); leavingEls={}; root.innerHTML="" },
+    // Clear the playback timer directly rather than via dvrPause(), which would
+    // repaint controls that are about to be torn out. The window-level pointer
+    // listeners outlive this root, so they have to come off with it.
+    destroy(){ destroyed=true; cancelAnimationFrame(rafId)
+      if(dvrPlayT){ clearTimeout(dvrPlayT); dvrPlayT=0 }
+      window.removeEventListener("pointerup",dvrRelease); window.removeEventListener("pointercancel",dvrRelease)
+      for(const id in leavingEls) clearTimeout(leavingEls[id].t); leavingEls={}; root.innerHTML="" },
   }
 }
