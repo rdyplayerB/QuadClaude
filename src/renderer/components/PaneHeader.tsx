@@ -1,5 +1,7 @@
 import { DragEvent, memo, useEffect, useState } from 'react'
-import { MIN_PANES } from '../../shared/types'
+import { MIN_PANES, ServerInfo } from '../../shared/types'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { splitServers } from '../util/ports'
 import { folderName } from '../util/paths'
 import { useWorkspaceStore } from '../store/workspace'
 import { clearTerminal, disposeTerminalForPane, restartShell } from './TerminalPane'
@@ -33,8 +35,9 @@ export const PANE_COLORS = [
   '#2dd4bf', // Teal (Terminal 12)
 ]
 
-// Port chips shown before the rest fold into a "+N" pill.
-const MAX_SERVER_CHIPS = 2
+// Past this many, the pips become a count. The header's width must not be a
+// function of how many servers a pane happens to be running.
+const MAX_PIPS = 3
 
 // Extract folder/repo name from path
 export function getFolderName(path: string): string {
@@ -74,18 +77,27 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
     if (!canClose) setArmed(false)
   }, [canClose])
 
+  // Declared with the other hooks — it has to run before the `!pane` bail below.
+  const portMenu = useAnchoredMenu({ width: 240, align: 'right' })
+
   const paneColor = PANE_COLORS[paneIndex % PANE_COLORS.length]
 
   if (!pane) return null
 
   const servers = pane.servers ?? []
-  // A pane running three dev servers renders three "Port NNNN | Stop" chips, which
-  // is wider than a third-of-screen header — the overflow used to push Close off
-  // the clipped right edge. Past two, the rest collapse into a "+N" you can hover.
-  const shownServers = servers.slice(0, MAX_SERVER_CHIPS)
-  const hiddenServers = servers.slice(MAX_SERVER_CHIPS)
+  // One number, then dots. Every port used to render its own "Port NNNN | Stop"
+  // chip — ~19 characters each, all `shrink-0`, sitting next to a `flex-1` name.
+  // That made the NAME the only thing layout could take space from, so a pane
+  // with three servers showed three ports you don't need and no repo you do.
+  // Now the app port carries the number, and the others are dots that say the
+  // one thing you wanted from them: still running.
+  const { primary, rest } = splitServers(servers)
   const openPort = (port: number) => {
     window.electronAPI.openExternal(`http://localhost:${port}`)
+  }
+  const stopServer = async (s: ServerInfo) => {
+    await window.electronAPI.killServer(paneId, s.pid)
+    useWorkspaceStore.getState().setPaneServers(paneId, servers.filter((x) => x.pid !== s.pid))
   }
 
   // A bare shell has nothing to lose, so it closes on one click; anything
@@ -159,48 +171,83 @@ export const PaneHeader = memo(function PaneHeader({ paneId }: PaneHeaderProps) 
             that gives up space when the header is tight, so the buttons below
             never get pushed out of a clipped header. */}
         <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-        {servers.length > 0 && (
-          <div className="flex items-center gap-1.5 font-mono text-meta leading-none min-w-0">
-            {shownServers.map((s) => (
-              <div
-                key={s.pid}
-                className="flex items-center gap-0.5 rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1 shrink-0"
-              >
-                <span
-                  className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 5px var(--git-orange)' }}
-                />
-                <button
-                  onClick={() => openPort(s.port)}
-                  className="underline decoration-[--git-orange]/40 hover:decoration-[--git-orange] transition-colors"
-                  title={`Open http://localhost:${s.port} in browser`}
-                >
-                  Port {s.port}
-                </button>
-                <span className="text-[--git-orange]/30 mx-0.5">|</span>
-                <button
-                  onClick={async () => {
-                    await window.electronAPI.killServer(paneId, s.pid)
-                    const remaining = servers.filter((x) => x.pid !== s.pid)
-                    useWorkspaceStore.getState().setPaneServers(paneId, remaining)
-                  }}
-                  className="text-[--git-orange]/60 hover:text-[--git-orange] transition-colors"
-                  title={`Stop ${s.command} (pid ${s.pid})`}
-                >
-                  Stop
-                </button>
-              </div>
-            ))}
-            {hiddenServers.length > 0 && (
+        {primary && (
+          <div className="flex items-center gap-1.5 font-mono text-meta leading-none shrink-0">
+            {/* The app port — the one you'd actually open. */}
+            <div className="group flex items-center gap-1 rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1 shrink-0">
               <span
-                className="rounded bg-[--git-orange]/10 text-[--git-orange] px-1.5 py-1 shrink-0"
-                title={hiddenServers.map((s) => `Port ${s.port} — ${s.command} (pid ${s.pid})`).join('\n')}
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: 'var(--git-orange)', boxShadow: '0 0 5px var(--git-orange)' }}
+              />
+              <button
+                onClick={() => openPort(primary.port)}
+                className="underline decoration-[--git-orange]/40 hover:decoration-[--git-orange] transition-colors"
+                title={`Open http://localhost:${primary.port} in browser`}
               >
-                +{hiddenServers.length}
-              </span>
+                :{primary.port}
+              </button>
+              {/* Stop is rare and was permanently on screen. It fades in on hover
+                  but keeps its width reserved, so hovering can't reflow the header. */}
+              <button
+                onClick={() => stopServer(primary)}
+                className="w-3 text-center text-[--git-orange]/50 opacity-0 group-hover:opacity-100 hover:text-[--git-orange] transition-opacity"
+                title={`Stop ${primary.command} (pid ${primary.pid})`}
+                aria-label={`Stop server on port ${primary.port}`}
+              >
+                ✕
+              </button>
+            </div>
+            {/* Everything else: alive, unnumbered. Capped so a pane running ten
+                servers is exactly as wide as one running two. */}
+            {rest.length > 0 && (
+              <button
+                ref={portMenu.triggerRef}
+                onClick={portMenu.toggle}
+                className="flex items-center gap-1 rounded px-1 py-1 shrink-0 hover:bg-[--git-orange]/10 transition-colors"
+                title={`${rest.length} more server${rest.length > 1 ? 's' : ''} running — click for ports`}
+                aria-label={`${rest.length} more servers running`}
+              >
+                {rest.length <= MAX_PIPS ? (
+                  rest.map((s) => (
+                    <span key={s.pid} className="w-1.5 h-1.5 rounded-full bg-[--git-orange]/60 shrink-0" />
+                  ))
+                ) : (
+                  <>
+                    <span className="w-1.5 h-1.5 rounded-full bg-[--git-orange]/60 shrink-0" />
+                    <span className="text-[--git-orange]/70">{rest.length}</span>
+                  </>
+                )}
+              </button>
             )}
           </div>
         )}
+        {/* The numbers are still one click away — for the times you do need the
+            backend's port, or need to stop it. */}
+        <PortalMenu menu={portMenu} className="font-mono text-meta">
+          {[primary, ...rest].filter(Boolean).map((s) => (
+            <div key={s!.pid} className="flex items-center gap-2 px-3 py-1.5 hover:bg-[--ui-bg-active]/50">
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: 'var(--git-orange)' }}
+              />
+              <button
+                onClick={() => { openPort(s!.port); portMenu.close() }}
+                className="flex-1 min-w-0 text-left text-[--ui-text-primary] hover:text-[--git-orange] transition-colors"
+                title={`Open http://localhost:${s!.port}`}
+              >
+                :{s!.port}
+                <span className="ml-2 text-[--ui-text-muted]">{s!.command}</span>
+              </button>
+              <button
+                onClick={() => { stopServer(s!); portMenu.close() }}
+                className="text-[--ui-text-muted] hover:text-[--git-orange] transition-colors shrink-0"
+                title={`Stop ${s!.command} (pid ${s!.pid})`}
+              >
+                Stop
+              </button>
+            </div>
+          ))}
+        </PortalMenu>
 
         {/* Git status - compact inline */}
         {pane.gitStatus?.isGitRepo && (
