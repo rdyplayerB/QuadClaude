@@ -90,8 +90,10 @@ export interface ClaudeAccount {
   email?: string // display only; auto-filled from the profile's login once it exists
   loggedIn?: boolean // whether the profile's /login has happened (its Keychain entry exists)
   // Model to pin for panes using this account (injected as ANTHROPIC_MODEL). A fresh
-  // profile session otherwise starts on Claude Code's default (Sonnet). Defaults to
-  // Opus 4.8 1M-context; the sentinel 'default' means "don't pin — use Claude Code's default".
+  // profile session otherwise starts on Claude Code's default (Sonnet), so we pin
+  // something. Defaults to the FAMILY ALIAS `opus[1m]` rather than a versioned id, so
+  // the pin follows the newest Opus instead of freezing on whatever shipped that week
+  // (see DEFAULT_ACCOUNT_MODEL). The sentinel 'default' means "don't pin at all".
   model?: string
   // A usage fingerprint of the account a bound pane's token ACTUALLY reaches — captured by
   // the status line from Claude Code's own per-session data (no API poll, no rate limit).
@@ -109,28 +111,52 @@ export interface ClaudeAccount {
 // new release is a single edit here rather than a hunt through components that
 // have each drifted their own copy.
 //
-// It is the baseline, not the last word: on startup the main process refreshes
-// it from the Models API when an ANTHROPIC_API_KEY is available and caches the
-// result (see refreshModelCatalog). Subscription auth has no equivalent
-// endpoint, so without a key this list is what you get.
+// Two kinds of entry, and the distinction is the point:
+//   * FAMILY ALIASES ('opus', 'sonnet') — resolved by Claude Code itself to the
+//     newest model in that family. These never go stale, so they are what we
+//     default to. Verified: `opus` -> claude-opus-5, `sonnet` -> claude-sonnet-5.
+//   * PINNED IDS ('claude-opus-5', ...) — for deliberately holding a version.
+//     These DO go stale, which is exactly how accounts ended up stuck on 4.8.
 //
-// `[1m]` selects a model's 1M-context variant — a Claude Code suffix, not part
-// of the API model ID.
+// `[1m]` selects a 1M-context variant — a Claude Code suffix, not part of the API
+// model ID — and composes with an alias: `opus[1m]` -> claude-opus-5[1m].
+//
+// An unrecognized value is rejected by Claude Code (the pane errors out), not
+// silently downgraded, so a dead alias would fail loudly rather than quietly
+// serving the wrong model.
+//
+// NOTE: this list is the whole story. An earlier comment here claimed the main
+// process refreshed it from the Models API at startup via `refreshModelCatalog`
+// — no such function exists anywhere in the repo, so nothing ever refreshed it.
+// The aliases above are what keeps it current without that machinery.
 export interface ClaudeModelOption { value: string; label: string }
 
 export const CLAUDE_MODELS: ClaudeModelOption[] = [
-  { value: 'claude-opus-5[1m]', label: 'Opus 5 (1M context)' },
-  { value: 'claude-opus-5', label: 'Opus 5' },
-  { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M context)' },
-  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
+  { value: 'opus[1m]', label: 'Latest Opus (1M context)' },
+  { value: 'opus', label: 'Latest Opus' },
+  { value: 'sonnet', label: 'Latest Sonnet' },
+  { value: 'claude-opus-5[1m]', label: 'Opus 5 (1M context) — pinned' },
+  { value: 'claude-opus-5', label: 'Opus 5 — pinned' },
+  { value: 'claude-opus-4-8[1m]', label: 'Opus 4.8 (1M context) — pinned' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8 — pinned' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5 — pinned' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6 — pinned' },
+  { value: 'claude-haiku-4-5', label: 'Haiku 4.5 — pinned' },
   { value: 'default', label: 'Claude Code default' },
 ]
 
-// The model a pane gets when no per-account model is set. Opus 5, 1M-context variant.
-export const DEFAULT_ACCOUNT_MODEL = 'claude-opus-5[1m]'
+// The model a pane gets when no per-account model is set: newest Opus, 1M-context
+// variant, resolved fresh by Claude Code on every spawn. Deliberately an alias and
+// not a versioned id — a versioned default is how panes kept coming up on 4.8 long
+// after Opus 5 shipped.
+export const DEFAULT_ACCOUNT_MODEL = 'opus[1m]'
+
+// Versioned ids that QuadClaude itself once auto-applied to new accounts. These were
+// never a user's deliberate choice — they are just a frozen copy of whatever the
+// default happened to be that week — so accountStore rewrites them to the alias above
+// on load (one time, in place). Anything else the user picked is left alone. Add the
+// outgoing value here if DEFAULT_ACCOUNT_MODEL ever changes again.
+export const LEGACY_AUTO_PINNED_MODELS = ['claude-opus-4-8[1m]', 'claude-opus-4-8']
 
 // Ring hues for paired panes. Each active pair claims the first free color, so
 // multiple pairs across the grid stay visually distinct. Sized for up to six

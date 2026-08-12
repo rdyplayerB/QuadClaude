@@ -20,7 +20,7 @@ import crypto from 'crypto'
 import { execFileSync } from 'child_process'
 import { app } from 'electron'
 import { logger } from './logger'
-import { ClaudeAccount } from '../shared/types'
+import { ClaudeAccount, DEFAULT_ACCOUNT_MODEL, LEGACY_AUTO_PINNED_MODELS } from '../shared/types'
 
 interface StoredAccount {
   id: string
@@ -53,10 +53,28 @@ function readStore(): StoredAccount[] {
   try {
     const raw = fs.readFileSync(storePath(), 'utf8')
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as StoredAccount[]) : []
+    return migrateAutoPinnedModels(Array.isArray(parsed) ? (parsed as StoredAccount[]) : [])
   } catch {
     return []
   }
+}
+
+// Accounts created before the default became a family alias carry a frozen version id
+// (e.g. 'claude-opus-4-8[1m]') that QuadClaude picked for them, so their panes kept
+// coming up on an old Opus no matter what the user set as their Claude Code default.
+// Rewrite those — and only those — to DEFAULT_ACCOUNT_MODEL. A pin the user chose
+// themselves is not in LEGACY_AUTO_PINNED_MODELS and survives untouched.
+function migrateAutoPinnedModels(accounts: StoredAccount[]): StoredAccount[] {
+  const stale = accounts.filter((a) => a.model && LEGACY_AUTO_PINNED_MODELS.includes(a.model))
+  if (stale.length === 0) return accounts
+  for (const a of stale) a.model = DEFAULT_ACCOUNT_MODEL
+  writeStore(accounts)
+  logger.info(
+    'accounts',
+    `Migrated ${stale.length} account(s) off an auto-pinned model to ${DEFAULT_ACCOUNT_MODEL}`,
+    stale.map((a) => a.label).join(', '),
+  )
+  return accounts
 }
 
 function writeStore(accounts: StoredAccount[]): void {

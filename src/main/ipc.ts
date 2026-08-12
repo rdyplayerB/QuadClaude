@@ -84,7 +84,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
             QC_USAGE_CACHE: path.join(app.getPath('home'), '.claude', `.statusline-usage-${accountId}`),
           }
           // Pin the model for this account (a fresh profile session otherwise starts on
-          // Claude Code's default). Default Opus 4.8 1M; sentinel 'default' opts out.
+          // Claude Code's default, i.e. Sonnet). Defaults to the `opus[1m]` family alias,
+          // which Claude Code resolves to the newest Opus at spawn; sentinel 'default'
+          // opts out of pinning entirely and lets the profile's own /model choice win.
           const model = accountStore.getModel(accountId) ?? DEFAULT_ACCOUNT_MODEL
           if (model && model !== 'default') accountEnv.ANTHROPIC_MODEL = model
         } else {
