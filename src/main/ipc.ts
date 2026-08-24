@@ -8,7 +8,8 @@ import { accountStore, ensureProfileDir } from './accountStore'
 import { delegationLog } from './delegationLog'
 import { listPlugins, togglePlugin, setPluginSetting, openPlugin, receiveWorkspaceSnapshot } from './pluginHost'
 import { loopbackStatus, ensureLoopbackAliases } from './loopback'
-import { IPC_CHANNELS, RouterProviderInput, DEFAULT_ACCOUNT_MODEL, portIsolationEnv } from '../shared/types'
+import { IPC_CHANNELS, RouterProviderInput, DEFAULT_ACCOUNT_MODEL, portIsolationEnv, PaneDigest } from '../shared/types'
+import { paneDigest, recentProjects } from './sidebar'
 import type { WorkspaceSnapshot } from '../shared/plugins'
 import type { PtyManager } from './pty'
 import type { WorkspaceManager } from './workspace'
@@ -300,6 +301,20 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   ipcMain.handle(IPC_CHANNELS.PTY_CONTEXT_USAGE, async (_, paneId: number) => {
     return ptyManager?.getContextUsage(paneId) ?? null
   })
+
+  // Sidebar rows. Batched: the list polls every ~3s while open, and twelve
+  // separate round-trips per poll for one line of text each is wasteful when a
+  // single call can answer for every pane at once.
+  ipcMain.handle(IPC_CHANNELS.SIDEBAR_DIGESTS, async (_, panes: Array<{ id: number; cwd: string }>) => {
+    const out: Record<number, PaneDigest> = {}
+    for (const p of panes || []) {
+      if (!p || typeof p.id !== 'number' || !p.cwd) continue
+      out[p.id] = paneDigest(p.cwd)
+    }
+    return out
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SIDEBAR_RECENTS, async (_, limit?: number) => recentProjects(limit ?? 40))
 
   // Detect listening servers for all panes (one shared lsof+ps).
   // Returns a plain object keyed by paneId for easy renderer consumption.

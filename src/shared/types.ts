@@ -45,6 +45,13 @@ export const FOCUS_SMALL_RATIO_DEFAULT = 0.25
 export const FOCUS_SMALL_RATIO_MIN = 0.25
 export const FOCUS_SMALL_RATIO_MAX = 0.45
 
+// Sidebar (the pane list) width in px. Wide enough for a three-line row —
+// name + session title + "branch · model · ctx% · :port" — at the meta font
+// size, which is what set the floor.
+export const SIDEBAR_W_DEFAULT = 280
+export const SIDEBAR_W_MIN = 220
+export const SIDEBAR_W_MAX = 460
+
 // Duo-layout divider: fraction of the width given to the LEFT pane.
 export const DUO_RATIO_DEFAULT = 0.5
 export const DUO_RATIO_MIN = 0.2
@@ -56,6 +63,28 @@ export const DUO_RATIO_MAX = 0.8
 // offsetWidth ignores transforms, so every fit path sees a nonzero size — the
 // beta CanvasAddon's 0×0 blank-render bug can never trigger for PiP tiles.
 export const PIP_VW = 640
+
+// One pane's row in the sidebar, as read from its Claude transcript. Everything
+// here is derived from the transcript tail (see main/transcript.ts) rather than
+// the store, so it is fetched over IPC and refreshed only while the sidebar is
+// open — the point of the sidebar is remembering what a pane was doing, and only
+// the transcript knows that.
+export interface PaneDigest {
+  title?: string      // Claude's own name for the session — the line you recognise it by
+  lastAction?: string // newest tool call, e.g. "Edit(service.ts)"
+  errored?: boolean   // the newest step failed, so the pane is stuck rather than working
+  queueDepth: number  // prompts you stacked behind the current turn
+  waitingOn?: string  // the question it asked, when it is blocked on you
+}
+
+// A project Claude has worked in, newest first. Sourced from ~/.claude/projects
+// mtimes, so it needs no bookkeeping of our own and includes work done outside
+// QuadClaude.
+export interface RecentProject {
+  path: string
+  name: string
+  at: number // epoch ms of last activity
+}
 
 // A local server (listening TCP port) running in a pane's process tree
 export interface ServerInfo {
@@ -184,6 +213,13 @@ export interface PaneConfig {
   state: PaneState
   gitStatus?: GitStatus // Git status for pane header
   servers?: ServerInfo[] // Transient: detected listening servers (not persisted)
+  // Transient (not persisted): when this pane last CHANGED state, so the sidebar
+  // can say how long it has been working or waiting. On a fresh launch there is
+  // no meaningful answer, which is why it is not saved.
+  stateSince?: number
+  // Transient: when you last focused this pane. A pane that finished work after
+  // this timestamp is "done and unread" — the sidebar's third way of needing you.
+  seenAt?: number
   agentId?: string // Which agent profile THIS pane runs; falls back to defaultAgentId
   claudeAccountId?: string // Which saved Claude account THIS pane authenticates as; undefined = the global /login account
   // Pane pairing (orchestrator ⇄ worker). Both panes in a pair share pairId and
@@ -218,6 +254,10 @@ export interface WorkspaceState {
   pipCorner?: PipCorner
   pipCollapsed?: boolean
   pipVisible?: boolean
+  // Sidebar (the pane list): open state and width. Part of the workspace, not
+  // preferences — it pushes the grid aside, so it belongs with the layout.
+  sidebarOpen?: boolean
+  sidebarWidth?: number
 }
 
 export interface HotkeyBindings {
@@ -415,6 +455,8 @@ export const IPC_CHANNELS = {
   USAGE_UPDATE: 'usage:update',
   USAGE_FETCH: 'usage:fetch',
   PTY_CONTEXT_USAGE: 'pty:context-usage',
+  SIDEBAR_DIGESTS: 'sidebar:digests',
+  SIDEBAR_RECENTS: 'sidebar:recents',
   PTY_DETECT_SERVERS: 'pty:detect-servers',
   PTY_KILL_SERVER: 'pty:kill-server',
   PTY_PASTE_IMAGE: 'pty:paste-image',
@@ -670,11 +712,17 @@ export type MenuAction =
   | 'layout-duo'
   | 'layout-solo'
   | 'toggle-pip'
+  | 'toggle-sidebar'
   | 'cycle-pane'
   | 'focus-pane-1'
   | 'focus-pane-2'
   | 'focus-pane-3'
   | 'focus-pane-4'
+  | 'focus-pane-5'
+  | 'focus-pane-6'
+  | 'focus-pane-7'
+  | 'focus-pane-8'
+  | 'focus-pane-9'
   | 'toggle-theme'
   | 'increase-font'
   | 'decrease-font'

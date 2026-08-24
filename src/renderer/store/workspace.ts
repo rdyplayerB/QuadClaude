@@ -21,6 +21,9 @@ import {
   FOCUS_SMALL_RATIO_MAX,
   DUO_RATIO_DEFAULT,
   PipCorner,
+  SIDEBAR_W_DEFAULT,
+  SIDEBAR_W_MIN,
+  SIDEBAR_W_MAX,
 } from '../../shared/types'
 import { visiblePaneCount, clampDuoRatio } from '../layouts'
 
@@ -57,6 +60,14 @@ interface WorkspaceStore extends WorkspaceState {
   // Pane actions
   updatePane: (id: number, updates: Partial<PaneConfig>) => void
   setPaneState: (id: number, state: PaneState) => void
+
+  // Sidebar (the pane list). Width and openness are workspace state, not a
+  // preference — they belong with the layout they push aside.
+  sidebarOpen: boolean
+  sidebarWidth: number
+  toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (px: number) => void
   setPaneAgent: (id: number, agentId: string) => void
 
   // Pane pairing (orchestrator ⇄ worker)
@@ -151,6 +162,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   pipCorner: 'bottom-right',
   pipCollapsed: false,
   pipVisible: true,
+  sidebarOpen: false,
+  sidebarWidth: SIDEBAR_W_DEFAULT,
   panes: [],
   preferences: {
     theme: 'dark',
@@ -229,6 +242,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         : 'bottom-right'
       const pipCollapsed = savedState.pipCollapsed ?? false
       const pipVisible = savedState.pipVisible ?? true
+      const sidebarOpen = savedState.sidebarOpen ?? false
+      const sidebarWidth = Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, savedState.sidebarWidth ?? SIDEBAR_W_DEFAULT))
 
       // Invariant for duo/solo: the active pane must be on the main stage. A
       // consistent state is always saved, but guard against hand-edited or
@@ -250,6 +265,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         pipCorner,
         pipCollapsed,
         pipVisible,
+        sidebarOpen,
+        sidebarWidth,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
@@ -330,8 +347,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setActivePaneId: (activePaneId) => {
-    set({ activePaneId })
+    // Looking at a pane marks it seen. That is what lets the sidebar distinguish
+    // "finished while you were away" from "finished and you already read it".
+    set((state) => ({
+      activePaneId,
+      panes: state.panes.map((p) => (p.id === activePaneId ? { ...p, seenAt: Date.now() } : p)),
+    }))
     // Don't save on active pane change - too frequent
+  },
+
+  toggleSidebar: () => {
+    set((state) => ({ sidebarOpen: !state.sidebarOpen }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+  setSidebarOpen: (sidebarOpen) => {
+    set({ sidebarOpen })
+    debouncedSave(() => get().saveWorkspace())
+  },
+  setSidebarWidth: (px) => {
+    set({ sidebarWidth: Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, px))) })
+    debouncedSave(() => get().saveWorkspace())
   },
 
   swapPanes: (paneId1, paneId2) => {
@@ -495,7 +530,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   // No save: pane state flips constantly during terminal activity.
-  setPaneState: (id, paneState) => patchPaneField(set, get, id, 'state', paneState, false),
+  // Stamps stateSince on a real transition. The sidebar shows how long a pane has
+  // been in its current state, and nothing else in the app tracked that — without
+  // the guard, every poll that re-asserts the same state would reset the clock.
+  setPaneState: (id, paneState) => patchPane(set, get, id, (p) => (
+    p.state === paneState ? p : { ...p, state: paneState, stateSince: Date.now() }
+  ), false),
 
   setPaneLabel: (id, label) => patchPaneField(set, get, id, 'label', label),
 
@@ -639,9 +679,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, focusSmallRatio, duoRatio, pipCorner, pipCollapsed, pipVisible, panes, preferences } = get()
+    const { layout, focusPaneId, activePaneId, focusSmallRatio, duoRatio, pipCorner, pipCollapsed, pipVisible, sidebarOpen, sidebarWidth, panes, preferences } = get()
     // Strip transient data (gitStatus, servers) from panes before persisting
-    const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, ...rest }) => rest)
+    const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, stateSince: _t, seenAt: _v, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
       layout,
       focusPaneId,
@@ -651,6 +691,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       pipCorner,
       pipCollapsed,
       pipVisible,
+      sidebarOpen,
+      sidebarWidth,
       panes: cleanPanes,
       preferences,
     })

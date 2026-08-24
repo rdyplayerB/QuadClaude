@@ -6,6 +6,7 @@ import { PromptToolbar } from './components/PromptToolbar'
 import { LayoutSelector } from './components/LayoutSelector'
 import { clearTerminal, sendToTerminal, focusTerminal, scrollAllTerminalsToBottom, disposeAllTerminals, dumpPaneDiagnostics, checkPaneHealth } from './components/TerminalPane'
 import { getFolderName } from './components/PaneHeader'
+import { SidebarSafe } from './components/SidebarBoundary'
 import { OpsOverlay } from './components/OpsOverlay'
 import { useWorkspaceStore } from './store/workspace'
 import { useHotkeys } from './hooks/useHotkeys'
@@ -41,6 +42,7 @@ function App() {
   const initialize = useWorkspaceStore((s) => s.initialize)
   const layout = useWorkspaceStore((s) => s.layout)
   const activePaneId = useWorkspaceStore((s) => s.activePaneId)
+  const sidebarOpen = useWorkspaceStore((s) => s.sidebarOpen)
   const setActivePaneId = useWorkspaceStore((s) => s.setActivePaneId)
   const setFocusPaneId = useWorkspaceStore((s) => s.setFocusPaneId)
 
@@ -215,6 +217,9 @@ function App() {
         case 'toggle-pip':
           store.togglePipVisible()
           break
+        case 'toggle-sidebar':
+          store.toggleSidebar()
+          break
         case 'cycle-pane': {
           const promoted = store.cyclePane()
           if (promoted !== null) {
@@ -233,6 +238,21 @@ function App() {
           break
         case 'focus-pane-4':
           handleTerminalFocus(3)
+          break
+        case 'focus-pane-5':
+          handleTerminalFocus(4)
+          break
+        case 'focus-pane-6':
+          handleTerminalFocus(5)
+          break
+        case 'focus-pane-7':
+          handleTerminalFocus(6)
+          break
+        case 'focus-pane-8':
+          handleTerminalFocus(7)
+          break
+        case 'focus-pane-9':
+          handleTerminalFocus(8)
           break
         case 'clear-pane':
           clearTerminal(store.activePaneId)
@@ -463,6 +483,10 @@ function App() {
 
       {/* Main content area */}
       <div className="flex-1 overflow-hidden flex">
+        {/* Pane list. Sits INSIDE the flex row so the grid shrinks beside it
+            rather than being covered — the grid's own geometry then accounts for
+            the narrower box, which is what keeps the terminals correctly sized. */}
+        {sidebarOpen && <SidebarSafe />}
         {/* Terminal grid - always mounted to preserve terminal state */}
         <div className="overflow-hidden flex-1">
           <TerminalGrid />

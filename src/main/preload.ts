@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, ClaudeAccount } from '../shared/types'
+import { IPC_CHANNELS, WorkspaceState, MenuAction, GitStatus, UsageData, ContextUsage, ServerInfo, RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult, RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent, DelegationDecision, DelegationInsights, ClaudeAccount, PaneDigest, RecentProject } from '../shared/types'
 import { PluginDescriptor, WorkspaceSnapshot } from '../shared/plugins'
 
 // Every pane registers its OWN terminal:output + pty:exit listener (each filters
@@ -86,6 +86,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Context usage per pane
   getContextUsage: (paneId: number) =>
     ipcRenderer.invoke(IPC_CHANNELS.PTY_CONTEXT_USAGE, paneId) as Promise<ContextUsage | null>,
+
+  // Sidebar rows: one batched call for every pane, plus the recents list.
+  sidebarDigests: (panes: Array<{ id: number; cwd: string }>) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SIDEBAR_DIGESTS, panes) as Promise<Record<number, PaneDigest>>,
+  sidebarRecents: (limit?: number) =>
+    ipcRenderer.invoke(IPC_CHANNELS.SIDEBAR_RECENTS, limit) as Promise<RecentProject[]>,
 
   // Local server detection / kill
   detectServers: () =>

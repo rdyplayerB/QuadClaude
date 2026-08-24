@@ -12,7 +12,7 @@ import type {
   GitStatus, WorkspaceState, MenuAction, UsageData, ContextUsage, ServerInfo,
   RouterProviderInput, RouterStatus, RouterSaveResult, RouterTestResult,
   RouterDelegationStatus, LoopbackStatus, DelegationProjectSummary, DelegationEvent,
-  DelegationDecision, DelegationInsights, ClaudeAccount,
+  DelegationDecision, DelegationInsights, ClaudeAccount, PaneDigest, RecentProject,
 } from '../shared/types'
 import type { PluginDescriptor, WorkspaceSnapshot } from '../shared/plugins'
 
@@ -35,6 +35,9 @@ declare global {
       onSystemResume: (callback: () => void) => () => void
       getAppVersion: () => Promise<string>
       getContextUsage: (paneId: number) => Promise<ContextUsage | null>
+
+      sidebarDigests: (panes: Array<{ id: number; cwd: string }>) => Promise<Record<number, PaneDigest>>
+      sidebarRecents: (limit?: number) => Promise<RecentProject[]>
       detectServers: () => Promise<Record<number, ServerInfo[]>>
       killServer: (paneId: number, pid: number) => Promise<boolean>
       pasteImage: (paneId: number, filePath: string) => Promise<boolean>

@@ -129,6 +129,11 @@ export function buildApplicationMenu(
         },
         { type: 'separator' },
         {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+\\',
+          click: () => sendMenuAction('toggle-sidebar')
+        },
+        {
           label: 'Toggle PiP Strip',
           accelerator: 'CmdOrCtrl+B',
           click: () => sendMenuAction('toggle-pip')
@@ -201,6 +206,31 @@ export function buildApplicationMenu(
           label: 'Focus Terminal 4',
           accelerator: 'CmdOrCtrl+Shift+4',
           click: () => sendMenuAction('focus-pane-4')
+        },
+        {
+          label: 'Focus Terminal 5',
+          accelerator: 'CmdOrCtrl+Shift+5',
+          click: () => sendMenuAction('focus-pane-5')
+        },
+        {
+          label: 'Focus Terminal 6',
+          accelerator: 'CmdOrCtrl+Shift+6',
+          click: () => sendMenuAction('focus-pane-6')
+        },
+        {
+          label: 'Focus Terminal 7',
+          accelerator: 'CmdOrCtrl+Shift+7',
+          click: () => sendMenuAction('focus-pane-7')
+        },
+        {
+          label: 'Focus Terminal 8',
+          accelerator: 'CmdOrCtrl+Shift+8',
+          click: () => sendMenuAction('focus-pane-8')
+        },
+        {
+          label: 'Focus Terminal 9',
+          accelerator: 'CmdOrCtrl+Shift+9',
+          click: () => sendMenuAction('focus-pane-9')
         },
         { type: 'separator' },
         {
