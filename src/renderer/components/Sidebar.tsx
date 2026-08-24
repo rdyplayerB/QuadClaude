@@ -150,10 +150,20 @@ export const Sidebar = memo(function Sidebar() {
 
   const needsCount = grouped.needs.length
 
+  // The app window is transparent, so chrome that does not paint its own ground
+  // composites straight onto the DESKTOP. This panel first shipped with
+  // `bg-[--ui-bg-elevated]/40`, and Tailwind cannot apply an alpha modifier to a
+  // bare CSS-variable arbitrary value — the class generated no rule at all, the
+  // panel was fully see-through, and near-white primary text landed on whatever
+  // window happened to be behind QuadClaude and vanished. The gray secondary
+  // lines survived, which is what made it look like a color bug rather than a
+  // missing background. Backgrounds here are therefore either inline styles or
+  // Tailwind palette colors (bg-white/[0.06]), both of which always compile;
+  // token + alpha does not.
   return (
     <div
-      className="relative shrink-0 h-full flex flex-col border-r border-[--border] bg-[--ui-bg-elevated]/40 overflow-hidden"
-      style={{ width }}
+      className="relative shrink-0 h-full flex flex-col border-r border-[--border] overflow-hidden"
+      style={{ width, background: 'var(--glass-bg-header)' }}
     >
       <div className="flex items-center justify-between px-3 h-8 shrink-0 border-b border-[--border]">
         <span className="text-meta tracking-wider text-[--ui-text-muted] uppercase">
@@ -175,7 +185,8 @@ export const Sidebar = memo(function Sidebar() {
           if (!list.length) return null
           return (
             <div key={key}>
-              <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-1 bg-[--ui-bg-elevated]/90 backdrop-blur text-meta uppercase tracking-wider text-[--ui-text-faint]">
+              <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-1 backdrop-blur text-meta uppercase tracking-wider text-[--ui-text-faint]"
+                style={{ background: 'var(--surface-4)' }}>
                 <span className={key === 'needs' ? 'text-[--git-orange]' : ''}>{label}</span>
                 <span>{list.length}</span>
               </div>
@@ -200,7 +211,7 @@ export const Sidebar = memo(function Sidebar() {
                     key={pane.id}
                     onClick={() => onRowClick(pane.id)}
                     className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors ${
-                      isActive ? 'bg-[--ui-bg-active]/50' : 'hover:bg-[--ui-bg-active]/30'
+                      isActive ? 'bg-white/[0.10]' : 'hover:bg-white/[0.06]'
                     }`}
                     style={{ borderLeftColor: isActive ? color : 'transparent' }}
                     title={`${pane.workingDirectory}\nclick to focus · double-click to solo`}
@@ -224,7 +235,7 @@ export const Sidebar = memo(function Sidebar() {
         <div className="border-t border-[--border] mt-1">
           <button
             onClick={() => setShowRecents((v) => !v)}
-            className="w-full flex items-center justify-between px-3 py-1 text-meta uppercase tracking-wider text-[--ui-text-faint] hover:text-[--ui-text-secondary] transition-colors"
+            className="w-full flex items-center justify-between px-3 py-1 text-meta uppercase tracking-wider text-[--ui-text-faint] hover:text-[--ui-text-secondary] hover:bg-white/[0.04] transition-colors"
             title="Projects Claude has worked in, newest first"
           >
             <span>recent projects</span><span>{showRecents ? '▾' : '▸'}</span>
@@ -233,7 +244,7 @@ export const Sidebar = memo(function Sidebar() {
             <button
               key={r.path}
               onClick={() => openRecent(r)}
-              className="w-full text-left px-3 py-1 hover:bg-[--ui-bg-active]/30 transition-colors"
+              className="w-full text-left px-3 py-1 hover:bg-white/[0.06] transition-colors"
               title={`${r.path}\nopens in a free pane`}
             >
               <div className="truncate text-meta text-[--ui-text-secondary]">{r.name}</div>
@@ -245,7 +256,7 @@ export const Sidebar = memo(function Sidebar() {
       {/* Resize handle on the inner edge */}
       <div
         onMouseDown={() => { dragging.current = true }}
-        className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-[--accent]/40"
+        className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-white/25"
         title={`Drag to resize (${SIDEBAR_W_MIN}–${SIDEBAR_W_MAX}px)`}
       />
     </div>
