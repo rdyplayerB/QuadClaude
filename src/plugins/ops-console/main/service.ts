@@ -9,7 +9,7 @@
 
 import { PluginContext, WorkspaceSnapshot } from '../../../shared/plugins'
 import { OpsSnapshot, OpsAgent, OpsCard, OpsFeedItem, OpsSubagent, AgentState } from '../types'
-import { readTranscript, newestTranscript, TranscriptInfo } from './transcript-tailer'
+import { readTranscript, newestTranscript, TranscriptInfo } from '../../../main/transcript'
 import { TokenMeter } from './token-meter'
 import { CardLog } from './cardlog'
 
