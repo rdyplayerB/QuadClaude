@@ -24,6 +24,9 @@ import {
   SIDEBAR_W_DEFAULT,
   SIDEBAR_W_MIN,
   SIDEBAR_W_MAX,
+  SIDEBAR_SCALE_DEFAULT,
+  SIDEBAR_SCALE_MIN,
+  SIDEBAR_SCALE_MAX,
 } from '../../shared/types'
 import { visiblePaneCount, clampDuoRatio } from '../layouts'
 
@@ -50,6 +53,8 @@ interface WorkspaceStore extends WorkspaceState {
   // Bring the next pane into the active slot (Ctrl+Tab). Returns the pane id
   // that should receive focus, or null when there's nothing to cycle.
   cyclePane: () => number | null
+  // Bring a pane into view, whatever the layout is currently hiding it behind.
+  showPane: (id: number) => void
 
   // Pane add/remove (4..MAX_PANES). addPane returns the new pane's id (or null
   // if already at the cap) so callers can focus it; removePane returns the
@@ -68,6 +73,8 @@ interface WorkspaceStore extends WorkspaceState {
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   setSidebarWidth: (px: number) => void
+  sidebarScale: number
+  setSidebarScale: (n: number) => void
   setPaneAgent: (id: number, agentId: string) => void
 
   // Pane pairing (orchestrator ⇄ worker)
@@ -164,6 +171,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   pipVisible: true,
   sidebarOpen: false,
   sidebarWidth: SIDEBAR_W_DEFAULT,
+  sidebarScale: SIDEBAR_SCALE_DEFAULT,
   panes: [],
   preferences: {
     theme: 'dark',
@@ -244,6 +252,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       const pipVisible = savedState.pipVisible ?? true
       const sidebarOpen = savedState.sidebarOpen ?? false
       const sidebarWidth = Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, savedState.sidebarWidth ?? SIDEBAR_W_DEFAULT))
+      const sidebarScale = Math.min(SIDEBAR_SCALE_MAX, Math.max(SIDEBAR_SCALE_MIN, savedState.sidebarScale ?? SIDEBAR_SCALE_DEFAULT))
 
       // Invariant for duo/solo: the active pane must be on the main stage. A
       // consistent state is always saved, but guard against hand-edited or
@@ -267,6 +276,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         pipVisible,
         sidebarOpen,
         sidebarWidth,
+        sidebarScale,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
@@ -368,6 +378,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ sidebarWidth: Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, px))) })
     debouncedSave(() => get().saveWorkspace())
   },
+  setSidebarScale: (n) => {
+    // Rounded to one decimal so repeated steps can't drift into 1.2000000000000002.
+    set({ sidebarScale: Math.round(Math.min(SIDEBAR_SCALE_MAX, Math.max(SIDEBAR_SCALE_MIN, n)) * 10) / 10 })
+    debouncedSave(() => get().saveWorkspace())
+  },
 
   swapPanes: (paneId1, paneId2) => {
     set((state) => {
@@ -446,6 +461,42 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   // stable order and never displaces duo's other visible slot. Focus layouts:
   // rotate the array so each pane takes a turn as the big pane. Grid: just
   // advance the focus ring.
+  // Make a pane the one you are looking at.
+  //
+  // "Focus" is not enough on its own: in duo/solo the panes on screen are the
+  // FIRST visiblePaneCount entries of the array (which is why cyclePane rotates
+  // the array rather than setting a field), and in the focus layouts the big
+  // slot is panes[0]. So setting activePaneId alone moves the cursor to a pane
+  // that is not rendered — clicking a sidebar row in solo appeared to do
+  // nothing. Promote by layout, then focus.
+  showPane: (id) => {
+    const { panes, layout, activePaneId } = get()
+    const idx = panes.findIndex((p) => p.id === id)
+    if (idx < 0) return
+    if (layout === 'focus' || layout === 'focus-right') {
+      if (idx !== 0) {
+        set({ panes: [panes[idx], ...panes.filter((_, i) => i !== idx)] })
+      }
+      set({ focusPaneId: id })
+    } else if (layout === 'duo' || layout === 'solo') {
+      const vc = visiblePaneCount(layout, panes.length)
+      if (idx >= vc) {
+        // Swap into the slot the active pane occupies, so the pane you were
+        // reading is the one that steps aside — not an arbitrary third pane.
+        const next = [...panes]
+        const activeIdx = next.findIndex((p) => p.id === activePaneId)
+        const k = activeIdx >= 0 && activeIdx < vc ? activeIdx : 0
+        const outgoing = next[k]
+        next[k] = next[idx]
+        next[idx] = outgoing
+        set({ panes: next })
+      }
+    }
+    // Stamps seenAt and saves.
+    get().setActivePaneId(id)
+    debouncedSave(() => get().saveWorkspace())
+  },
+
   cyclePane: () => {
     const { panes, activePaneId, layout } = get()
     if (panes.length < 2) return null
@@ -679,7 +730,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, focusSmallRatio, duoRatio, pipCorner, pipCollapsed, pipVisible, sidebarOpen, sidebarWidth, panes, preferences } = get()
+    const { layout, focusPaneId, activePaneId, focusSmallRatio, duoRatio, pipCorner, pipCollapsed, pipVisible, sidebarOpen, sidebarWidth, sidebarScale, panes, preferences } = get()
     // Strip transient data (gitStatus, servers) from panes before persisting
     const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, stateSince: _t, seenAt: _v, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
@@ -693,6 +744,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       pipVisible,
       sidebarOpen,
       sidebarWidth,
+      sidebarScale,
       panes: cleanPanes,
       preferences,
     })

@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
-import { PaneConfig, PaneDigest, RecentProject, MAX_PANES, SIDEBAR_W_MIN, SIDEBAR_W_MAX } from '../../shared/types'
+import { PaneConfig, PaneDigest, RecentProject, MAX_PANES, SIDEBAR_W_MIN, SIDEBAR_W_MAX, SIDEBAR_SCALE_MIN, SIDEBAR_SCALE_MAX, SIDEBAR_SCALE_STEP, SIDEBAR_SCALE_DEFAULT } from '../../shared/types'
 import { PANE_COLORS, getFolderName } from './PaneHeader'
 import { focusTerminal, launchAgent, resolvePaneProfile } from './TerminalPane'
 import { splitServers } from '../util/ports'
@@ -39,6 +39,8 @@ export const Sidebar = memo(function Sidebar() {
   const width = useWorkspaceStore((s) => s.sidebarWidth)
   const setSidebarWidth = useWorkspaceStore((s) => s.setSidebarWidth)
   const toggleSidebar = useWorkspaceStore((s) => s.toggleSidebar)
+  const scale = useWorkspaceStore((s) => s.sidebarScale)
+  const setScale = useWorkspaceStore((s) => s.setSidebarScale)
 
   const [digests, setDigests] = useState<Record<number, PaneDigest>>({})
   const [ctx, setCtx] = useState<Record<number, { contextPct: number; model: string }>>({})
@@ -109,15 +111,18 @@ export const Sidebar = memo(function Sidebar() {
   // Click focuses in place; double-click blows the pane up to Solo. Kept apart by
   // a timer rather than onDoubleClick alone so the single click still feels instant.
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // showPane promotes the pane into view first — in solo/duo the rendered panes
+  // are the first N of the array, so focusing alone would have moved the cursor
+  // to a window that is not on screen.
   const focusPane = useCallback((id: number) => {
-    useWorkspaceStore.getState().setActivePaneId(id)
+    useWorkspaceStore.getState().showPane(id)
     focusTerminal(id)
   }, [])
   const soloPane = useCallback((id: number) => {
     const store = useWorkspaceStore.getState()
-    store.setFocusPaneId(id)
     store.setLayout('solo')
-    store.setActivePaneId(id)
+    // After the layout switch, promote under SOLO's rules (first slot wins).
+    useWorkspaceStore.getState().showPane(id)
     focusTerminal(id)
   }, [])
   const onRowClick = useCallback((id: number) => {
@@ -162,21 +167,63 @@ export const Sidebar = memo(function Sidebar() {
   // token + alpha does not.
   return (
     <div
-      className="relative shrink-0 h-full flex flex-col border-r border-[--border] overflow-hidden"
-      style={{ width, background: 'var(--glass-bg-header)' }}
+      className="relative shrink-0 self-stretch h-full flex flex-col border-r border-[--border] overflow-hidden"
+      style={{
+        width,
+        height: '100%',
+        background: 'var(--surface-4)',
+        // Local type scale. The --fs-* tokens are calc(base * --ui-scale) at :root,
+        // and a custom property's var() references resolve where it is DECLARED —
+        // so overriding --ui-scale here would not retro-change them. Redeclaring
+        // the four sizes themselves does, and every descendant inherits these, so
+        // one knob moves the whole panel off the same design-system bases.
+        '--fs-meta': `calc(var(--fs-meta-base) * ${scale})`,
+        '--fs-body': `calc(var(--fs-body-base) * ${scale})`,
+        '--fs-heading': `calc(var(--fs-heading-base) * ${scale})`,
+        '--fs-title': `calc(var(--fs-title-base) * ${scale})`,
+      } as CSSProperties}
     >
-      <div className="flex items-center justify-between px-3 h-8 shrink-0 border-b border-[--border]">
-        <span className="text-meta tracking-wider text-[--ui-text-muted] uppercase">
-          windows <span className="text-[--ui-text-faint]">{panes.length}</span>
+      <div className="flex items-center justify-between px-3 h-9 shrink-0 border-b border-[--border]">
+        <span className="text-heading tracking-wider text-[--ui-text-secondary] uppercase">
+          windows <span className="text-[--ui-text-muted]">{panes.length}</span>
           {needsCount > 0 && <span className="ml-2 text-[--git-orange]">{needsCount} need you</span>}
         </span>
-        <button
-          onClick={toggleSidebar}
-          className="text-[--ui-text-faint] hover:text-[--ui-text-primary] transition-colors text-meta"
-          title="Hide the pane list (⌘\)"
-        >
-          ⌫
-        </button>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={() => setScale(scale - SIDEBAR_SCALE_STEP)}
+            disabled={scale <= SIDEBAR_SCALE_MIN}
+            className="px-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] disabled:opacity-30 transition-colors"
+            style={{ fontSize: 'var(--fs-body-base)' }}
+            title="Smaller text"
+          >
+            A-
+          </button>
+          <button
+            onClick={() => setScale(SIDEBAR_SCALE_DEFAULT)}
+            className="px-0.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] transition-colors tabular-nums"
+            style={{ fontSize: 'var(--fs-meta-base)' }}
+            title="Reset text size"
+          >
+            {Math.round(scale * 100)}%
+          </button>
+          <button
+            onClick={() => setScale(scale + SIDEBAR_SCALE_STEP)}
+            disabled={scale >= SIDEBAR_SCALE_MAX}
+            className="px-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] disabled:opacity-30 transition-colors"
+            style={{ fontSize: 'var(--fs-heading-base)' }}
+            title="Larger text"
+          >
+            A+
+          </button>
+          <button
+            onClick={toggleSidebar}
+            className="pl-1.5 text-[--ui-text-muted] hover:text-[--ui-text-primary] transition-colors"
+            style={{ fontSize: 'var(--fs-body-base)' }}
+            title="Hide the pane list"
+          >
+            ⌫
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
@@ -185,7 +232,7 @@ export const Sidebar = memo(function Sidebar() {
           if (!list.length) return null
           return (
             <div key={key}>
-              <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-1 backdrop-blur text-meta uppercase tracking-wider text-[--ui-text-faint]"
+              <div className="sticky top-0 z-10 flex items-center justify-between px-3 py-2 backdrop-blur text-heading uppercase tracking-wider text-[--ui-text-secondary]"
                 style={{ background: 'var(--surface-4)' }}>
                 <span className={key === 'needs' ? 'text-[--git-orange]' : ''}>{label}</span>
                 <span>{list.length}</span>
@@ -210,21 +257,21 @@ export const Sidebar = memo(function Sidebar() {
                   <button
                     key={pane.id}
                     onClick={() => onRowClick(pane.id)}
-                    className={`w-full text-left px-3 py-1.5 border-l-2 transition-colors ${
+                    className={`w-full text-left px-3 py-2 border-l-2 transition-colors ${
                       isActive ? 'bg-white/[0.10]' : 'hover:bg-white/[0.06]'
                     }`}
                     style={{ borderLeftColor: isActive ? color : 'transparent' }}
-                    title={`${pane.workingDirectory}\nclick to focus · double-click to solo`}
+                    title={`${pane.workingDirectory}\nclick to show · double-click to solo`}
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                      <span className="truncate text-body text-[--ui-text-primary]">{getFolderName(pane.workingDirectory)}</span>
-                      <span className={`ml-auto shrink-0 text-meta ${reason ? 'text-[--git-orange]' : 'text-[--ui-text-faint]'}`}>
+                      <span className="truncate text-title font-medium text-[--ui-text-primary]">{getFolderName(pane.workingDirectory)}</span>
+                      <span className={`ml-auto shrink-0 text-heading ${reason ? 'text-[--git-orange]' : 'text-[--ui-text-muted]'}`}>
                         {reason || since(pane.stateSince)}
                       </span>
                     </div>
-                    <div className="truncate text-meta text-[--ui-text-secondary] pl-3">{line2}</div>
-                    {meta && <div className="truncate text-meta text-[--ui-text-faint] pl-3">{meta}</div>}
+                    <div className="truncate text-heading text-[--ui-text-secondary] pl-4">{line2}</div>
+                    {meta && <div className="truncate text-body text-[--ui-text-muted] pl-4">{meta}</div>}
                   </button>
                 )
               })}
@@ -235,7 +282,7 @@ export const Sidebar = memo(function Sidebar() {
         <div className="border-t border-[--border] mt-1">
           <button
             onClick={() => setShowRecents((v) => !v)}
-            className="w-full flex items-center justify-between px-3 py-1 text-meta uppercase tracking-wider text-[--ui-text-faint] hover:text-[--ui-text-secondary] hover:bg-white/[0.04] transition-colors"
+            className="w-full flex items-center justify-between px-3 py-2 text-heading uppercase tracking-wider text-[--ui-text-secondary] hover:text-[--ui-text-primary] hover:bg-white/[0.04] transition-colors"
             title="Projects Claude has worked in, newest first"
           >
             <span>recent projects</span><span>{showRecents ? '▾' : '▸'}</span>
@@ -244,10 +291,10 @@ export const Sidebar = memo(function Sidebar() {
             <button
               key={r.path}
               onClick={() => openRecent(r)}
-              className="w-full text-left px-3 py-1 hover:bg-white/[0.06] transition-colors"
+              className="w-full text-left px-3 py-1.5 hover:bg-white/[0.06] transition-colors"
               title={`${r.path}\nopens in a free pane`}
             >
-              <div className="truncate text-meta text-[--ui-text-secondary]">{r.name}</div>
+              <div className="truncate text-heading text-[--ui-text-secondary]">{r.name}</div>
             </button>
           ))}
         </div>

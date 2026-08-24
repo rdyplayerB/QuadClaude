@@ -48,7 +48,17 @@ export const FOCUS_SMALL_RATIO_MAX = 0.45
 // Sidebar (the pane list) width in px. Wide enough for a three-line row —
 // name + session title + "branch · model · ctx% · :port" — at the meta font
 // size, which is what set the floor.
-export const SIDEBAR_W_DEFAULT = 280
+// Sidebar text scale. The panel redeclares the --fs-* tokens locally at this
+// multiplier, so every size inside it moves together off the same design-system
+// bases rather than each one being hand-tuned. Separate from the app-wide
+// --ui-scale on purpose: a dense list you read at a glance wants to be bigger
+// than the chrome around it, and that preference is personal.
+export const SIDEBAR_SCALE_DEFAULT = 1
+export const SIDEBAR_SCALE_MIN = 0.9
+export const SIDEBAR_SCALE_MAX = 2
+export const SIDEBAR_SCALE_STEP = 0.1
+
+export const SIDEBAR_W_DEFAULT = 320
 export const SIDEBAR_W_MIN = 220
 export const SIDEBAR_W_MAX = 460
 
@@ -258,6 +268,7 @@ export interface WorkspaceState {
   // preferences — it pushes the grid aside, so it belongs with the layout.
   sidebarOpen?: boolean
   sidebarWidth?: number
+  sidebarScale?: number
 }
 
 export interface HotkeyBindings {
