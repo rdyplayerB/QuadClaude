@@ -1,51 +1,21 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { sendToTerminal } from './TerminalPane'
+import { PortalMenu, useAnchoredMenu } from './ui/PortalMenu'
+import { folderName, normalizePath } from '../util/paths'
 
 interface FavoritesDropdownProps {
   paneId: number
   currentDirectory: string
 }
 
-function normalizePath(p: string): string {
-  return p.replace(/\/+$/, '')
-}
-
-function getFolderName(path: string): string {
-  if (!path) return ''
-  const parts = path.split('/')
-  const name = parts[parts.length - 1] || parts[parts.length - 2]
-  if (path.match(/^\/Users\/[^/]+\/?$/)) return '~'
-  return name || path
-}
-
 export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, currentDirectory }: FavoritesDropdownProps) {
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const menu = useAnchoredMenu({ width: 220 })
   const { preferences, updatePreferences } = useWorkspaceStore()
 
   const favorites = preferences.favoriteDirectories
   const normalizedCwd = normalizePath(currentDirectory)
   const isCwdStarred = favorites.some((f) => normalizePath(f) === normalizedCwd)
-
-  // Close on click outside
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  const toggleOpen = useCallback(() => setOpen((o) => !o), [])
 
   const addFavorite = useCallback(() => {
     if (isCwdStarred || !currentDirectory) return
@@ -59,51 +29,39 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
 
   const navigateTo = useCallback((path: string) => {
     sendToTerminal(paneId, `cd "${path}"\n`)
-    setOpen(false)
-  }, [paneId])
-
-  // Calculate dropdown position
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 220 }
-  }
+    menu.close()
+  }, [paneId, menu])
 
   return (
     <>
       <button
-        ref={buttonRef}
-        onClick={toggleOpen}
+        ref={menu.triggerRef}
+        onClick={menu.toggle}
         className="flex items-center gap-1 px-1.5 py-1 text-[--ui-text-muted] hover:text-[--ui-text-primary] hover:bg-[--ui-bg-active]/50 transition-all rounded"
         title="Favorite Directories"
       >
         <svg width="15" height="15" viewBox="0 0 14 14" fill={isCwdStarred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.2">
           <path d="M7 1.5l1.76 3.57 3.94.57-2.85 2.78.67 3.93L7 10.5l-3.52 1.85.67-3.93L1.3 5.64l3.94-.57L7 1.5z"/>
         </svg>
-        <span className="text-[10px] font-mono leading-none">Favorites</span>
+        <span className="pane-ctl-label text-meta font-mono leading-none">Favorites</span>
       </button>
 
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[220px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
+      <PortalMenu menu={menu}>
           {/* Favorite list */}
           {favorites.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-[--ui-text-muted]">No favorites yet</div>
+            <div className="px-3 py-2 text-body text-[--ui-text-muted]">No favorites yet</div>
           ) : (
             <div className="max-h-[200px] overflow-y-auto">
               {favorites.map((path) => (
                 <div
                   key={path}
-                  className="group/fav flex items-center gap-1 px-3 py-1.5 hover:bg-[--ui-bg-active]/50 cursor-pointer text-xs"
+                  className="group/fav flex items-center gap-1 px-3 py-1.5 hover:bg-[--ui-bg-active]/50 cursor-pointer text-body"
                   onClick={() => navigateTo(path)}
                   title={path}
                 >
-                  <span className="truncate flex-1 text-[--ui-text-primary]">{getFolderName(path)}</span>
+                  <span className="truncate flex-1 text-[--ui-text-primary]">{folderName(path)}</span>
                   <button
-                    className="shrink-0 p-0.5 text-[--ui-text-muted] hover:text-red-400 opacity-0 group-hover/fav:opacity-100 transition-opacity"
+                    className="shrink-0 p-0.5 text-[--ui-text-muted] hover:text-[--danger] opacity-0 group-hover/fav:opacity-100 transition-opacity"
                     onClick={(e) => {
                       e.stopPropagation()
                       removeFavorite(path)
@@ -120,11 +78,11 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
           )}
 
           {/* Divider */}
-          <div className="border-t border-[#444]" />
+          <div className="border-t border-[--border]" />
 
           {/* Star/Unstar current directory */}
           <button
-            className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 flex items-center gap-2"
+            className="w-full px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 flex items-center gap-2"
             onClick={() => {
               if (isCwdStarred) {
                 removeFavorite(currentDirectory)
@@ -140,9 +98,7 @@ export const FavoritesDropdown = memo(function FavoritesDropdown({ paneId, curre
               {isCwdStarred ? 'Unstar current directory' : 'Star current directory'}
             </span>
           </button>
-        </div>,
-        document.body
-      )}
+      </PortalMenu>
     </>
   )
 })

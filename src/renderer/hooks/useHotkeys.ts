@@ -79,6 +79,16 @@ export function useHotkeys(enabled: boolean = true) {
       { ...parseHotkey(hotkeys.layoutGrid), layout: 'grid' },
       { ...parseHotkey(hotkeys.layoutFocus), layout: 'focus' },
       { ...parseHotkey(hotkeys.layoutFocusRight), layout: 'focus-right' },
+      { ...parseHotkey(hotkeys.layoutDuo), layout: 'duo' },
+      { ...parseHotkey(hotkeys.layoutSolo), layout: 'solo' },
+    ]
+
+    // PiP strip toggle + cycle-pane. Like the layout keys, this path serves
+    // chrome-focused events; while a terminal has focus the app-menu
+    // accelerators (main/index.ts) handle the default bindings.
+    const actionHotkeyConfigs: { key: string; modifiers: { ctrl: boolean; alt: boolean; shift: boolean; meta: boolean }; action: 'toggle-pip' | 'cycle-pane' }[] = [
+      { ...parseHotkey(hotkeys.togglePip), action: 'toggle-pip' },
+      { ...parseHotkey(hotkeys.cyclePane), action: 'cycle-pane' },
     ]
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -104,6 +114,32 @@ export function useHotkeys(enabled: boolean = true) {
           e.preventDefault()
           e.stopPropagation()
           setLayout(config.layout)
+          return
+        }
+      }
+
+      // Check PiP toggle / cycle-pane hotkeys
+      for (const config of actionHotkeyConfigs) {
+        const modifiersMatch =
+          e.ctrlKey === config.modifiers.ctrl &&
+          e.altKey === config.modifiers.alt &&
+          e.shiftKey === config.modifiers.shift &&
+          e.metaKey === config.modifiers.meta
+
+        if (pressedKey === config.key && modifiersMatch) {
+          e.preventDefault()
+          e.stopPropagation()
+          const store = useWorkspaceStore.getState()
+          if (config.action === 'toggle-pip') {
+            store.togglePipVisible()
+          } else {
+            const promoted = store.cyclePane()
+            if (promoted !== null) {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => focusTerminal(promoted))
+              })
+            }
+          }
           return
         }
       }

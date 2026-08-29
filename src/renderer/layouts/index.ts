@@ -3,12 +3,30 @@ import {
   FOCUS_SMALL_RATIO_DEFAULT,
   FOCUS_SMALL_RATIO_MIN,
   FOCUS_SMALL_RATIO_MAX,
+  DUO_RATIO_DEFAULT,
+  DUO_RATIO_MIN,
+  DUO_RATIO_MAX,
 } from '../../shared/types'
 
 // Clamp the focus splitter to its allowed range (default == min).
 export function clampFocusRatio(r: number): number {
   if (!Number.isFinite(r)) return FOCUS_SMALL_RATIO_DEFAULT
   return Math.min(FOCUS_SMALL_RATIO_MAX, Math.max(FOCUS_SMALL_RATIO_MIN, r))
+}
+
+// Clamp the duo divider (left pane's width fraction) to its allowed range.
+export function clampDuoRatio(r: number): number {
+  if (!Number.isFinite(r)) return DUO_RATIO_DEFAULT
+  return Math.min(DUO_RATIO_MAX, Math.max(DUO_RATIO_MIN, r))
+}
+
+// How many panes a layout shows on the main stage. Panes at array positions
+// >= this count are hidden — in duo/solo they render as floating PiP tiles.
+// Array order stays the single source of truth for "where is this pane".
+export function visiblePaneCount(layout: LayoutMode, count: number): number {
+  if (layout === 'solo') return Math.min(1, count)
+  if (layout === 'duo') return Math.min(2, count)
+  return count
 }
 
 export interface LayoutConfig {
@@ -20,6 +38,8 @@ export const LAYOUTS: Record<LayoutMode, LayoutConfig> = {
   grid: { name: 'Grid', icon: '⊞' },
   focus: { name: 'Focus', icon: '◱' },
   'focus-right': { name: 'Focus Right', icon: '◰' },
+  duo: { name: 'Duo', icon: '◫' },
+  solo: { name: 'Solo', icon: '□' },
 }
 
 // Auto-balanced grid dimensions for N panes: the most square-ish layout that
@@ -43,8 +63,35 @@ export function getGridStyle(
   layout: LayoutMode,
   count: number,
   focusSmallRatio: number = FOCUS_SMALL_RATIO_DEFAULT,
+  duoRatio: number = DUO_RATIO_DEFAULT,
 ): React.CSSProperties {
-  const base: React.CSSProperties = { display: 'grid', gap: '2px', height: '100%' }
+  // The gap is the floating effect: it is where the ground (and, when cleared,
+  // the desktop) shows between panes. 2px read as a hairline seam; this reads
+  // as separate tiles. Set inline, so it wins over the container's gap-* class
+  // — keep it equal to GRID_PAD in TerminalGrid so the outer margin matches the
+  // inner gutters and the tiles sit evenly on the ground.
+  const base: React.CSSProperties = { display: 'grid', gap: '20px', height: '100%' }
+
+  // Duo: two panes split the full area at the (draggable, persisted) ratio.
+  // Solo: one pane fills everything. Both are position:relative to anchor the
+  // absolutely-positioned PiP tiles + strip chrome (and duo's divider).
+  if (layout === 'duo') {
+    const r = clampDuoRatio(duoRatio)
+    return {
+      ...base,
+      position: 'relative',
+      gridTemplateColumns: `${r}fr ${1 - r}fr`,
+      gridTemplateRows: '1fr',
+    }
+  }
+  if (layout === 'solo') {
+    return {
+      ...base,
+      position: 'relative',
+      gridTemplateColumns: '1fr',
+      gridTemplateRows: '1fr',
+    }
+  }
 
   // Focus layouts: one large pane spanning all rows, the rest stacked in a
   // narrow column beside it. Rows = number of small panes (count - 1). The
@@ -77,7 +124,22 @@ export function getPaneStyle(
   layout: LayoutMode,
   count: number,
 ): React.CSSProperties {
-  const base: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: 'hidden' }
+  // overflow is deliberately NOT hidden here. This wrapper used to clip at its
+  // own edge, which made an outer box-shadow impossible — the reason every pane
+  // outline in the app was drawn inset and nothing ever looked like it floated.
+  // The pane itself still clips its own content (see TerminalPane's rounded
+  // overflow-hidden root), and min-width/height:0 is what actually stops a
+  // terminal from blowing out its grid track.
+  const base: React.CSSProperties = { minWidth: 0, minHeight: 0 }
+
+  // Duo/solo place only the visible panes; hidden positions (>= visible count)
+  // are styled by TerminalGrid as floating PiP tiles, not by this function.
+  if (layout === 'duo') {
+    return { ...base, gridColumn: position === 0 ? 1 : 2, gridRow: 1 }
+  }
+  if (layout === 'solo') {
+    return { ...base, gridColumn: 1, gridRow: 1 }
+  }
 
   // Focus layouts place panes explicitly: position 0 is the big pane (spanning
   // every row), positions 1..n-1 stack in the narrow column.

@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../store/workspace'
 import { launchAgent, resolvePaneProfile, sendToTerminal } from './TerminalPane'
+import { ClaudeAccount } from '../../shared/types'
+import { PortalMenu, useAnchoredMenu, menuItemClass } from './ui/PortalMenu'
 
 interface AgentBadgeProps {
   paneId: number
@@ -11,14 +12,12 @@ interface AgentBadgeProps {
 // the label shows which agent the pane runs (Claude / Qwen / Codex / ...),
 // clicking it launches that agent, and the caret switches the assigned agent.
 export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) {
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
+  const menu = useAnchoredMenu({ width: 230 })
 
   const pane = useWorkspaceStore((s) => s.panes.find((p) => p.id === paneId))
   const agentProfiles = useWorkspaceStore((s) => s.preferences.agentProfiles)
   const defaultAgentId = useWorkspaceStore((s) => s.preferences.defaultAgentId)
-  const setPaneAgent = useWorkspaceStore((s) => s.setPaneAgent)
+  const updatePane = useWorkspaceStore((s) => s.updatePane)
   const pairPanes = useWorkspaceStore((s) => s.pairPanes)
   const unpairPane = useWorkspaceStore((s) => s.unpairPane)
   const swapPairRoles = useWorkspaceStore((s) => s.swapPairRoles)
@@ -28,21 +27,19 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   const [pairMode, setPairMode] = useState(false)
   const [pairTargets, setPairTargets] = useState<Array<{ id: number; label: string }>>([])
 
-  // Close on click outside
+  // Saved Claude accounts (per-pane multi-account). Loaded lazily when the menu opens; the
+  // list only changes via Settings, which the user would have closed before reaching here.
+  const [accounts, setAccounts] = useState<ClaudeAccount[]>([])
   useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (
-        panelRef.current && !panelRef.current.contains(e.target as Node) &&
-        buttonRef.current && !buttonRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false)
-        setPairMode(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
+    if (!menu.open) return
+    window.electronAPI.claudeAccountsList().then(setAccounts).catch(() => {})
+  }, [menu.open])
+
+  // When the menu closes (incl. via the shared click-outside handler), leave
+  // "pair with" sub-mode too, so it never reopens mid-pairing.
+  useEffect(() => {
+    if (!menu.open) setPairMode(false)
+  }, [menu.open])
 
   const profiles = agentProfiles ?? []
   const paneProfile = resolvePaneProfile(pane, { agentProfiles, defaultAgentId })
@@ -50,22 +47,26 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
   // agents stay in 'shell' state, so the badge just shows their identity.
   const claudeRunning =
     paneProfile.builtin === 'claude' &&
-    (pane?.state === 'claude-active' || pane?.state === 'claude-waiting')
+    (pane?.state === 'claude-active' || pane?.state === 'claude-idle' || pane?.state === 'claude-waiting')
 
   const launch = useCallback(() => {
     if (!pane) return
     launchAgent(paneId, paneProfile, pane.workingDirectory)
   }, [pane, paneId, paneProfile])
 
-  const pick = useCallback(
-    (id: string) => {
+  // Launch an agent in this pane, optionally as a specific Claude account. One unified
+  // action: a Claude row carries an accountId (or undefined for the global login); a
+  // non-Claude agent always passes undefined. Sets both the agent and the account
+  // atomically, then respawns so the right token takes effect.
+  const launchAs = useCallback(
+    (profileId: string, accountId: string | undefined) => {
       if (!pane) return
-      setPaneAgent(paneId, id)
-      const profile = (agentProfiles ?? []).find((p) => p.id === id)
+      updatePane(paneId, { agentId: profileId, claudeAccountId: accountId })
+      const profile = (agentProfiles ?? []).find((p) => p.id === profileId)
       if (profile) launchAgent(paneId, profile, pane.workingDirectory)
-      setOpen(false)
+      menu.close()
     },
-    [pane, paneId, agentProfiles, setPaneAgent],
+    [pane, paneId, agentProfiles, updatePane],
   )
 
   const enterPairMode = useCallback(() => {
@@ -88,21 +89,12 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
         )
       }
       setPairMode(false)
-      setOpen(false)
+      menu.close()
     },
     [paneId, pairPanes],
   )
 
-  const closeMenu = useCallback(() => {
-    setOpen(false)
-    setPairMode(false)
-  }, [])
-
-  const getPosition = () => {
-    if (!buttonRef.current) return { top: 0, left: 0 }
-    const rect = buttonRef.current.getBoundingClientRect()
-    return { top: rect.bottom + 4, left: rect.right - 200 }
-  }
+  const closeMenu = useCallback(() => menu.close(), [menu])
 
   if (!pane) return null
 
@@ -127,14 +119,14 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           className={`w-1.5 h-1.5 rounded-full shrink-0 ${claudeRunning ? 'animate-pulse' : ''}`}
           style={{ backgroundColor: claudeRunning ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }}
         />
-        <span className="text-[10px] leading-none max-w-[110px] truncate">
+        <span className="pane-ctl-label text-meta leading-none max-w-[110px] truncate">
           {claudeRunning ? 'Running' : paneProfile.name}
         </span>
       </button>
       {/* Switch agent */}
       <button
-        ref={buttonRef}
-        onClick={() => (open ? closeMenu() : setOpen(true))}
+        ref={menu.triggerRef}
+        onClick={() => (menu.open ? closeMenu() : menu.setOpen(true))}
         className="px-0.5 py-0.5 rounded-r text-[--ui-text-dimmed] hover:text-[--ui-text-primary] transition-colors"
         title="Switch agent"
       >
@@ -143,48 +135,64 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
         </svg>
       </button>
 
-      {open && createPortal(
-        <div
-          ref={panelRef}
-          className="fixed z-50 w-[200px] bg-[--ui-bg-elevated] border border-[#444] rounded-md shadow-lg overflow-hidden"
-          style={getPosition()}
-        >
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
-            Launch agent
+      <PortalMenu menu={menu}>
+          <div className="px-3 py-1.5 text-meta uppercase tracking-wide text-[--ui-text-muted]">
+            Launch
           </div>
-          <div className="max-h-[240px] overflow-y-auto">
-            {profiles.map((p) => {
-              const isCurrent = p.id === paneProfile.id
-              return (
+          <div className="max-h-[300px] overflow-y-auto">
+            {profiles.flatMap((p) => {
+              const isClaude = p.builtin === 'claude'
+              // A small row: agent + (for Claude) which account it runs as. Account is shown
+              // as a dimmed identity beside "Claude Code" so the menu reads as one list of
+              // launchable identities — "Claude Code as boshiro.one" — not two parallel lists.
+              const Row = (key: string, accountId: string | undefined, suffix: string | null, current: boolean, disabled: boolean, title: string) => (
                 <button
-                  key={p.id}
-                  onClick={() => pick(p.id)}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 transition-colors"
-                  title={p.command}
+                  key={key}
+                  onClick={() => !disabled && launchAs(p.id, accountId)}
+                  disabled={disabled}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-body text-left hover:bg-[--ui-bg-active]/50 transition-colors disabled:opacity-40"
+                  title={title}
                 >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full shrink-0"
-                    style={{ backgroundColor: isCurrent ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }}
-                  />
-                  <span className="truncate flex-1 text-[--ui-text-primary]">{p.name}</span>
-                  {isCurrent && <span className="text-[9px] text-[--ui-text-muted]">current</span>}
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: current ? 'var(--git-green)' : 'var(--ui-text-dimmed)' }} />
+                  <span className="shrink-0 text-[--ui-text-primary]">{p.name}</span>
+                  {suffix && <span className="truncate text-[--ui-text-dimmed]">· {suffix}</span>}
                 </button>
               )
+              // Non-Claude agent, or Claude with no saved accounts → a single plain row.
+              if (!isClaude || accounts.length === 0) {
+                return [Row(p.id, undefined, null, p.id === paneProfile.id, false, p.command)]
+              }
+              // Claude with accounts → "global login" row + one row per account, all launching Claude.
+              const claudeCurrent = p.id === paneProfile.id
+              const rows = [
+                Row(`${p.id}:global`, undefined, 'global login', claudeCurrent && !pane.claudeAccountId, false, 'Run Claude Code as the globally signed-in account (claude /login)'),
+              ]
+              for (const a of accounts) {
+                // Never disabled: a not-yet-logged-in profile is still launchable — binding
+                // a pane and running /login there IS how the profile gets its login.
+                rows.push(Row(
+                  `${p.id}:${a.id}`, a.id, a.label,
+                  claudeCurrent && pane.claudeAccountId === a.id,
+                  false,
+                  a.loggedIn ? `Run Claude Code as ${a.email || a.label}` : `${a.label} — not logged in yet: launch it here, then run /login once`,
+                ))
+              }
+              return rows
             })}
           </div>
 
           {/* Pairing */}
-          <div className="border-t border-[#444]" />
+          <div className="border-t border-[--border]" />
           {pane.pairId ? (
             <div className="py-1">
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+              <div className="px-3 py-1 text-meta uppercase tracking-wide text-[--ui-text-muted]">
                 Paired · {pane.pairRole}
               </div>
               <button
                 onClick={() => {
                   swapPairRoles(paneId)
                 }}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className={menuItemClass}
               >
                 Swap roles
               </button>
@@ -193,24 +201,24 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
                   unpairPane(paneId)
                   closeMenu()
                 }}
-                className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary]"
+                className={menuItemClass}
               >
                 Unpair
               </button>
             </div>
           ) : pairMode ? (
             <div className="py-1 max-h-[160px] overflow-y-auto">
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-[--ui-text-muted]">
+              <div className="px-3 py-1 text-meta uppercase tracking-wide text-[--ui-text-muted]">
                 Pair as orchestrator with…
               </div>
               {pairTargets.length === 0 ? (
-                <div className="px-3 py-1.5 text-xs text-[--ui-text-dimmed]">No other panes</div>
+                <div className="px-3 py-1.5 text-body text-[--ui-text-dimmed]">No other panes</div>
               ) : (
                 pairTargets.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => doPair(t.id)}
-                    className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] truncate"
+                    className={`${menuItemClass} truncate`}
                   >
                     {t.label}
                   </button>
@@ -220,14 +228,14 @@ export const AgentBadge = memo(function AgentBadge({ paneId }: AgentBadgeProps) 
           ) : (
             <button
               onClick={enterPairMode}
-              className="w-full px-3 py-1.5 text-xs text-left hover:bg-[--ui-bg-active]/50 text-[--ui-text-primary] flex items-center gap-2"
+              className={`${menuItemClass} flex items-center gap-2`}
             >
-              <span aria-hidden>🔗</span> Pair with…
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" className="shrink-0">
+                <path d="M5.8 8.2l2.4-2.4M5.9 3.9l.8-.8a2.3 2.3 0 013.2 3.2l-.8.8M8.1 10.1l-.8.8a2.3 2.3 0 01-3.2-3.2l.8-.8" />
+              </svg> Pair with…
             </button>
           )}
-        </div>,
-        document.body,
-      )}
+      </PortalMenu>
     </div>
   )
 })

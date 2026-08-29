@@ -19,7 +19,16 @@ import {
   FOCUS_SMALL_RATIO_DEFAULT,
   FOCUS_SMALL_RATIO_MIN,
   FOCUS_SMALL_RATIO_MAX,
+  DUO_RATIO_DEFAULT,
+  PipCorner,
+  SIDEBAR_W_DEFAULT,
+  SIDEBAR_W_MIN,
+  SIDEBAR_W_MAX,
+  SIDEBAR_SCALE_DEFAULT,
+  SIDEBAR_SCALE_MIN,
+  SIDEBAR_SCALE_MAX,
 } from '../../shared/types'
+import { visiblePaneCount, clampDuoRatio } from '../layouts'
 
 interface WorkspaceStore extends WorkspaceState {
   // Initialization
@@ -32,6 +41,20 @@ interface WorkspaceStore extends WorkspaceState {
   setActivePaneId: (id: number) => void
   swapPanes: (paneId1: number, paneId2: number) => void
   setFocusSmallRatio: (ratio: number) => void
+  setDuoRatio: (ratio: number) => void
+
+  // PiP strip (duo/solo layouts)
+  setPipCorner: (corner: PipCorner) => void
+  setPipCollapsed: (collapsed: boolean) => void
+  togglePipVisible: () => void
+  // Swap a hidden pane into the active visible slot (no-op past activating it
+  // if already visible). Returns the promoted pane id, or null if unknown.
+  promotePane: (paneId: number) => number | null
+  // Bring the next pane into the active slot (Ctrl+Tab). Returns the pane id
+  // that should receive focus, or null when there's nothing to cycle.
+  cyclePane: () => number | null
+  // Bring a pane into view, whatever the layout is currently hiding it behind.
+  showPane: (id: number) => void
 
   // Pane add/remove (4..MAX_PANES). addPane returns the new pane's id (or null
   // if already at the cap) so callers can focus it; removePane returns the
@@ -42,12 +65,25 @@ interface WorkspaceStore extends WorkspaceState {
   // Pane actions
   updatePane: (id: number, updates: Partial<PaneConfig>) => void
   setPaneState: (id: number, state: PaneState) => void
+
+  // Sidebar (the pane list). Width and openness are workspace state, not a
+  // preference — they belong with the layout they push aside.
+  sidebarOpen: boolean
+  sidebarWidth: number
+  toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (px: number) => void
+  sidebarScale: number
+  setSidebarScale: (n: number) => void
   setPaneAgent: (id: number, agentId: string) => void
 
   // Pane pairing (orchestrator ⇄ worker)
   pairPanes: (orchestratorId: number, workerId: number) => void
   unpairPane: (id: number) => void
   swapPairRoles: (id: number) => void
+  // Live-feed panes (standalone; several allowed). scope = orchestrator pane id to follow,
+  // or undefined for all delegations (global feed).
+  setPaneLiveFeed: (id: number, on: boolean, scope?: number) => void
   setPaneLabel: (id: number, label: string) => void
   setPaneCwd: (id: number, cwd: string) => void
   setPaneGitStatus: (id: number, gitStatus: GitStatus) => void
@@ -73,6 +109,22 @@ let saveTimeout: ReturnType<typeof setTimeout> | null = null
 const debouncedSave = (saveFn: () => void) => {
   if (saveTimeout) clearTimeout(saveTimeout)
   saveTimeout = setTimeout(saveFn, 500) // Debounce by 500ms
+}
+
+type WSet = (fn: (s: WorkspaceStore) => Partial<WorkspaceStore>) => void
+type WGet = () => WorkspaceStore
+
+// Immutably replace one pane (by id); debounced-save unless save === false.
+// Collapses the panes.map(...) + debouncedSave pattern repeated across setters.
+function patchPane(set: WSet, get: WGet, id: number, updater: (p: PaneConfig) => PaneConfig, save = true): void {
+  set((state) => ({ panes: state.panes.map((p) => (p.id === id ? updater(p) : p)) }))
+  if (save) debouncedSave(() => get().saveWorkspace())
+}
+
+// Set one pane field, skipping the write (and re-render) if already equal.
+function patchPaneField<K extends keyof PaneConfig>(set: WSet, get: WGet, id: number, field: K, value: PaneConfig[K], save = true): void {
+  if (get().panes.find((p) => p.id === id)?.[field] === value) return
+  patchPane(set, get, id, (p) => ({ ...p, [field]: value }), save)
 }
 
 // Strip all pairing fields from a pane (used when dissolving a pair).
@@ -113,6 +165,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   focusPaneId: 0,
   activePaneId: 0,
   focusSmallRatio: FOCUS_SMALL_RATIO_DEFAULT,
+  duoRatio: DUO_RATIO_DEFAULT,
+  pipCorner: 'bottom-right',
+  pipCollapsed: false,
+  pipVisible: true,
+  sidebarOpen: false,
+  sidebarWidth: SIDEBAR_W_DEFAULT,
+  sidebarScale: SIDEBAR_SCALE_DEFAULT,
   panes: [],
   preferences: {
     theme: 'dark',
@@ -123,6 +182,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     background: DEFAULT_BACKGROUND,
     agentProfiles: DEFAULT_AGENT_PROFILES,
     defaultAgentId: CLAUDE_PROFILE_ID,
+    // 1 = the standard glass ground. Lower it (Settings → Background) to let
+    // the desktop through the gaps between panes.
+    groundOpacity: 1,
+    // Matches the wallpaper scrim the panes have always used, so existing
+    // workspaces look identical until the user moves the slider.
+    windowTint: 0.85,
+    // Neutral near-black, matching --terminal-bg. Changing this re-hues every
+    // surface at once rather than per-window.
+    windowTintColor: '#1e1e1e',
   },
   isInitialized: false,
 
@@ -150,16 +218,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         savedState.preferences?.defaultAgentId,
       )
 
-      // Migrate removed layouts to 'grid'
+      // Migrate removed layouts to 'grid'. These legacy names aren't in the
+      // current LayoutMode union, so compare as plain strings.
       let layout = savedState.layout
-      if (layout === 'horizontal' || layout === 'vertical' || layout === 'fullscreen' || layout === 'split' || layout === 'history') {
+      if ((['horizontal', 'vertical', 'fullscreen', 'split', 'history'] as string[]).includes(layout)) {
         layout = 'grid'
       }
 
-      // Reset all pane states to 'shell' on startup - Claude sessions don't survive app restart
+      // Reset all pane states to 'shell' on startup - Claude sessions don't survive app
+      // restart. Pairing is also stripped: an orchestrator⇄worker delegation link belongs
+      // to a single session, so it must NOT carry over — the next launch starts unpaired
+      // and only re-pairs if the user delegates again.
       const panes = savedState.panes?.map((pane: PaneConfig) => ({
-        ...pane,
+        ...stripPair(pane),
         state: 'shell' as PaneState,
+        liveFeed: false, // the tail process doesn't survive a restart — start clean
+        liveFeedScope: undefined,
       })) ?? []
 
       // Restore the focus splitter (clamped; default for older saves).
@@ -168,11 +242,41 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         Math.max(FOCUS_SMALL_RATIO_MIN, savedState.focusSmallRatio ?? FOCUS_SMALL_RATIO_DEFAULT),
       )
 
+      // Restore duo divider + PiP strip state (clamped/defaulted for older saves).
+      const duoRatio = clampDuoRatio(savedState.duoRatio ?? DUO_RATIO_DEFAULT)
+      const pipCorners: PipCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+      const pipCorner = pipCorners.includes(savedState.pipCorner as PipCorner)
+        ? (savedState.pipCorner as PipCorner)
+        : 'bottom-right'
+      const pipCollapsed = savedState.pipCollapsed ?? false
+      const pipVisible = savedState.pipVisible ?? true
+      const sidebarOpen = savedState.sidebarOpen ?? false
+      const sidebarWidth = Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, savedState.sidebarWidth ?? SIDEBAR_W_DEFAULT))
+      const sidebarScale = Math.min(SIDEBAR_SCALE_MAX, Math.max(SIDEBAR_SCALE_MIN, savedState.sidebarScale ?? SIDEBAR_SCALE_DEFAULT))
+
+      // Invariant for duo/solo: the active pane must be on the main stage. A
+      // consistent state is always saved, but guard against hand-edited or
+      // partially-migrated saves.
+      let activePaneId = savedState.activePaneId ?? 0
+      const vc = visiblePaneCount(layout, panes.length)
+      const activeIdx = panes.findIndex((p: PaneConfig) => p.id === activePaneId)
+      if (panes.length > 0 && (activeIdx === -1 || activeIdx >= vc)) {
+        activePaneId = panes[0].id
+      }
+
       set({
         ...savedState,
         layout,
         panes,
+        activePaneId,
         focusSmallRatio,
+        duoRatio,
+        pipCorner,
+        pipCollapsed,
+        pipVisible,
+        sidebarOpen,
+        sidebarWidth,
+        sidebarScale,
         preferences: {
           ...savedState.preferences,
           hotkeys: mergedHotkeys,
@@ -184,6 +288,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         },
         isInitialized: true,
       })
+      // Persist the cleaned state so the on-disk workspace doesn't keep stale pairing
+      // (delegation links from a previous session) around between launches.
+      get().saveWorkspace()
     } catch (error) {
       console.error('Failed to load workspace:', error)
       // Create default state
@@ -216,15 +323,20 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Layout actions
   setLayout: (layout) => {
-    // When switching to a focus layout, swap the active pane to position 0 (the large pane)
+    const activePaneId = get().activePaneId
+    const panes = [...get().panes]
+    const activeIndex = panes.findIndex((p) => p.id === activePaneId)
     if (layout === 'focus' || layout === 'focus-right') {
-      const activePaneId = get().activePaneId
-      const panes = [...get().panes]
-      const activeIndex = panes.findIndex((p) => p.id === activePaneId)
+      // Focus layouts: swap the active pane to position 0 (the large pane)
       if (activeIndex > 0) {
         ;[panes[0], panes[activeIndex]] = [panes[activeIndex], panes[0]]
         set({ panes, focusPaneId: activePaneId })
       }
+    } else if (activeIndex >= visiblePaneCount(layout, panes.length)) {
+      // Duo/solo: keep the active pane on the main stage — swap it to the
+      // front slot rather than letting it vanish into the PiP strip.
+      ;[panes[0], panes[activeIndex]] = [panes[activeIndex], panes[0]]
+      set({ panes })
     }
     set({ layout })
     debouncedSave(() => get().saveWorkspace())
@@ -245,8 +357,31 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setActivePaneId: (activePaneId) => {
-    set({ activePaneId })
+    // Looking at a pane marks it seen. That is what lets the sidebar distinguish
+    // "finished while you were away" from "finished and you already read it".
+    set((state) => ({
+      activePaneId,
+      panes: state.panes.map((p) => (p.id === activePaneId ? { ...p, seenAt: Date.now() } : p)),
+    }))
     // Don't save on active pane change - too frequent
+  },
+
+  toggleSidebar: () => {
+    set((state) => ({ sidebarOpen: !state.sidebarOpen }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+  setSidebarOpen: (sidebarOpen) => {
+    set({ sidebarOpen })
+    debouncedSave(() => get().saveWorkspace())
+  },
+  setSidebarWidth: (px) => {
+    set({ sidebarWidth: Math.round(Math.min(SIDEBAR_W_MAX, Math.max(SIDEBAR_W_MIN, px))) })
+    debouncedSave(() => get().saveWorkspace())
+  },
+  setSidebarScale: (n) => {
+    // Rounded to one decimal so repeated steps can't drift into 1.2000000000000002.
+    set({ sidebarScale: Math.round(Math.min(SIDEBAR_SCALE_MAX, Math.max(SIDEBAR_SCALE_MIN, n)) * 10) / 10 })
+    debouncedSave(() => get().saveWorkspace())
   },
 
   swapPanes: (paneId1, paneId2) => {
@@ -273,6 +408,124 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     debouncedSave(() => get().saveWorkspace())
   },
 
+  // Drag the duo-layout divider (left pane's width fraction). Same contract as
+  // setFocusSmallRatio: clamped, live during drag, save debounced.
+  setDuoRatio: (ratio) => {
+    const clamped = clampDuoRatio(ratio)
+    if (get().duoRatio === clamped) return
+    set({ duoRatio: clamped })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPipCorner: (pipCorner) => {
+    if (get().pipCorner === pipCorner) return
+    set({ pipCorner })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPipCollapsed: (pipCollapsed) => {
+    if (get().pipCollapsed === pipCollapsed) return
+    set({ pipCollapsed })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  togglePipVisible: () => {
+    set({ pipVisible: !(get().pipVisible ?? true) })
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  // Swap a PiP pane into the active visible slot and make it active. Already-
+  // visible panes are just activated. Focus follow-up (focusTerminal) is the
+  // caller's job, matching the swapPanes/hotkey convention.
+  promotePane: (paneId) => {
+    const { panes, activePaneId, layout } = get()
+    const idx = panes.findIndex((p) => p.id === paneId)
+    if (idx === -1) return null
+    const vc = visiblePaneCount(layout, panes.length)
+    if (idx < vc) {
+      set({ activePaneId: paneId })
+      return paneId
+    }
+    const activeIdx = panes.findIndex((p) => p.id === activePaneId)
+    const targetIdx = activeIdx >= 0 && activeIdx < vc ? activeIdx : 0
+    const next = [...panes]
+    ;[next[targetIdx], next[idx]] = [next[idx], next[targetIdx]]
+    set({ panes: next, activePaneId: paneId })
+    debouncedSave(() => get().saveWorkspace())
+    return paneId
+  },
+
+  // Ctrl+Tab. Duo/solo: the first hidden pane takes the active visible slot
+  // and the outgoing pane goes to the END of the array — a plain swap would
+  // ping-pong between two panes; this cycles through every hidden pane in
+  // stable order and never displaces duo's other visible slot. Focus layouts:
+  // rotate the array so each pane takes a turn as the big pane. Grid: just
+  // advance the focus ring.
+  // Make a pane the one you are looking at.
+  //
+  // "Focus" is not enough on its own: in duo/solo the panes on screen are the
+  // FIRST visiblePaneCount entries of the array (which is why cyclePane rotates
+  // the array rather than setting a field), and in the focus layouts the big
+  // slot is panes[0]. So setting activePaneId alone moves the cursor to a pane
+  // that is not rendered — clicking a sidebar row in solo appeared to do
+  // nothing. Promote by layout, then focus.
+  showPane: (id) => {
+    const { panes, layout, activePaneId } = get()
+    const idx = panes.findIndex((p) => p.id === id)
+    if (idx < 0) return
+    if (layout === 'focus' || layout === 'focus-right') {
+      if (idx !== 0) {
+        set({ panes: [panes[idx], ...panes.filter((_, i) => i !== idx)] })
+      }
+      set({ focusPaneId: id })
+    } else if (layout === 'duo' || layout === 'solo') {
+      const vc = visiblePaneCount(layout, panes.length)
+      if (idx >= vc) {
+        // Swap into the slot the active pane occupies, so the pane you were
+        // reading is the one that steps aside — not an arbitrary third pane.
+        const next = [...panes]
+        const activeIdx = next.findIndex((p) => p.id === activePaneId)
+        const k = activeIdx >= 0 && activeIdx < vc ? activeIdx : 0
+        const outgoing = next[k]
+        next[k] = next[idx]
+        next[idx] = outgoing
+        set({ panes: next })
+      }
+    }
+    // Stamps seenAt and saves.
+    get().setActivePaneId(id)
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  cyclePane: () => {
+    const { panes, activePaneId, layout } = get()
+    if (panes.length < 2) return null
+    if (layout === 'duo' || layout === 'solo') {
+      const vc = visiblePaneCount(layout, panes.length)
+      if (panes.length <= vc) return null
+      const activeIdx = panes.findIndex((p) => p.id === activePaneId)
+      const k = activeIdx >= 0 && activeIdx < vc ? activeIdx : 0
+      const next = [...panes]
+      const incoming = next.splice(vc, 1)[0]
+      const outgoing = next[k]
+      next[k] = incoming
+      next.push(outgoing)
+      set({ panes: next, activePaneId: incoming.id })
+      debouncedSave(() => get().saveWorkspace())
+      return incoming.id
+    }
+    if (layout === 'focus' || layout === 'focus-right') {
+      const next = [...panes.slice(1), panes[0]]
+      set({ panes: next, focusPaneId: next[0].id, activePaneId: next[0].id })
+      debouncedSave(() => get().saveWorkspace())
+      return next[0].id
+    }
+    const idx = panes.findIndex((p) => p.id === activePaneId)
+    const nextPane = panes[(idx + 1) % panes.length]
+    set({ activePaneId: nextPane.id })
+    return nextPane.id
+  },
+
   // Add a pane in the lowest free id slot (0..MAX_PANES-1), so ids stay dense
   // and Ctrl+1..6 keep mapping to slots. New pane opens in the active pane's
   // directory. No-op at the cap.
@@ -290,7 +543,16 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       workingDirectory,
       state: 'shell',
     }
-    set({ panes: [...panes, newPane], activePaneId: newId })
+    const nextPanes = [...panes, newPane]
+    // Duo/solo: an appended pane would be born hidden in the PiP strip while
+    // becoming active (breaking the active-pane-is-visible invariant). Swap it
+    // to the front slot — you asked for a terminal, you get it on stage.
+    const { layout } = get()
+    if (layout === 'duo' || layout === 'solo') {
+      const last = nextPanes.length - 1
+      ;[nextPanes[0], nextPanes[last]] = [nextPanes[last], nextPanes[0]]
+    }
+    set({ panes: nextPanes, activePaneId: newId })
     debouncedSave(() => get().saveWorkspace())
     return newId
   },
@@ -315,65 +577,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Pane actions
   updatePane: (id, updates) => {
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, ...updates } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
+    patchPane(set, get, id, (p) => ({ ...p, ...updates }))
   },
 
-  setPaneState: (id, paneState) => {
-    // Avoid unnecessary re-renders if state hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.state === paneState) return
+  // No save: pane state flips constantly during terminal activity.
+  // Stamps stateSince on a real transition. The sidebar shows how long a pane has
+  // been in its current state, and nothing else in the app tracked that — without
+  // the guard, every poll that re-asserts the same state would reset the clock.
+  setPaneState: (id, paneState) => patchPane(set, get, id, (p) => (
+    p.state === paneState ? p : { ...p, state: paneState, stateSince: Date.now() }
+  ), false),
 
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, state: paneState } : pane
-      ),
-    }))
-    // Don't save on pane state changes - too frequent during terminal activity
-  },
+  setPaneLabel: (id, label) => patchPaneField(set, get, id, 'label', label),
 
-  setPaneLabel: (id, label) => {
-    // Avoid unnecessary re-renders if label hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.label === label) return
+  setPaneCwd: (id, cwd) => patchPaneField(set, get, id, 'workingDirectory', cwd),
 
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, label } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
-
-  setPaneCwd: (id, cwd) => {
-    // Avoid unnecessary re-renders if cwd hasn't changed
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.workingDirectory === cwd) return
-
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, workingDirectory: cwd } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
-
-  setPaneAgent: (id, agentId) => {
-    // Persist which agent this pane runs, so the window remembers its role.
-    const currentPane = get().panes.find((p) => p.id === id)
-    if (currentPane?.agentId === agentId) return
-
-    set((state) => ({
-      panes: state.panes.map((pane) =>
-        pane.id === id ? { ...pane, agentId } : pane
-      ),
-    }))
-    debouncedSave(() => get().saveWorkspace())
-  },
+  // Persist which agent this pane runs, so the window remembers its role.
+  setPaneAgent: (id, agentId) => patchPaneField(set, get, id, 'agentId', agentId),
 
   pairPanes: (orchestratorId, workerId) => {
     if (orchestratorId === workerId) return
@@ -426,6 +646,18 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         p.pairId === pairId
           ? { ...p, pairRole: p.pairRole === 'orchestrator' ? 'worker' : 'orchestrator' }
           : p,
+      ),
+    }))
+    debouncedSave(() => get().saveWorkspace())
+  },
+
+  setPaneLiveFeed: (id, on, scope) => {
+    const current = get().panes.find((p) => p.id === id)
+    if (!current) return
+    if (!!current.liveFeed === on && current.liveFeedScope === (on ? scope : undefined)) return
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, liveFeed: on, liveFeedScope: on ? scope : undefined } : p,
       ),
     }))
     debouncedSave(() => get().saveWorkspace())
@@ -498,14 +730,21 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   // Save to disk (debounced calls converge here)
   saveWorkspace: () => {
-    const { layout, focusPaneId, activePaneId, focusSmallRatio, panes, preferences } = get()
+    const { layout, focusPaneId, activePaneId, focusSmallRatio, duoRatio, pipCorner, pipCollapsed, pipVisible, sidebarOpen, sidebarWidth, sidebarScale, panes, preferences } = get()
     // Strip transient data (gitStatus, servers) from panes before persisting
-    const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, ...rest }) => rest)
+    const cleanPanes = panes.map(({ gitStatus: _g, servers: _s, stateSince: _t, seenAt: _v, ...rest }) => rest)
     window.electronAPI.saveWorkspace({
       layout,
       focusPaneId,
       activePaneId,
       focusSmallRatio,
+      duoRatio,
+      pipCorner,
+      pipCollapsed,
+      pipVisible,
+      sidebarOpen,
+      sidebarWidth,
+      sidebarScale,
       panes: cleanPanes,
       preferences,
     })

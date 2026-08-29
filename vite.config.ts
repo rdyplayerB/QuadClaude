@@ -53,6 +53,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist/renderer',
-    emptyOutDir: true
+    emptyOutDir: true,
+    rollupOptions: {
+      // Two renderer entries: the app itself, and the standalone window the
+      // Activity Console pops out into (ops.html → src/renderer/ops-window.ts).
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        ops: resolve(__dirname, 'ops.html')
+      }
+    }
   }
 })

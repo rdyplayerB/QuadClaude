@@ -1,15 +1,22 @@
 import { useEffect, useRef, useCallback, useState, DragEvent, memo } from 'react'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ILink } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { showLinkTip, hideLinkTip, copyLinkTarget, disposeLinkTip } from '../util/linkTooltip'
 import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
 import { useWorkspaceStore } from '../store/workspace'
 import { PaneHeader, PANE_DRAG_TYPE } from './PaneHeader'
-import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, WorkspacePreferences } from '../../shared/types'
+import { DEFAULT_HOTKEYS, DEFAULT_BACKGROUND, DEFAULT_AGENT_PROFILES, AgentProfile, PaneConfig, PaneState, WorkspacePreferences } from '../../shared/types'
+import { visiblePaneCount } from '../layouts'
+import { paneLog, armBlankWatchdog, notePaneOutput, clearBlankWatchdog } from '../paneDiag'
 
 // Module-level tracking to persist across component remounts
 const initializedPtys = new Set<number>()
+// Diagnostics: last createPty result + cumulative fit attempts per pane, fed
+// into the blank-pane watchdog snapshot (see paneDiag.ts).
+const ptyCreateResult = new Map<number, boolean>()
+const fitAttempts = new Map<number, number>()
 const terminals = new Map<number, { terminal: Terminal; fitAddon: FitAddon }>()
 // Track focus listeners for proper cleanup
 const focusListeners = new Map<number, () => void>()
@@ -40,6 +47,56 @@ const promptScanTimers = new Map<number, ReturnType<typeof setTimeout>>()
 // background toggles (the canvas addon bakes in transparency at load time
 // and won't honor a later theme-background alpha change reliably).
 const canvasAddons = new Map<number, CanvasAddon>()
+// Cumulative bytes this pane's terminal has RECEIVED (renderer side). Bumped
+// once per output batch — cheap. Lets diagnostics tell "no output ever arrived"
+// apart from "output arrived but never painted" (the two blank-pane causes).
+const paneReceivedBytes = new Map<number, number>()
+// --- Claude busy detection -----------------------------------------------
+// Claude animates a spinner with a live elapsed timer while it works, so a
+// working pane writes to its PTY several times a second; a pane parked at the
+// input box writes nothing at all (the cursor blink is drawn client-side).
+// That makes PTY output the one busy signal that doesn't depend on scraping
+// Claude's UI — the affordance strings change between versions, so matching
+// them would rot. Two refinements keep it honest:
+//   - a lone repaint burst isn't work, so output must run for OUTPUT_STREAK_MS
+//     before it counts as busy;
+//   - the echo of your own typing is output too, so a keystroke resets the streak.
+const lastOutputAt = new Map<number, number>()
+const outputStreakFrom = new Map<number, number>()
+const OUTPUT_QUIET_MS = 3000 // silent this long → the turn is over
+const OUTPUT_STREAK_MS = 800 // output running this long → genuinely working
+const OUTPUT_GAP_MS = 1500 // a gap this big starts a new streak
+
+function noteOutput(paneId: number) {
+  const now = Date.now()
+  const prev = lastOutputAt.get(paneId) ?? 0
+  if (now - prev > OUTPUT_GAP_MS) outputStreakFrom.set(paneId, now)
+  lastOutputAt.set(paneId, now)
+}
+
+function noteInput(paneId: number) {
+  outputStreakFrom.set(paneId, Date.now())
+}
+
+function isClaudeBusy(paneId: number): boolean {
+  const last = lastOutputAt.get(paneId) ?? 0
+  if (Date.now() - last > OUTPUT_QUIET_MS) return false
+  return last - (outputStreakFrom.get(paneId) ?? last) >= OUTPUT_STREAK_MS
+}
+
+// The three Claude states, in precedence order: a blocking prompt beats
+// everything, then live output, then "parked at the prompt, your move".
+function classifyClaudeState(paneId: number, terminal: Terminal | null): PaneState {
+  if (terminal && scanForClaudePrompt(terminal)) return 'claude-waiting'
+  return isClaudeBusy(paneId) ? 'claude-active' : 'claude-idle'
+}
+// Panes the periodic health sweep has already flagged as blank, so each is
+// reported once (not every tick) until it recovers.
+const healthAnomalyReported = new Set<number>()
+// Panes seen without a live terminal on the PREVIOUS sweep — used to require two
+// consecutive sightings before flagging, so the brief window at creation (pane
+// in the store, terminal not yet built) doesn't false-positive.
+const missingTerminalSeen = new Set<number>()
 
 // xterm theme with a fully-transparent background lets the wallpaper show
 // through. Used both at terminal creation and on background toggle.
@@ -150,15 +207,14 @@ function schedulePendingFlush(paneId: number, terminal: Terminal) {
   })
 }
 
-// Re-evaluate active vs waiting from the buffer, transitioning state and
+// Re-evaluate active/idle/waiting from the buffer, transitioning state and
 // chiming once when a pane newly enters the waiting state.
-function refreshClaudeWaitingState(paneId: number, terminal: Terminal | null) {
+function refreshClaudeRunState(paneId: number, terminal: Terminal | null) {
   const store = useWorkspaceStore.getState()
   const current = store.panes.find((p) => p.id === paneId)?.state
   // Only meaningful while Claude is believed to be running
-  if (current !== 'claude-active' && current !== 'claude-waiting') return
-  const waiting = terminal ? scanForClaudePrompt(terminal) : false
-  const next = waiting ? 'claude-waiting' : 'claude-active'
+  if (current !== 'claude-active' && current !== 'claude-idle' && current !== 'claude-waiting') return
+  const next = classifyClaudeState(paneId, terminal)
   if (current !== next) {
     store.setPaneState(paneId, next)
     if (next === 'claude-waiting') playDecisionChime()
@@ -228,11 +284,135 @@ const DARK_THEME = {
 }
 
 
+// Cheap render-state snapshot of one pane, for diagnostics. Reads only already-
+// computed xterm buffer fields + a couple of DOM measurements — no layout thrash
+// in steady state (called on-demand or on a slow interval).
+function snapshotPane(paneId: number, terminal: Terminal) {
+  const el = terminal.element as HTMLElement | null
+  const rect = el?.getBoundingClientRect()
+  const canvases = el ? Array.from(el.querySelectorAll('canvas')) : []
+  const canvasPainted = canvases.some((c) => c.width > 0 && c.height > 0)
+  const buf = terminal.buffer.active
+  return {
+    paneId,
+    pos: useWorkspaceStore.getState().panes.findIndex((p) => p.id === paneId),
+    cols: terminal.cols,
+    rows: terminal.rows,
+    bufferLines: buf.length,
+    baseY: buf.baseY,
+    viewportY: buf.viewportY,
+    cursorY: buf.cursorY,
+    atBottom: buf.baseY + terminal.rows >= buf.length - 1,
+    userScrolledUp: userScrolledUp.get(paneId) ?? false,
+    hasCanvasAddon: canvasAddons.has(paneId),
+    canvasCount: canvases.length,
+    canvasPainted,
+    elW: rect ? Math.round(rect.width) : -1,
+    elH: rect ? Math.round(rect.height) : -1,
+    connected: !!el?.isConnected,
+    receivedBytes: paneReceivedBytes.get(paneId) ?? 0,
+  }
+}
+
+// On-demand: dump every live pane's render state to app.log (hotkey
+// Cmd+Shift+D). Fire it the instant a pane looks blank — the snapshot
+// distinguishes the causes: bufferLines<=1 → no output reached the terminal;
+// non-empty + !atBottom → content scrolled out of view; non-empty + atBottom +
+// canvas not painted → the canvas renderer failed to paint.
+export function dumpPaneDiagnostics() {
+  terminals.forEach((entry, paneId) => {
+    // Per-pane guard: a disposed/broken terminal in the map (accessing its
+    // buffer throws) must not abort the whole dump — otherwise a single bad
+    // pane produces NO output at all, which is exactly what happened before.
+    try {
+      paneLog('info', 'pane-diag-dump', snapshotPane(paneId, entry.terminal))
+    } catch (e) {
+      paneLog('warn', 'pane-diag-dump-failed', { paneId, error: String(e) })
+    }
+  })
+}
+
+// Always-on but anomaly-gated: called on a slow interval. Logs ONLY panes that
+// look wrong, each once until it recovers, so a healthy app produces zero output
+// and there's no steady-state cost. Two signatures:
+//  - pane-no-terminal: a pane exists in the store but has NO live terminal in the
+//    module map. This is the close+reopen bug — the pane is bound to a terminal
+//    that was disposed (or never created), so nothing renders and you can't type.
+//    Requires two consecutive sweeps to skip the brief init window.
+//  - pane-render-anomaly: a pane HAS a terminal, real size, and buffered content,
+//    but its canvas renderer isn't painting.
+export function checkPaneHealth() {
+  const panes = useWorkspaceStore.getState().panes
+  const liveIds = new Set(terminals.keys())
+  const activeIds = new Set(panes.map((p) => p.id))
+
+  panes.forEach((p, pos) => {
+    if (!liveIds.has(p.id)) {
+      // No terminal object for this store pane.
+      if (missingTerminalSeen.has(p.id)) {
+        if (!healthAnomalyReported.has(p.id)) {
+          healthAnomalyReported.add(p.id)
+          paneLog('warn', 'pane-no-terminal', {
+            paneId: p.id,
+            pos,
+            cwd: p.workingDirectory,
+            liveTerminals: [...liveIds],
+          })
+        }
+      } else {
+        missingTerminalSeen.add(p.id)
+      }
+      return
+    }
+    missingTerminalSeen.delete(p.id)
+
+    const entry = terminals.get(p.id)!
+    // Guard the snapshot: a broken terminal in the map must not throw out of the
+    // whole sweep (which would stop every later pane from being checked).
+    let s: ReturnType<typeof snapshotPane>
+    try {
+      s = snapshotPane(p.id, entry.terminal)
+    } catch (e) {
+      if (!healthAnomalyReported.has(p.id)) {
+        healthAnomalyReported.add(p.id)
+        paneLog('warn', 'pane-snapshot-failed', { paneId: p.id, pos, error: String(e) })
+      }
+      return
+    }
+    const canvasBroken = s.hasCanvasAddon && (s.canvasCount === 0 || !s.canvasPainted)
+    const blank = s.connected && s.elW > 0 && s.elH > 0 && s.bufferLines > 1 && canvasBroken
+    if (blank) {
+      if (!healthAnomalyReported.has(p.id)) {
+        healthAnomalyReported.add(p.id)
+        paneLog('warn', 'pane-render-anomaly', s)
+      }
+    } else {
+      healthAnomalyReported.delete(p.id)
+    }
+  })
+
+  // Drop bookkeeping for panes that no longer exist (closed for real).
+  missingTerminalSeen.forEach((id) => { if (!activeIds.has(id)) missingTerminalSeen.delete(id) })
+  healthAnomalyReported.forEach((id) => { if (!activeIds.has(id)) healthAnomalyReported.delete(id) })
+}
+
 // Exported functions to control terminals from outside
 export function clearTerminal(paneId: number) {
   const entry = terminals.get(paneId)
   if (entry) {
     entry.terminal.clear()
+  }
+}
+
+// Full terminal reset — clears the buffer AND resets terminal modes. A TUI that crashes
+// or is force-stopped can leave mouse tracking (ESC[?1006h) or the alt-screen enabled; the
+// shell then echoes raw mouse sequences (^[[<35;…M) on every cursor move and looks frozen.
+// terminal.clear() does NOT undo those modes, but reset() does — so the recovery paths
+// (Stop, agent re-spawn) use this to guarantee a clean terminal.
+export function resetTerminal(paneId: number) {
+  const entry = terminals.get(paneId)
+  if (entry) {
+    entry.terminal.reset()
   }
 }
 
@@ -248,9 +428,30 @@ export function sendToTerminal(paneId: number, text: string) {
 // pane was spawned with. null = a plain shell (no injected env). Used to decide
 // when an agent launch must re-spawn the PTY to inject/clear env.
 const paneEnvProfile = new Map<number, string | null>()
+// Transient: the Claude account id the current PTY for each pane was spawned with
+// (null = the global /login account). Changing it must re-spawn so the new account's
+// token is injected. Tracked separately from the agent profile since they're orthogonal.
+const paneAccount = new Map<number, string | null>()
 // Panes with a launch in flight — guards against double-click / double-fire
 // sending the agent command twice (the env re-spawn path is async).
 const launchingPanes = new Set<number>()
+
+// Re-fit a pane's xterm to its container and push the resulting cols/rows to its PTY.
+// A freshly (re)spawned PTY starts at the default 80x24, so an agent launched right after
+// a respawn renders into a cramped window until the next manual resize (e.g. switching a
+// pane to Qwen/aider and back to Claude Code). The container size hasn't changed, so we
+// just re-measure it and resize the new PTY to match — which also delivers SIGWINCH so the
+// agent re-renders at full size.
+function refitPane(paneId: number): void {
+  const entry = terminals.get(paneId)
+  if (!entry || !entry.terminal.element) return
+  try {
+    entry.fitAddon.fit()
+    window.electronAPI.resizeTerminal(paneId, entry.terminal.cols, entry.terminal.rows)
+  } catch {
+    /* ignore fit errors during transitions */
+  }
+}
 
 // Resolve which agent profile a pane should run: per-pane assignment, then the
 // global default, then the Claude builtin. The id-based fallthrough also makes
@@ -284,16 +485,26 @@ export async function launchAgent(
   setTimeout(() => launchingPanes.delete(paneId), 600)
   const hasEnv = !!profile.env && Object.keys(profile.env).length > 0
   const currentEnvProfile = paneEnvProfile.get(paneId) ?? null
-  // Re-spawn when a directory is forced, this profile needs env, OR the pane's
-  // PTY still carries env from a DIFFERENT profile (don't leak prior secrets).
+  // The pane's bound Claude account (if any). Passed to main as a non-secret env HINT;
+  // main decrypts the matching token and injects CLAUDE_CODE_OAUTH_TOKEN (the token never
+  // reaches the renderer). A different account than the PTY was spawned with forces a
+  // re-spawn so the right token takes effect.
+  const accountId = useWorkspaceStore.getState().panes.find((p) => p.id === paneId)?.claudeAccountId ?? null
+  const accountChanged = (paneAccount.get(paneId) ?? null) !== accountId
+  // Re-spawn when a directory is forced, the account changed, this profile needs env, OR
+  // the pane's PTY still carries env from a DIFFERENT profile (don't leak prior secrets).
   const needsRespawn =
-    !!forceCwd || (hasEnv ? currentEnvProfile !== profile.id : currentEnvProfile !== null)
+    !!forceCwd || accountChanged || (hasEnv ? currentEnvProfile !== profile.id : currentEnvProfile !== null)
   if (needsRespawn) {
     // Use the forced dir, else the live tracked cwd (user may have cd'd).
     const cwd = forceCwd || (await window.electronAPI.getCwd(paneId)) || fallbackCwd
-    clearTerminal(paneId)
-    await window.electronAPI.createPty(paneId, cwd, hasEnv ? profile.env : undefined)
+    const spawnEnv: Record<string, string> | undefined =
+      accountId ? { ...(hasEnv ? profile.env : {}), QC_ACCOUNT_ID: accountId } : (hasEnv ? profile.env : undefined)
+    resetTerminal(paneId) // fresh PTY → fully reset the terminal (clears any stuck modes)
+    await window.electronAPI.createPty(paneId, cwd, spawnEnv)
     paneEnvProfile.set(paneId, hasEnv ? profile.id : null)
+    paneAccount.set(paneId, accountId)
+    refitPane(paneId) // size the new PTY to the full pane before the agent starts
   }
   let command = profile.command
   if (profile.builtin === 'claude') {
@@ -308,9 +519,10 @@ export async function launchAgent(
 // the PTY sends SIGHUP to the shell's process group, killing the stuck child too.
 export async function restartShell(paneId: number, fallbackCwd: string) {
   const cwd = (await window.electronAPI.getCwd(paneId)) || fallbackCwd
-  clearTerminal(paneId)
+  resetTerminal(paneId) // full reset clears stuck modes (mouse tracking / alt-screen) left by a crashed TUI
   paneEnvProfile.set(paneId, null)
   await window.electronAPI.createPty(paneId, cwd)
+  refitPane(paneId) // size the fresh PTY to the full pane (avoids a cramped window)
   useWorkspaceStore.getState().setPaneState(paneId, 'shell')
 }
 
@@ -346,6 +558,7 @@ export function getTerminalStats() {
 function disposeTerminal(paneId: number) {
   const entry = terminals.get(paneId)
   if (entry) {
+    paneLog('info', 'terminal-disposed', { paneId })
     // Remove focus listener if exists
     const focusListener = focusListeners.get(paneId)
     if (focusListener && entry.terminal.textarea) {
@@ -357,6 +570,8 @@ function disposeTerminal(paneId: number) {
     pendingOutput.delete(paneId)
     pendingBytes.delete(paneId)
     droppedBytes.delete(paneId)
+    lastOutputAt.delete(paneId)
+    outputStreakFrom.delete(paneId)
     const handles = pendingFlush.get(paneId)
     if (handles) {
       if (handles.raf !== null) cancelAnimationFrame(handles.raf)
@@ -367,10 +582,46 @@ function disposeTerminal(paneId: number) {
     if (scanTimer) clearTimeout(scanTimer)
     promptScanTimers.delete(paneId)
     paneEnvProfile.delete(paneId)
-    canvasAddons.delete(paneId) // addon is disposed with terminal.dispose()
+    paneReceivedBytes.delete(paneId)
+    healthAnomalyReported.delete(paneId)
 
-    // Dispose the terminal (releases xterm.js resources, DOM elements, event listeners)
-    entry.terminal.dispose()
+    // Dispose the beta CanvasAddon EXPLICITLY and FIRST, while the terminal's
+    // core services still exist. Its LinkRenderLayer subscribes to the core
+    // linkifier's onShowLinkUnderline; if the addon is torn down by
+    // terminal.dispose() AFTER the core is gone, that access hits `undefined`
+    // and throws (confirmed: it threw on every close, "Cannot read properties
+    // of undefined (reading 'onShowLinkUnderline')"). Disposing it here, in
+    // order, both prevents the throw and releases the heavy GPU/canvas layers
+    // (the real leak). Guarded regardless.
+    const canvasAddon = canvasAddons.get(paneId)
+    if (canvasAddon) {
+      try {
+        canvasAddon.dispose()
+      } catch (e) {
+        paneLog('warn', 'canvas-dispose-threw', { paneId, error: String(e) })
+      }
+    }
+    canvasAddons.delete(paneId)
+    // The hover label lives inside terminal.element, so it would go with the
+    // terminal anyway — dropped explicitly to clear the map entry and any
+    // in-flight "Copied" timer.
+    disposeLinkTip(paneId)
+    // Cancel the blank-pane watchdog so a deliberately-closed pane never logs a
+    // false "blank-detected".
+    clearBlankWatchdog(paneId)
+    ptyCreateResult.delete(paneId)
+    fitAttempts.delete(paneId)
+
+    // Dispose the terminal (releases remaining xterm.js resources, DOM, event
+    // listeners). Still guarded belt-and-suspenders: if anything here throws,
+    // the map cleanup below MUST run anyway — otherwise a reused pane id would
+    // reattach to this disposed terminal (dead PTY) → a blank, unscrollable
+    // pane. terminals.delete guarantees a reused id always builds fresh.
+    try {
+      entry.terminal.dispose()
+    } catch (e) {
+      paneLog('warn', 'terminal-dispose-threw', { paneId, error: String(e) })
+    }
     terminals.delete(paneId)
     initializedPtys.delete(paneId)
   }
@@ -401,74 +652,87 @@ function isTerminalAtBottom(terminal: Terminal): boolean {
   return buffer.baseY + terminal.rows >= buffer.length - 1
 }
 
-// Git Status Bar component - always visible
-const GitStatusBar = memo(function GitStatusBar({ paneId }: { paneId: number }) {
-  const [showTooltip, setShowTooltip] = useState(false)
-  const pane = useWorkspaceStore((state) => state.panes.find((p) => p.id === paneId))
-  const gitStatus = pane?.gitStatus
+// Load the GPU Canvas renderer for a pane, exactly once (idempotent). Must be
+// called AFTER terminal.open() and while the theme background is already
+// transparent — the canvas addon bakes transparency in at load time. Returns
+// true only if it actually loaded the addon on this call (for diagnostics).
+//
+// Deferred until the container has real dimensions: the beta canvas addon
+// renders a PERMANENTLY blank pane if it bakes at 0×0, which is exactly what
+// happens to a pane added into a re-flowing grid (2×2 → 3×2) whose cell is
+// still 0×0 for the first frames. The shell and buffer are fine underneath;
+// nothing ever paints, and only close+reopen recovers it.
+function ensureCanvasAddon(paneId: number, terminal: Terminal): boolean {
+  if (canvasAddons.has(paneId)) return false
+  try {
+    const canvasAddon = new CanvasAddon()
+    terminal.loadAddon(canvasAddon)
+    canvasAddons.set(paneId, canvasAddon)
+    return true
+  } catch (e) {
+    // Canvas context unavailable — xterm falls back to the DOM renderer.
+    return false
+  }
+}
 
-  return (
-    <div className="flex items-center justify-end px-3 h-7 glass-header font-mono text-xs shrink-0 border-t border-white/[0.04] overflow-hidden min-w-0">
-      {/* Right side - branch and changes */}
-      <div
-        className="relative flex items-center gap-2 min-w-0 shrink-0"
-        onMouseEnter={() => gitStatus?.isGitRepo && setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-      >
-        {gitStatus?.isGitRepo ? (
-          <>
-            <span className="flex items-center gap-1.5">
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" className="text-[--git-green]">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-              </svg>
-              <span className="text-[--git-green]">{gitStatus.branch}</span>
-            </span>
-            {(gitStatus.ahead ?? 0) > 0 && (
-              <span className="text-[--git-cyan] flex items-center gap-0.5">
-                <span className="text-[10px]">↑</span>
-                <span>{gitStatus.ahead}</span>
-              </span>
-            )}
-            {(gitStatus.behind ?? 0) > 0 && (
-              <span className="text-[--git-yellow] flex items-center gap-0.5">
-                <span className="text-[10px]">↓</span>
-                <span>{gitStatus.behind}</span>
-              </span>
-            )}
-            {(gitStatus.dirty ?? 0) > 0 && (
-              <span className="text-[--git-orange] flex items-center gap-0.5">
-                <span className="text-[10px]">●</span>
-                <span>{gitStatus.dirty}</span>
-              </span>
-            )}
-            {/* Tooltip - positioned above */}
-            {showTooltip && (
-              <div className="absolute bottom-full right-0 mb-2 px-3 py-2 bg-[--ui-bg-elevated] border border-[--ui-border] rounded-lg shadow-xl text-xs whitespace-nowrap z-50">
-                <div className="text-[--ui-text-primary] mb-1.5">
-                  <span className="text-[--git-green]">{gitStatus.branch}</span> branch
-                </div>
-                {(gitStatus.ahead ?? 0) > 0 && (
-                  <div className="text-[--git-cyan] py-0.5">↑ {gitStatus.ahead} commit{gitStatus.ahead !== 1 ? 's' : ''} ahead</div>
-                )}
-                {(gitStatus.behind ?? 0) > 0 && (
-                  <div className="text-[--git-yellow] py-0.5">↓ {gitStatus.behind} commit{gitStatus.behind !== 1 ? 's' : ''} behind</div>
-                )}
-                {(gitStatus.dirty ?? 0) > 0 && (
-                  <div className="text-[--git-orange] py-0.5">● {gitStatus.dirty} uncommitted</div>
-                )}
-                {(gitStatus.ahead ?? 0) === 0 && (gitStatus.behind ?? 0) === 0 && (gitStatus.dirty ?? 0) === 0 && (
-                  <div className="text-[--ui-text-muted] py-0.5">Clean working tree</div>
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <span className="text-[--ui-text-faint]">—</span>
-        )}
-      </div>
-    </div>
+// Fit a freshly-opened terminal once its container actually has dimensions.
+// A new pane mounts INTO the `pane-transition` CSS animation, so its container
+// can report offsetWidth === 0 for the first few frames. The old one-shot RAF
+// fit simply gave up in that window and relied entirely on the ResizeObserver —
+// which intermittently left the pane blank (terminal opened at 0×0 onto the
+// canvas renderer, never repainted, PTY never told its real size). This polls a
+// bounded number of frames until the container is sized, then fits ONCE, syncs
+// the PTY dimensions, scrolls to bottom, and forces a repaint of the buffer.
+function fitWhenSized(
+  paneId: number,
+  terminal: Terminal,
+  fitAddon: FitAddon,
+  getContainer: () => HTMLElement | null,
+  framesLeft = 180 // ~3s at 60fps — well past any layout transition
+): void {
+  fitAttempts.set(paneId, (fitAttempts.get(paneId) ?? 0) + 1)
+  const el = getContainer()
+  if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+    try {
+      fitAddon.fit()
+      // Load the canvas renderer AFTER the fit so it bakes at the pane's real
+      // size. When the canvas was deferred at creation (cell was 0×0), this is
+      // where it finally loads — baking here instead of at 0×0 is what prevents
+      // the permanently-blank added pane. No-op if it already loaded.
+      const canvasDeferredLoaded = ensureCanvasAddon(paneId, terminal)
+      const { cols, rows } = terminal
+      window.electronAPI.resizeTerminal(paneId, cols, rows)
+      terminal.scrollToBottom()
+      // Force the renderer to paint whatever the PTY already emitted while the
+      // pane was 0-sized; without this the pane can stay blank.
+      terminal.refresh(0, terminal.rows - 1)
+      paneLog('info', 'fit-ok', {
+        paneId,
+        cols,
+        rows,
+        attempts: fitAttempts.get(paneId),
+        canvasDeferredLoaded,
+      })
+    } catch (e) {
+      paneLog('warn', 'fit-error', { paneId, error: String(e) })
+    }
+    return
+  }
+  if (framesLeft <= 0) {
+    // Container never got real dimensions within the budget — a strong signal
+    // for a stuck/blank pane.
+    paneLog('warn', 'fit-retry-exhausted', {
+      paneId,
+      attempts: fitAttempts.get(paneId),
+      containerW: el?.offsetWidth ?? -1,
+      containerH: el?.offsetHeight ?? -1,
+    })
+    return
+  }
+  requestAnimationFrame(() =>
+    fitWhenSized(paneId, terminal, fitAddon, getContainer, framesLeft - 1)
   )
-})
+}
 
 // Helper to safely fit terminal while preserving scroll position
 function safeFit(terminal: Terminal, fitAddon: FitAddon): void {
@@ -510,11 +774,23 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   // Initialize terminal
   useEffect(() => {
-    if (!terminalRef.current || !pane) return
+    if (!terminalRef.current || !pane) {
+      // The effect bailed before creating anything. It re-runs when `pane`
+      // becomes defined (see deps below), so this is usually transient — but
+      // log it so a pane that stays blank because the retry never happened is
+      // traceable.
+      paneLog('warn', 'init-bail', {
+        paneId,
+        hasContainer: !!terminalRef.current,
+        hasPane: !!pane,
+      })
+      return
+    }
 
     // Check if we already have a terminal for this pane (persisted across remounts)
     const existing = terminals.get(paneId)
     if (existing) {
+      paneLog('info', 'terminal-reattached', { paneId })
       // Reattach existing terminal to new DOM element
       xtermRef.current = existing.terminal
       fitAddonRef.current = existing.fitAddon
@@ -559,10 +835,77 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       })
 
       const fitAddon = new FitAddon()
-      const webLinksAddon = new WebLinksAddon()
+      // Open a clicked link in the user's DEFAULT browser as a normal tab in their active
+      // session (via the main process → shell.openExternal). The default WebLinksAddon
+      // calls window.open(), which Electron turns into a chromeless popup window — not what
+      // anyone wants for a localhost preview.
+      //
+      // Hover shows the target first (see linkTooltip) so a link can be read before it's
+      // followed, and ⌥-click copies it instead of opening it.
+      const webLinksAddon = new WebLinksAddon(
+        (event, uri) => {
+          if (event.altKey) {
+            copyLinkTarget(paneId, uri)
+            return
+          }
+          void window.electronAPI.openExternal(uri)
+        },
+        {
+          hover: (event, uri) =>
+            showLinkTip(paneId, terminal.element ?? undefined, event, uri, 'Click to open · ⌥ click to copy'),
+          leave: () => hideLinkTip(paneId),
+        },
+      )
 
       terminal.loadAddon(fitAddon)
       terminal.loadAddon(webLinksAddon)
+
+      // Make markdown file paths in the output clickable — clicking opens the file in
+      // TextEdit. The main process resolves the matched text against this pane's live cwd
+      // and refuses anything that isn't an existing .md file, so over-matching here is safe.
+      // Match a run of path-like characters that ends in .md / .markdown.
+      const MD_PATH_RE = /[^\s'"`()[\]<>|]+\.(?:md|markdown)\b/gi
+      terminal.registerLinkProvider({
+        provideLinks(bufferLineNumber, callback) {
+          const line = terminal.buffer.active.getLine(bufferLineNumber - 1)
+          if (!line) {
+            callback(undefined)
+            return
+          }
+          const text = line.translateToString(false)
+          const links: ILink[] = []
+          let match: RegExpExecArray | null
+          MD_PATH_RE.lastIndex = 0
+          while ((match = MD_PATH_RE.exec(text)) !== null) {
+            const matched = match[0]
+            const startX = match.index + 1 // xterm ranges are 1-based, inclusive
+            links.push({
+              text: matched,
+              range: {
+                start: { x: startX, y: bufferLineNumber },
+                end: { x: startX + matched.length - 1, y: bufferLineNumber },
+              },
+              activate: (event) => {
+                if (event.altKey) {
+                  copyLinkTarget(paneId, matched)
+                  return
+                }
+                void window.electronAPI.openInEditor(paneId, matched)
+              },
+              hover: (event) =>
+                showLinkTip(
+                  paneId,
+                  terminal.element ?? undefined,
+                  event,
+                  matched,
+                  'Click to open in editor · ⌥ click to copy',
+                ),
+              leave: () => hideLinkTip(paneId),
+            })
+          }
+          callback(links.length ? links : undefined)
+        },
+      })
 
       terminal.open(terminalRef.current)
 
@@ -572,13 +915,22 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // addon bakes transparency in at load time. Canvas honors
       // allowTransparency (WebGL does not), so the wallpaper shows through
       // while still getting the GPU CPU win under heavy log output.
-      try {
-        const canvasAddon = new CanvasAddon()
-        terminal.loadAddon(canvasAddon)
-        canvasAddons.set(paneId, canvasAddon)
-      } catch (e) {
-        // If the canvas context can't be created, xterm falls back to DOM
+      //
+      // BUT only bake it now if the cell already has real dimensions. A pane
+      // added into a re-flowing grid is 0×0 for the first frames, and a canvas
+      // baked at 0×0 paints a permanently-blank pane. When 0-sized, defer the
+      // load to fitWhenSized (below), which fires once the cell is sized.
+      const containerSized =
+        terminalRef.current.offsetWidth > 0 && terminalRef.current.offsetHeight > 0
+      if (containerSized) {
+        ensureCanvasAddon(paneId, terminal)
       }
+      paneLog('info', 'canvas-init', {
+        paneId,
+        deferred: !containerSized,
+        w: terminalRef.current.offsetWidth,
+        h: terminalRef.current.offsetHeight,
+      })
 
       xtermRef.current = terminal
       fitAddonRef.current = fitAddon
@@ -586,17 +938,27 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       // Store in module-level map
       terminals.set(paneId, { terminal, fitAddon })
 
-      // Delay fit to ensure container has dimensions
-      requestAnimationFrame(() => {
-        if (terminalRef.current && terminalRef.current.offsetWidth > 0) {
-          try {
-            fitAddon.fit()
-            terminal.scrollToBottom()
-          } catch (e) {
-            // Ignore fit errors
-          }
-        }
-      })
+      fitAttempts.set(paneId, 0)
+      ptyCreateResult.set(paneId, false)
+      paneLog('info', 'terminal-created', { paneId, cwd: pane.workingDirectory })
+
+      // Arm the blank-pane watchdog: if no PTY output ever arrives, log an ERROR
+      // with a full snapshot of why (container unsized, PTY never spawned, etc.).
+      armBlankWatchdog(paneId, () => ({
+        containerW: terminalRef.current?.offsetWidth ?? -1,
+        containerH: terminalRef.current?.offsetHeight ?? -1,
+        cols: xtermRef.current?.cols ?? -1,
+        rows: xtermRef.current?.rows ?? -1,
+        ptyCreateOk: ptyCreateResult.get(paneId) ?? null,
+        fitAttempts: fitAttempts.get(paneId) ?? 0,
+        attached: !!xtermRef.current?.element?.isConnected,
+      }))
+
+      // Fit once the container is actually sized (it can be 0×0 for the first
+      // frames while the new pane animates in via `pane-transition`). Retries
+      // until sized, then fits + syncs PTY size + repaints, so the pane never
+      // gets stuck blank when it happens to open at 0×0.
+      fitWhenSized(paneId, terminal, fitAddon, () => terminalRef.current)
 
       // Create PTY for this pane (only once globally)
       const initPty = async () => {
@@ -607,6 +969,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           paneId,
           pane.workingDirectory
         )
+        ptyCreateResult.set(paneId, success)
+        if (!success) {
+          paneLog('error', 'pty-create-failed', { paneId, cwd: pane.workingDirectory })
+        }
         if (success && xtermRef.current) {
           const { cols, rows } = xtermRef.current
           window.electronAPI.resizeTerminal(paneId, cols, rows)
@@ -616,6 +982,7 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
       // Handle input
       terminal.onData((data) => {
+        noteInput(paneId)
         window.electronAPI.sendInput(paneId, data)
       })
 
@@ -671,13 +1038,19 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         // Only Cmd on Mac to avoid conflict with Ctrl+1-4 terminal focus
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
         if (isMac && e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', 'p'].includes(key)) {
+          if (['1', '2', '3', '4', '5', 'p', 'b'].includes(key)) {
             return false
           }
         } else if (!isMac && e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-          if (['1', '2', '3', 'p'].includes(key)) {
+          if (['1', '2', '3', '4', '5', 'p', 'b'].includes(key)) {
             return false
           }
+        }
+
+        // Ctrl+Tab cycles the next pane into view (app-menu accelerator owns
+        // the action) — make sure xterm never feeds it to the shell as a tab.
+        if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === 'tab') {
+          return false
         }
 
         // Let xterm handle all other keys
@@ -708,7 +1081,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       resizeObserver.disconnect()
       // Don't dispose terminal or kill PTY - they persist in module-level storage
     }
-  }, [paneId]) // Remove pane.workingDirectory from deps to prevent re-init
+    // Deps are [paneId, paneExists] only. paneId is the identity; paneExists
+    // (!!pane) makes the effect RE-RUN when the pane appears in the store after
+    // an initial render where it was still undefined. Without it, a new pane's
+    // first render (where the store selector transiently returns undefined →
+    // the component renders null, so terminalRef.current is null) makes the
+    // guard below bail, and because paneId never changes the effect never runs
+    // again → a permanently blank pane with no terminal/PTY. Re-running is safe:
+    // the terminals.get(paneId) and initializedPtys guards make creation
+    // idempotent. We deliberately do NOT depend on pane.workingDirectory/state
+    // (those change often) to avoid re-initializing the terminal on every update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneId, !!pane])
 
   // Update font size when preference changes - preserve scroll position
   // Debounced to handle rapid Cmd+/- presses and notify PTY of new dimensions
@@ -785,7 +1169,6 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
         try {
           fitAddon.fit()
-          if (terminalRef.current) closeRowGap(terminalRef.current)
         } catch (e) {
           // Ignore fit errors
         }
@@ -813,7 +1196,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   useEffect(() => {
     const unsubscribe = window.electronAPI.onTerminalOutput(
       (outputPaneId, data) => {
-        if (outputPaneId === paneId && xtermRef.current) {
+        if (outputPaneId !== paneId) return
+        if (!xtermRef.current) {
+          // Output arrived but there's no terminal to write it to — it is
+          // dropped. This is one way a pane ends up blank; record it.
+          paneLog('warn', 'output-before-terminal', { paneId, bytes: data.length })
+          return
+        }
+        {
+          // Healthy output → cancel the blank-pane watchdog (logs first-byte latency).
+          notePaneOutput(paneId)
+          noteOutput(paneId)
+          paneReceivedBytes.set(paneId, (paneReceivedBytes.get(paneId) ?? 0) + data.length)
           const terminal = xtermRef.current
 
           // Accumulate, then schedule one drain per pane (RAF + setTimeout
@@ -847,14 +1241,18 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           const st = useWorkspaceStore
             .getState()
             .panes.find((p) => p.id === paneId)?.state
-          if (st === 'claude-active' || st === 'claude-waiting') {
+          if (st === 'claude-idle' && isClaudeBusy(paneId)) {
+            // Claude picked the turn back up — don't make the 3s poll find it.
+            useWorkspaceStore.getState().setPaneState(paneId, 'claude-active')
+          }
+          if (st === 'claude-active' || st === 'claude-idle' || st === 'claude-waiting') {
             const existingTimer = promptScanTimers.get(paneId)
             if (existingTimer) clearTimeout(existingTimer)
             promptScanTimers.set(
               paneId,
               setTimeout(() => {
                 promptScanTimers.delete(paneId)
-                refreshClaudeWaitingState(paneId, xtermRef.current)
+                refreshClaudeRunState(paneId, xtermRef.current)
               }, 400)
             )
           }
@@ -890,10 +1288,25 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           const paneConfig = store.panes.find((p) => p.id === paneId)
           initializedPtys.add(paneId)
           paneEnvProfile.set(paneId, null)
-          await window.electronAPI.createPty(
+          // Re-arm the blank-pane watchdog: the respawned shell must also print a
+          // prompt — if it never does, the pane goes blank and we want that logged.
+          armBlankWatchdog(paneId, () => ({
+            containerW: terminalRef.current?.offsetWidth ?? -1,
+            containerH: terminalRef.current?.offsetHeight ?? -1,
+            cols: xtermRef.current?.cols ?? -1,
+            rows: xtermRef.current?.rows ?? -1,
+            ptyCreateOk: ptyCreateResult.get(paneId) ?? null,
+            fitAttempts: fitAttempts.get(paneId) ?? 0,
+            attached: !!xtermRef.current?.element?.isConnected,
+          }))
+          const respawnOk = await window.electronAPI.createPty(
             paneId,
             paneConfig?.workingDirectory
           )
+          ptyCreateResult.set(paneId, respawnOk)
+          if (!respawnOk) {
+            paneLog('error', 'pty-respawn-failed', { paneId, cwd: paneConfig?.workingDirectory })
+          }
 
           // Clear and resize terminal - scroll to bottom since we cleared
           if (xtermRef.current && fitAddonRef.current && terminalRef.current) {
@@ -936,9 +1349,9 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
         return
       }
 
-      // Claude is running: classify active vs waiting from the buffer.
-      const waiting = xtermRef.current ? scanForClaudePrompt(xtermRef.current) : false
-      const next = waiting ? 'claude-waiting' : 'claude-active'
+      // Claude is running: classify active vs idle vs waiting. This poll is what
+      // catches the end of a turn — output stops, nothing else fires.
+      const next = classifyClaudeState(paneId, xtermRef.current)
       if (currentState !== next) {
         store.setPaneState(paneId, next)
         // Chime on any transition into waiting (poll covers cases the
@@ -1044,8 +1457,20 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
     if (draggedPaneId) {
       const sourcePaneId = parseInt(draggedPaneId, 10)
       if (sourcePaneId !== paneId) {
+        const store = useWorkspaceStore.getState()
+        const wasHidden =
+          store.panes.findIndex((p) => p.id === sourcePaneId) >=
+          visiblePaneCount(store.layout, store.panes.length)
         // Swap pane positions - this visually swaps them since grid uses array position
         swapPanes(sourcePaneId, paneId)
+        // Dragging a PiP tile onto a visible pane promotes it — make it active
+        // and focused, matching click-promote in the strip.
+        if (wasHidden) {
+          setActivePaneId(sourcePaneId)
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => focusTerminal(sourcePaneId))
+          })
+        }
       }
       return
     }
@@ -1117,9 +1542,10 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
   const waiting = pane.state === 'claude-waiting'
   const ringShadows: string[] = []
   if (paired) ringShadows.push(`inset 0 0 0 2px ${pane.pairColor}`)
-  if (isActive && !waiting) {
-    ringShadows.push('inset 0 0 0 1.5px rgba(255, 255, 255, 0.7), inset 0 0 12px 1px rgba(255, 255, 255, 0.22)')
-  }
+  // The active pane's own marker moved OUT to .pane-surface.is-active, which
+  // can now cast a real ring + lift instead of painting a white glow on the
+  // inside of the glass. This layer is left to the pair colour and the waiting
+  // pulse, which genuinely belong inside the pane's edge.
   const showRingOverlay = waiting || ringShadows.length > 0
 
   // Background image for this pane (per-pane mode allows different images per pane)
@@ -1131,7 +1557,11 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
 
   return (
     <div
-      className={`group h-full min-h-0 flex flex-col overflow-hidden rounded transition-all relative ${getBorderClass()} glass-elevated ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      className={`group h-full min-h-0 flex flex-col overflow-hidden transition-all relative pane-surface ${isActive ? 'is-active' : ''} ${getBorderClass()} ${pane.state === 'claude-waiting' ? 'claude-waiting-pane' : ''}`}
+      // The surface colour comes from the shared tint, not a fixed
+      // glass-elevated: with a wallpaper the scrim below covers this, without
+      // one this IS the pane. Either way it's the same number as the console.
+      style={{ backgroundColor: `rgba(var(--window-tint-rgb, 30, 30, 30), var(--window-tint, 0.85))` }}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onDragOver={handleDragOver}
@@ -1144,8 +1574,12 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           above the terminal (z-[5]) so the terminal canvas can't cover them. */}
       {showRingOverlay && (
         <div
-          className={`pointer-events-none absolute inset-0 rounded z-[5] ${waiting ? 'claude-waiting-ring' : ''}`}
-          style={waiting ? undefined : { boxShadow: ringShadows.join(', ') }}
+          className={`pointer-events-none absolute inset-0 z-[5] ${waiting ? 'claude-waiting-ring' : ''}`}
+          style={
+            waiting
+              ? { borderRadius: 'var(--pane-radius)' }
+              : { borderRadius: 'var(--pane-radius)', boxShadow: ringShadows.join(', ') }
+          }
         />
       )}
       {/* Terminal wrapper - fills all remaining space */}
@@ -1156,14 +1590,19 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          ...(background.mode === 'unified' ? { backgroundAttachment: 'fixed' } : {}),
+          // `fixed` anchors the image to the VIEWPORT, not to each pane, which
+          // is the whole point: every pane is a window onto one shared canvas,
+          // so the picture lines up across the grid while the gutters between
+          // them stay clear. Panes are cut-outs on a single backdrop — not
+          // separate tiles each holding their own copy of the photo.
+          ...(background.mode === 'unified' ? { backgroundAttachment: 'fixed' as const } : {}),
         } : undefined}
       >
         {/* Opacity overlay - controls how much wallpaper shows through */}
         {bgEnabled && (
           <div
             className="absolute inset-0 pointer-events-none z-0"
-            style={{ backgroundColor: `rgba(var(--terminal-bg-rgb), ${background.opacity})` }}
+            style={{ backgroundColor: `rgba(var(--window-tint-rgb, 30, 30, 30), var(--window-tint, 0.85))` }}
           />
         )}
         <div
@@ -1175,12 +1614,12 @@ export const TerminalPane = memo(function TerminalPane({ paneId }: TerminalPaneP
       </div>
       {isDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
-          <div className="text-[--accent] text-sm font-medium">Drop file here</div>
+          <div className="text-[--accent] text-body font-medium">Drop file here</div>
         </div>
       )}
       {isPaneDragOver && (
         <div className="absolute inset-0 flex items-center justify-center bg-[--accent]/10 pointer-events-none font-mono rounded-sm">
-          <div className="text-[--accent] text-sm font-medium">Swap terminals</div>
+          <div className="text-[--accent] text-body font-medium">Swap terminals</div>
         </div>
       )}
     </div>

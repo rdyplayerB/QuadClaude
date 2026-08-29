@@ -22,7 +22,6 @@ let longTaskMaxMs = 0
 let frameCount = 0
 let fpsWindowStart = 0
 let lastFps = 0
-let rafHandle = 0
 
 function frameTick(now: number) {
   if (fpsWindowStart === 0) fpsWindowStart = now
@@ -33,7 +32,7 @@ function frameTick(now: number) {
     frameCount = 0
     fpsWindowStart = now
   }
-  rafHandle = requestAnimationFrame(frameTick)
+  requestAnimationFrame(frameTick)
 }
 
 function collectReport() {
@@ -91,7 +90,7 @@ export function startPerfReporter() {
     // longtask not supported; skip
   }
 
-  rafHandle = requestAnimationFrame(frameTick)
+  requestAnimationFrame(frameTick)
 
   // Allow the main process to ask for an immediate flush (e.g. on a marker).
   window.electronAPI.onPerfFlush?.(() => sendReport())
@@ -99,8 +98,4 @@ export function startPerfReporter() {
   setInterval(sendReport, REPORT_INTERVAL_MS)
   // First report shortly after startup once terminals have mounted.
   setTimeout(sendReport, 1500)
-}
-
-export function stopFrameTracking() {
-  if (rafHandle) cancelAnimationFrame(rafHandle)
 }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, shell, powerMonitor, dialog, clipboard, nativeImage } from 'electron'
+import { app, BrowserWindow, shell, powerMonitor, clipboard, ipcMain } from 'electron'
 import liquidGlass from 'electron-liquid-glass'
 import fs from 'fs'
 import path from 'path'
@@ -6,16 +6,20 @@ import { PtyManager } from './pty'
 import { UsagePoller } from './usage'
 import { WorkspaceManager } from './workspace'
 import { RouterManager } from './router'
+import { delegationLog } from './delegationLog'
 import { logger } from './logger'
-import { IPC_CHANNELS, MenuAction, RouterProviderInput, portIsolationEnv } from '../shared/types'
-import { loopbackStatus, ensureLoopbackAliases } from './loopback'
+import { stopServerScan } from './serverScan'
+import { IPC_CHANNELS, MenuAction } from '../shared/types'
+import { installStatuslineScript } from './statusline'
+import { buildApplicationMenu } from './menu'
+import { registerIpcHandlers } from './ipc'
+import {
+  initPluginHost, listPlugins, emitPtyExit, shutdownPlugins, closeAllPluginUi,
+} from './pluginHost'
 import {
   startPerfMonitor,
   stopPerfMonitor,
   setupPerfHandlers,
-  addMarker,
-  revealPerfLogs,
-  requestRendererFlush,
 } from './perfMonitor'
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -28,7 +32,55 @@ try {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+// Send to the renderer only if the window AND its webContents are still alive. node-pty
+// (and other async sources) can emit one more event after the window/webContents has been
+// destroyed on quit/reload; `mainWindow?.` guards null but NOT a destroyed-but-non-null
+// webContents, which throws "Object has been destroyed". This guards both.
+function sendToRenderer(channel: string, ...args: unknown[]): void {
+  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+    mainWindow.webContents.send(channel, ...args)
+  }
+}
+let stopDelegationWatch: (() => void) | null = null
+
+// Bridge the app's delegation toggle to the Claude running inside a pane: write an
+// authoritative status file the orchestrator (and a SessionStart hook) can read, so a
+// fresh session auto-detects "delegation is ON" instead of falling back to OFF-by-default.
+// Content: the model route when enabled+configured, else "off".
+function delegationModelRoute(): string {
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath('home'), '.quadclaude', 'delegation-model'), 'utf8').trim()
+    return raw.replace('-delegate,', ',') // report the user-facing route
+  } catch {
+    return ''
+  }
+}
+function delegationEnabled(): boolean {
+  try {
+    return !!workspaceManager?.load().preferences.delegation?.enabled
+  } catch {
+    return false
+  }
+}
+function syncDelegationActive(): void {
+  try {
+    const dir = path.join(app.getPath('home'), '.quadclaude')
+    fs.mkdirSync(dir, { recursive: true })
+    const route = delegationModelRoute()
+    const on = delegationEnabled() && !!route
+    fs.writeFileSync(path.join(dir, 'delegation-active'), on ? route : 'off', 'utf8')
+  } catch (error) {
+    logger.error('delegation', 'failed to sync delegation-active', error instanceof Error ? error.message : String(error))
+  }
+}
 let logWindow: BrowserWindow | null = null
+// Handle for the native liquid-glass view backing the main window, plus the
+// ground opacity last requested by the renderer (so a re-created view comes up
+// matching the user's setting). -1 / null means "no view" — every call below
+// no-ops rather than throwing on machines without the material.
+let glassViewId: number | null = null
+let lastGroundOpacity = 1
 let ptyManager: PtyManager | null = null
 let usagePoller: UsagePoller | null = null
 let workspaceManager: WorkspaceManager | null = null
@@ -79,7 +131,7 @@ function openLogViewer() {
     }
     .log-path {
       font-size: 11px;
-      color: #808080;
+      color: #737375;
       margin-bottom: 16px;
       word-break: break-all;
     }
@@ -99,7 +151,7 @@ function openLogViewer() {
     }
     button:hover { background: #4c4c4c; }
     pre {
-      background: #252526;
+      background: #252525;
       border: 1px solid #3c3c3c;
       border-radius: 4px;
       padding: 16px;
@@ -108,11 +160,11 @@ function openLogViewer() {
       white-space: pre-wrap;
       word-wrap: break-word;
     }
-    .error { color: #f48771; }
-    .warn { color: #cca700; }
-    .info { color: #75beff; }
+    .error { color: #f87171; }
+    .warn { color: #fbbf24; }
+    .info { color: #22d3ee; }
     .empty {
-      color: #808080;
+      color: #737375;
       font-style: italic;
     }
   </style>
@@ -165,393 +217,47 @@ function openLogViewer() {
   logger.info('app', 'Log viewer opened')
 }
 
-// Install the statusline script (based on Claude-Usage-Tracker) that renders a
-// rich terminal statusline AND writes context data for QuadClaude's React UI.
-function installStatuslineScript() {
-  const claudeDir = path.join(app.getPath('home'), '.claude')
-  const scriptPath = path.join(claudeDir, 'quadclaude-statusline.sh')
-  const configPath = path.join(claudeDir, 'statusline-config.txt')
-  const settingsPath = path.join(claudeDir, 'settings.json')
-
-  // Full statusline bash script based on Claude-Usage-Tracker by hamed-elfayome
-  // https://github.com/hamed-elfayome/Claude-Usage-Tracker
-  const script = `#!/bin/bash
-
-# --- QuadClaude context data (written for React UI) ---
-input=$(cat)
-pct_raw=$(echo "$input" | grep -o '"used_percentage":[0-9.]*' | head -1 | sed 's/"used_percentage"://')
-[ -z "$pct_raw" ] && pct_raw=0
-pct_int=\${pct_raw%%.*}
-model_raw=$(echo "$input" | grep -o '"display_name":"[^"]*"' | sed 's/"display_name":"//;s/"$//')
-echo "{\\"context_pct\\":$pct_int,\\"model\\":\\"$model_raw\\",\\"ts\\":$(date +%s)}" > "/tmp/quadclaude-ctx-$PPID.json" 2>/dev/null
-
-# --- Statusline display (Claude-Usage-Tracker style) ---
-config_file="$HOME/.claude/statusline-config.txt"
-if [ -f "$config_file" ]; then
-  source "$config_file"
-  show_model=$SHOW_MODEL
-  show_dir=$SHOW_DIRECTORY
-  show_branch=$SHOW_BRANCH
-  show_context=$SHOW_CONTEXT
-  context_as_tokens=$CONTEXT_AS_TOKENS
-  show_usage=$SHOW_USAGE
-  show_bar=$SHOW_PROGRESS_BAR
-  show_pace_marker=$SHOW_PACE_MARKER
-  show_reset=$SHOW_RESET_TIME
-  use_24h=$USE_24_HOUR_TIME
-  show_context_label=$SHOW_CONTEXT_LABEL
-  show_usage_label=$SHOW_USAGE_LABEL
-  show_reset_label=$SHOW_RESET_LABEL
-  color_mode=$COLOR_MODE
-  single_color=$SINGLE_COLOR
-  show_profile=$SHOW_PROFILE
-  profile_name="$PROFILE_NAME"
-  pace_marker_step_colors=$PACE_MARKER_STEP_COLORS
-else
-  show_model=1
-  show_dir=1
-  show_branch=1
-  show_context=1
-  context_as_tokens=0
-  show_usage=1
-  show_bar=1
-  show_pace_marker=1
-  show_reset=1
-  use_24h=0
-  show_context_label=1
-  show_usage_label=1
-  show_reset_label=1
-  color_mode="colored"
-  single_color="#00BFFF"
-  show_profile=0
-  profile_name=""
-  pace_marker_step_colors=1
-fi
-
-current_dir_path=$(echo "$input" | grep -o '"current_dir":"[^"]*"' | sed 's/"current_dir":"//;s/"$//')
-current_dir=$(basename "$current_dir_path")
-model=$(echo "$input" | grep -o '"display_name":"[^"]*"' | sed 's/"display_name":"//;s/"$//')
-
-hex_to_ansi() {
-  local hex=$1
-  hex=\${hex#\\#}
-  local r=$((16#\${hex:0:2}))
-  local g=$((16#\${hex:2:2}))
-  local b=$((16#\${hex:4:2}))
-  printf '\\033[38;2;%d;%d;%dm' "$r" "$g" "$b"
+// Attach the native liquid-glass material that backs the whole window. Kept
+// separate from createWindow so the transparency setting can decide whether it
+// gets attached at all.
+function attachGlassView(win: BrowserWindow) {
+  glassViewId = liquidGlass.addView(win.getNativeWindowHandle(), {
+    cornerRadius: 12,
+    tintColor: '#20000000',
+    opaque: false,
+  })
+  logger.info('window', 'Liquid glass enabled', `viewId: ${glassViewId}`)
 }
 
-RESET=$'\\033[0m'
-
-if [ "$color_mode" = "monochrome" ]; then
-  BLUE="" ; GREEN="" ; GRAY="" ; YELLOW="" ; CYAN="" ; MAGENTA=""
-  LEVEL_1="" ; LEVEL_2="" ; LEVEL_3="" ; LEVEL_4="" ; LEVEL_5=""
-  LEVEL_6="" ; LEVEL_7="" ; LEVEL_8="" ; LEVEL_9="" ; LEVEL_10=""
-  PACE_COMFORTABLE="" ; PACE_ON_TRACK="" ; PACE_WARMING=""
-  PACE_PRESSING="" ; PACE_CRITICAL="" ; PACE_RUNAWAY=""
-elif [ "$color_mode" = "singleColor" ]; then
-  single_ansi=$(hex_to_ansi "$single_color")
-  BLUE=$single_ansi ; GREEN=$single_ansi ; GRAY=$single_ansi
-  YELLOW=$single_ansi ; CYAN=$single_ansi ; MAGENTA=$single_ansi
-  LEVEL_1=$single_ansi ; LEVEL_2=$single_ansi ; LEVEL_3=$single_ansi
-  LEVEL_4=$single_ansi ; LEVEL_5=$single_ansi ; LEVEL_6=$single_ansi
-  LEVEL_7=$single_ansi ; LEVEL_8=$single_ansi ; LEVEL_9=$single_ansi
-  LEVEL_10=$single_ansi
-  PACE_COMFORTABLE=$single_ansi ; PACE_ON_TRACK=$single_ansi
-  PACE_WARMING=$single_ansi ; PACE_PRESSING=$single_ansi
-  PACE_CRITICAL=$single_ansi ; PACE_RUNAWAY=$single_ansi
-else
-  BLUE=$'\\033[0;34m' ; GREEN=$'\\033[0;32m' ; GRAY=$'\\033[0;90m'
-  YELLOW=$'\\033[0;33m' ; CYAN=$'\\033[0;36m' ; MAGENTA=$'\\033[0;35m'
-  LEVEL_1=$'\\033[38;5;22m' ; LEVEL_2=$'\\033[38;5;28m' ; LEVEL_3=$'\\033[38;5;34m'
-  LEVEL_4=$'\\033[38;5;100m' ; LEVEL_5=$'\\033[38;5;142m' ; LEVEL_6=$'\\033[38;5;178m'
-  LEVEL_7=$'\\033[38;5;172m' ; LEVEL_8=$'\\033[38;5;166m' ; LEVEL_9=$'\\033[38;5;160m'
-  LEVEL_10=$'\\033[38;5;124m'
-  PACE_COMFORTABLE=$'\\033[38;5;34m' ; PACE_ON_TRACK=$'\\033[38;5;37m'
-  PACE_WARMING=$'\\033[38;5;178m' ; PACE_PRESSING=$'\\033[38;5;208m'
-  PACE_CRITICAL=$'\\033[38;5;160m' ; PACE_RUNAWAY=$'\\033[38;5;135m'
-fi
-
-if [ "$pace_marker_step_colors" != "0" ]; then
-  PACE_COMFORTABLE=$'\\033[38;5;34m' ; PACE_ON_TRACK=$'\\033[38;5;37m'
-  PACE_WARMING=$'\\033[38;5;178m' ; PACE_PRESSING=$'\\033[38;5;208m'
-  PACE_CRITICAL=$'\\033[38;5;160m' ; PACE_RUNAWAY=$'\\033[38;5;135m'
-fi
-
-dir_text=""
-if [ "$show_dir" = "1" ]; then
-  dir_text="\${BLUE}\${current_dir}\${RESET}"
-fi
-
-branch_text=""
-if [ "$show_branch" = "1" ]; then
-  if git rev-parse --git-dir > /dev/null 2>&1; then
-    branch=$(git branch --show-current 2>/dev/null)
-    [ -n "$branch" ] && branch_text="\${GREEN}⎇ \${branch}\${RESET}"
-  fi
-fi
-
-model_text=""
-if [ "$show_model" = "1" ] && [ -n "$model" ]; then
-  model_text="\${YELLOW}\${model}\${RESET}"
-fi
-
-profile_text=""
-if [ "$show_profile" = "1" ] && [ -n "$profile_name" ]; then
-  profile_text="\${MAGENTA}\${profile_name}\${RESET}"
-fi
-
-context_text=""
-if [ "$show_context" = "1" ]; then
-  input_tokens=$(echo "$input" | grep -o '"input_tokens":[0-9]*' | head -1 | sed 's/"input_tokens"://')
-  cache_create=$(echo "$input" | grep -o '"cache_creation_input_tokens":[0-9]*' | sed 's/"cache_creation_input_tokens"://')
-  cache_read=$(echo "$input" | grep -o '"cache_read_input_tokens":[0-9]*' | sed 's/"cache_read_input_tokens"://')
-  context_size=$(echo "$input" | grep -o '"context_window_size":[0-9]*' | sed 's/"context_window_size"://')
-
-  [ -z "$input_tokens" ] && input_tokens=0
-  [ -z "$cache_create" ] && cache_create=0
-  [ -z "$cache_read" ] && cache_read=0
-
-  if [ -n "$context_size" ] && [ "$context_size" -gt 0 ]; then
-    current_tokens=$((input_tokens + cache_create + cache_read))
-    context_pct=$((current_tokens * 100 / context_size))
-    if [ "$context_pct" -le 50 ]; then
-      context_color="$CYAN"
-    elif [ "$context_pct" -le 75 ]; then
-      context_color="$YELLOW"
-    else
-      context_color="$LEVEL_9"
-    fi
-    context_int=$context_pct
-    ctx_label=""
-    [ "$show_context_label" = "1" ] && ctx_label="Ctx: "
-    if [ "$context_as_tokens" = "1" ]; then
-      if [ "$current_tokens" -ge 1000 ]; then
-        tokens_k=$((current_tokens / 1000))
-        context_text="\${context_color}\${ctx_label}\${tokens_k}K\${RESET}"
-      else
-        context_text="\${context_color}\${ctx_label}\${current_tokens}\${RESET}"
-      fi
-    else
-      context_text="\${context_color}\${ctx_label}\${context_int}%\${RESET}"
-    fi
-  fi
-fi
-
-usage_text=""
-if [ "$show_usage" = "1" ]; then
-  cache_file="$HOME/.claude/.statusline-usage-cache"
-  swift_result=""
-  if [ -f "$cache_file" ]; then
-    cache_ts=$(grep "^TIMESTAMP=" "$cache_file" 2>/dev/null | cut -d= -f2)
-    now_ts=$(date +%s)
-    if [ -n "$cache_ts" ]; then
-      cache_age=$((now_ts - cache_ts))
-      if [ "$cache_age" -lt 600 ]; then
-        cache_util=$(grep "^UTILIZATION=" "$cache_file" | cut -d= -f2)
-        cache_reset=$(grep "^RESETS_AT=" "$cache_file" | cut -d= -f2)
-        if [ -n "$cache_util" ]; then
-          swift_result="\${cache_util}|\${cache_reset}"
-        fi
-      fi
-    fi
-  fi
-
-  if [ -z "$swift_result" ] && [ -x "$HOME/.claude/fetch-claude-usage.swift" ]; then
-    swift_result=$(swift "$HOME/.claude/fetch-claude-usage.swift" 2>/dev/null)
-  fi
-
-  if [ -n "$swift_result" ]; then
-    utilization=$(echo "$swift_result" | cut -d'|' -f1)
-    resets_at=$(echo "$swift_result" | cut -d'|' -f2)
-
-    reset_epoch=""
-    if [ -n "$resets_at" ] && [ "$resets_at" != "null" ]; then
-      iso_time=$(echo "$resets_at" | sed 's/\\.[0-9]*Z$//')
-      reset_epoch=$(date -ju -f "%Y-%m-%dT%H:%M:%S" "$iso_time" "+%s" 2>/dev/null)
-    fi
-
-    if [ -n "$utilization" ] && [ "$utilization" != "ERROR" ]; then
-      if [ "$utilization" -le 10 ]; then usage_color="$LEVEL_1"
-      elif [ "$utilization" -le 20 ]; then usage_color="$LEVEL_2"
-      elif [ "$utilization" -le 30 ]; then usage_color="$LEVEL_3"
-      elif [ "$utilization" -le 40 ]; then usage_color="$LEVEL_4"
-      elif [ "$utilization" -le 50 ]; then usage_color="$LEVEL_5"
-      elif [ "$utilization" -le 60 ]; then usage_color="$LEVEL_6"
-      elif [ "$utilization" -le 70 ]; then usage_color="$LEVEL_7"
-      elif [ "$utilization" -le 80 ]; then usage_color="$LEVEL_8"
-      elif [ "$utilization" -le 90 ]; then usage_color="$LEVEL_9"
-      else usage_color="$LEVEL_10"
-      fi
-
-      if [ "$show_bar" = "1" ]; then
-        if [ "$utilization" -eq 0 ]; then filled_blocks=0
-        elif [ "$utilization" -eq 100 ]; then filled_blocks=10
-        else filled_blocks=$(( (utilization * 10 + 50) / 100 ))
-        fi
-        [ "$filled_blocks" -lt 0 ] && filled_blocks=0
-        [ "$filled_blocks" -gt 10 ] && filled_blocks=10
-        empty_blocks=$((10 - filled_blocks))
-        progress_bar=" "
-        i=0; while [ $i -lt $filled_blocks ]; do progress_bar="\${progress_bar}▓"; i=$((i + 1)); done
-        i=0; while [ $i -lt $empty_blocks ]; do progress_bar="\${progress_bar}░"; i=$((i + 1)); done
-      else
-        progress_bar=""
-      fi
-
-      if [ "$show_pace_marker" = "1" ] && [ "$show_bar" = "1" ] && [ -n "$reset_epoch" ]; then
-        now_epoch=$(date +%s)
-        remaining=$((reset_epoch - now_epoch))
-        if [ $remaining -gt 0 ] && [ $remaining -lt 18000 ]; then
-          elapsed_secs=$((18000 - remaining))
-          marker_pos=$(( (elapsed_secs * 10 + 9000) / 18000 ))
-          [ $marker_pos -gt 9 ] && marker_pos=9
-          [ $marker_pos -lt 0 ] && marker_pos=0
-          pace_color=""
-          if [ $elapsed_secs -ge 540 ]; then
-            projected_pct=$((utilization * 18000 / elapsed_secs))
-            if [ $projected_pct -lt 50 ]; then pace_color="$PACE_COMFORTABLE"
-            elif [ $projected_pct -lt 75 ]; then pace_color="$PACE_ON_TRACK"
-            elif [ $projected_pct -lt 90 ]; then pace_color="$PACE_WARMING"
-            elif [ $projected_pct -lt 100 ]; then pace_color="$PACE_PRESSING"
-            elif [ $projected_pct -lt 120 ]; then pace_color="$PACE_CRITICAL"
-            else pace_color="$PACE_RUNAWAY"
-            fi
-          fi
-          if [ "$pace_marker_step_colors" = "0" ]; then pace_color="$usage_color"; fi
-          if [ -n "$pace_color" ]; then
-            left="\${progress_bar:0:$((marker_pos + 1))}"
-            right="\${progress_bar:$((marker_pos + 2))}"
-            progress_bar="\${left}\${pace_color}┃\${RESET}\${usage_color}\${right}"
-          fi
-        fi
-      fi
-
-      reset_time_display=""
-      if [ "$show_reset" = "1" ] && [ -n "$reset_epoch" ]; then
-        epoch=$reset_epoch
-        if [ -n "$epoch" ]; then
-          seconds_part=$((epoch % 60))
-          if [ "$seconds_part" -ge 30 ]; then epoch=$((epoch + (60 - seconds_part)))
-          else epoch=$((epoch - seconds_part))
-          fi
-          if [ "$use_24h" = "1" ]; then
-            reset_time=$(date -r "$epoch" "+%H:%M" 2>/dev/null)
-          else
-            reset_time=$(date -r "$epoch" "+%I:%M %p" 2>/dev/null)
-          fi
-          if [ "$show_reset_label" = "1" ]; then
-            [ -n "$reset_time" ] && reset_time_display=$(printf " → Reset: %s" "$reset_time")
-          else
-            [ -n "$reset_time" ] && reset_time_display=$(printf " → %s" "$reset_time")
-          fi
-        fi
-      fi
-
-      if [ "$show_usage_label" = "1" ]; then
-        usage_text="\${usage_color}Usage: \${utilization}%\${progress_bar}\${reset_time_display}\${RESET}"
-      else
-        usage_text="\${usage_color}\${utilization}%\${progress_bar}\${reset_time_display}\${RESET}"
-      fi
-    else
-      if [ "$show_usage_label" = "1" ]; then usage_text="\${YELLOW}Usage: ~\${RESET}"
-      else usage_text="\${YELLOW}~\${RESET}"
-      fi
-    fi
-  else
-    if [ "$show_usage_label" = "1" ]; then usage_text="\${YELLOW}Usage: ~\${RESET}"
-    else usage_text="\${YELLOW}~\${RESET}"
-    fi
-  fi
-fi
-
-output=""
-separator="\${GRAY} │ \${RESET}"
-
-[ -n "$dir_text" ] && output="\${dir_text}"
-if [ -n "$branch_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${branch_text}"
-fi
-if [ -n "$model_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${model_text}"
-fi
-if [ -n "$profile_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${profile_text}"
-fi
-if [ -n "$context_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${context_text}"
-fi
-if [ -n "$usage_text" ]; then
-  [ -n "$output" ] && output="\${output}\${separator}"
-  output="\${output}\${usage_text}"
-fi
-
-printf "%s\\n" "$output"
-`
-
-  // Default config for the statusline display
-  const defaultConfig = `SHOW_MODEL=1
-SHOW_DIRECTORY=1
-SHOW_BRANCH=1
-SHOW_CONTEXT=1
-CONTEXT_AS_TOKENS=0
-SHOW_USAGE=1
-SHOW_PROGRESS_BAR=1
-SHOW_PACE_MARKER=1
-PACE_MARKER_STEP_COLORS=1
-SHOW_RESET_TIME=1
-USE_24_HOUR_TIME=0
-SHOW_CONTEXT_LABEL=1
-SHOW_USAGE_LABEL=1
-SHOW_RESET_LABEL=1
-COLOR_MODE=colored
-SINGLE_COLOR=#00BFFF
-SHOW_PROFILE=0
-PROFILE_NAME=""
-`
-
+// Match the native material to how clear the user wants the window.
+//
+// There is no way to REMOVE a glass view once added, and every variant is
+// still a glass material — even `clear` blurs and brightens what is behind it,
+// which is why a "fully transparent" window read as a milky white sheet. So
+// genuine see-through means never attaching the view in the first place:
+//   - fully opaque  → attach the view (frosted `regular`, the standard look)
+//   - anything less → no view at all, just the transparent window
+// Going clear→opaque attaches live. Going opaque→clear can only soften the
+// material to `clear`, since the view cannot be detached; the window comes up
+// truly clear on next launch (attachGlassView is skipped at startup).
+function applyGlassClarity(groundOpacity: number) {
+  lastGroundOpacity = groundOpacity
+  const wantsGlass = groundOpacity >= 1
   try {
-    if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true })
-    fs.writeFileSync(scriptPath, script, { mode: 0o755 })
-
-    // Install default config if none exists
-    if (!fs.existsSync(configPath)) {
-      fs.writeFileSync(configPath, defaultConfig, 'utf-8')
-      logger.info('statusline', 'Installed default statusline config')
+    if (wantsGlass && (glassViewId == null || glassViewId < 0)) {
+      if (mainWindow && !mainWindow.isDestroyed()) attachGlassView(mainWindow)
+      return
     }
-
-    // Always set our statusline script (replaces any prior script including older QuadClaude versions)
-    let settings: Record<string, unknown> = {}
-    if (fs.existsSync(settingsPath)) {
-      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
-    }
-
-    settings.statusLine = {
-      type: 'command',
-      command: `bash ${scriptPath}`,
-    }
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8')
-    logger.info('statusline', 'Installed QuadClaude statusline script')
-  } catch (error) {
-    logger.warn('statusline', 'Failed to install statusline script', error instanceof Error ? error.message : String(error))
-  }
-
-  // Clean up stale temp files on startup
-  try {
-    const tmpFiles = fs.readdirSync('/tmp').filter(f => f.startsWith('quadclaude-ctx-'))
-    for (const file of tmpFiles) {
-      const filePath = `/tmp/${file}`
-      const stat = fs.statSync(filePath)
-      if (Date.now() - stat.mtimeMs > 3600_000) { // Older than 1 hour
-        fs.unlinkSync(filePath)
-      }
-    }
-  } catch {
-    // Ignore cleanup errors
+    if (glassViewId == null || glassViewId < 0) return
+    const variant = wantsGlass
+      ? liquidGlass.GlassMaterialVariant.regular
+      : liquidGlass.GlassMaterialVariant.clear
+    liquidGlass.unstable_setVariant(glassViewId, variant)
+    logger.info('window', 'Glass clarity applied', `groundOpacity: ${groundOpacity}, variant: ${variant}`)
+  } catch (err) {
+    // Native material calls are best-effort across macOS builds; a failure here
+    // just means the window stays as it is, never that the app breaks.
+    logger.info('window', 'Glass clarity not applied', err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -633,19 +339,30 @@ function createWindow() {
     // Reveal the window now that content has painted - avoids the empty
     // transparent flash during the Dock launch animation.
     mainWindow?.show()
+    // Push new delegation events to the renderer (drives the live dashboard and the
+    // session-scoped worker-feed prompt). Re-armed on every load; the prior watcher
+    // is cleared first so a reload doesn't stack pollers.
+    stopDelegationWatch?.()
+    stopDelegationWatch = delegationLog.startWatching((event) => {
+      sendToRenderer(IPC_CHANNELS.DELEGATION_EVENT, event)
+    })
     // Ensure zoom is exactly 1.0 to prevent scaling differences
     mainWindow?.webContents.setZoomFactor(1.0)
 
-    // Enable liquid glass effect (macOS Tahoe+)
+    // Enable liquid glass effect (macOS Tahoe+) — but only if the user hasn't
+    // asked for a see-through window. Read the saved setting rather than
+    // waiting for the renderer, so a clear window never flashes frosted first
+    // (and never gets a view we would then be unable to remove).
     try {
       if (mainWindow) {
         mainWindow.setWindowButtonVisibility(true)
-        liquidGlass.addView(mainWindow.getNativeWindowHandle(), {
-          cornerRadius: 12,
-          tintColor: '#20000000',
-          opaque: false,
-        })
-        logger.info('window', 'Liquid glass enabled')
+        const savedGround = workspaceManager?.load().preferences.groundOpacity ?? 1
+        lastGroundOpacity = savedGround
+        if (savedGround >= 1) {
+          attachGlassView(mainWindow)
+        } else {
+          logger.info('window', 'Liquid glass skipped for transparency', `groundOpacity: ${savedGround}`)
+        }
       }
     } catch (err) {
       logger.info('window', 'Liquid glass not available', err instanceof Error ? err.message : String(err))
@@ -679,13 +396,39 @@ function createWindow() {
     }
   })
 
+  // Any window.open / target=_blank / popup attempt → hand the URL to the system default
+  // browser (a normal tab in the active session) and NEVER spawn a chromeless Electron
+  // popup window. Without this, the terminal's link addon and any preview markup open
+  // their own bare window instead of the user's real browser.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+
   // Save window bounds on resize/move
   mainWindow.on('resize', saveWindowBounds)
   mainWindow.on('move', saveWindowBounds)
 
+  // Returning to the app from another window/app can leave the webContents without
+  // keyboard focus — the terminal pane stays selectable but won't accept typing or
+  // Ctrl-C until focus is restored. Re-focus the webContents on window focus; the
+  // renderer then re-focuses the active terminal's textarea.
+  mainWindow.on('focus', () => mainWindow?.webContents.focus())
+
   mainWindow.on('closed', () => {
     logger.info('window', 'Main window closed')
     mainWindow = null
+    // Nothing may outlive the app window. A popped-out Activity Console (or the
+    // log viewer) is still a BrowserWindow, so leaving it open means
+    // 'window-all-closed' never fires and closing QuadClaude strands a lone
+    // console window keeping the whole app alive. Tearing them down here also
+    // means the console always comes back in-app on the next launch.
+    // Dismiss plugin UI first so its "showing" flag doesn't survive the window
+    // and re-open on top of a freshly created one.
+    try { closeAllPluginUi() } catch { /* never block teardown */ }
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) { try { w.destroy() } catch { /* already gone */ } }
+    }
   })
 
   // Create application menu
@@ -700,424 +443,33 @@ function saveWindowBounds() {
 }
 
 function createApplicationMenu() {
-  const template: Electron.MenuItemConstructorOptions[] = [
-    {
-      label: app.name,
-      submenu: [
-        {
-          label: 'About QuadClaude',
-          click: () => {
-            app.setAboutPanelOptions({
-              applicationName: 'QuadClaude',
-              applicationVersion: app.getVersion(),
-              version: 'Build ' + new Date().toISOString().split('T')[0],
-              copyright: '© 2024-2026 rdyplayerB',
-              credits: 'The ADHD workspace for Claude Code\n\nCrafted by ビルド studio · https://birudo.studio',
-            })
-            app.showAboutPanel()
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Settings...',
-          accelerator: 'CmdOrCtrl+,',
-          click: () => sendMenuAction('open-settings')
-        },
-        { type: 'separator' },
-        { role: 'services' },
-        { type: 'separator' },
-        { role: 'hide' },
-        { role: 'hideOthers' },
-        { role: 'unhide' },
-        { type: 'separator' },
-        { role: 'quit' }
-      ]
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
-        { type: 'separator' },
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        { role: 'selectAll' }
-      ]
-    },
-    {
-      label: 'View',
-      submenu: [
-        // Explicitly register refresh shortcuts to block Electron's default reload behavior
-        // These must be enabled for the accelerator to be "claimed" and prevent default
-        {
-          label: 'Reload (Disabled)',
-          accelerator: 'CmdOrCtrl+R',
-          visible: false,
-          click: () => {
-            // Intentionally do nothing - blocks page refresh
-            logger.info('window', 'Blocked Cmd+R from menu')
-          }
-        },
-        {
-          label: 'Force Reload (Disabled)',
-          accelerator: 'CmdOrCtrl+Shift+R',
-          visible: false,
-          click: () => {
-            // Intentionally do nothing - blocks force refresh
-            logger.info('window', 'Blocked Cmd+Shift+R from menu')
-          }
-        },
-        {
-          label: 'Reload F5 (Disabled)',
-          accelerator: 'F5',
-          visible: false,
-          click: () => {
-            // Intentionally do nothing - blocks F5 refresh
-            logger.info('window', 'Blocked F5 from menu')
-          }
-        },
-        {
-          label: 'Always Show Prompt Bar',
-          accelerator: 'CmdOrCtrl+P',
-          type: 'checkbox',
-          checked: true,
-          click: (menuItem) => {
-            sendMenuAction('toggle-prompt-bar')
-            // Menu item checked state toggles automatically
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Grid Layout',
-          accelerator: 'CmdOrCtrl+1',
-          click: () => sendMenuAction('layout-grid')
-        },
-        {
-          label: 'Focus Left Layout',
-          accelerator: 'CmdOrCtrl+2',
-          click: () => sendMenuAction('layout-focus')
-        },
-        {
-          label: 'Focus Right Layout',
-          accelerator: 'CmdOrCtrl+3',
-          click: () => sendMenuAction('layout-focus-right')
-        },
-        { type: 'separator' },
-        {
-          label: 'Increase Font Size',
-          accelerator: 'CmdOrCtrl+Plus',
-          click: () => sendMenuAction('increase-font')
-        },
-        {
-          label: 'Decrease Font Size',
-          accelerator: 'CmdOrCtrl+-',
-          click: () => sendMenuAction('decrease-font')
-        },
-        { type: 'separator' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
-      ]
-    },
-    {
-      label: 'Terminal',
-      submenu: [
-        {
-          label: 'Focus Terminal 1',
-          accelerator: 'CmdOrCtrl+Shift+1',
-          click: () => sendMenuAction('focus-pane-1')
-        },
-        {
-          label: 'Focus Terminal 2',
-          accelerator: 'CmdOrCtrl+Shift+2',
-          click: () => sendMenuAction('focus-pane-2')
-        },
-        {
-          label: 'Focus Terminal 3',
-          accelerator: 'CmdOrCtrl+Shift+3',
-          click: () => sendMenuAction('focus-pane-3')
-        },
-        {
-          label: 'Focus Terminal 4',
-          accelerator: 'CmdOrCtrl+Shift+4',
-          click: () => sendMenuAction('focus-pane-4')
-        },
-        { type: 'separator' },
-        {
-          label: 'Clear Terminal',
-          accelerator: 'CmdOrCtrl+K',
-          click: () => sendMenuAction('clear-pane')
-        },
-        {
-          label: 'Launch Claude',
-          accelerator: 'CmdOrCtrl+L',
-          click: () => sendMenuAction('launch-claude')
-        },
-        { type: 'separator' },
-        {
-          label: 'Reset Current Pane',
-          accelerator: 'CmdOrCtrl+Shift+K',
-          click: () => sendMenuAction('reset-pane')
-        }
-      ]
-    },
-    {
-      label: 'Window',
-      submenu: [
-        { role: 'minimize' },
-        { role: 'zoom' },
-        { type: 'separator' },
-        { role: 'front' }
-      ]
-    },
-    {
-      label: 'Performance',
-      submenu: [
-        {
-          label: 'Mark Slowdown Now',
-          accelerator: 'CmdOrCtrl+Shift+M',
-          click: () => {
-            requestRendererFlush()
-            addMarker('user-reported-slowdown')
-          }
-        },
-        {
-          label: 'Add Marker',
-          click: () => {
-            requestRendererFlush()
-            addMarker('manual-marker')
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Reveal Performance Logs',
-          click: () => revealPerfLogs()
-        }
-      ]
-    },
-    {
-      label: 'Help',
-      submenu: [
-        {
-          label: 'View Error Log...',
-          click: () => openLogViewer()
-        },
-        {
-          label: 'Open Log File in Finder',
-          click: async () => {
-            const logPath = logger.getLogFilePath()
-            logger.info('app', 'Opening log file location', logPath)
-            await shell.showItemInFolder(logPath)
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Learn More',
-          click: async () => {
-            await shell.openExternal('https://github.com/rdyplayerB/QuadClaude')
-          }
-        }
-      ]
-    }
-  ]
-
-  const menu = Menu.buildFromTemplate(template)
-  Menu.setApplicationMenu(menu)
+  buildApplicationMenu(sendMenuAction, openLogViewer)
 }
 
 function sendMenuAction(action: MenuAction) {
-  mainWindow?.webContents.send(IPC_CHANNELS.APP_MENU_ACTION, action)
+  sendToRenderer(IPC_CHANNELS.APP_MENU_ACTION, action)
+}
+
+// Persist plugin enabled-state + settings to the workspace so they survive a
+// restart. Called after every toggle/setSetting (rare, user-driven — load()
+// here is fine, unlike the debounced pane-save path). Without this, enabling a
+// plugin / "open at launch" / verification mode all silently reset on relaunch.
+function persistPluginPrefs(): void {
+  if (!workspaceManager) return
+  const plugins: Record<string, { enabled: boolean; settings: Record<string, unknown> }> = {}
+  for (const d of listPlugins()) {
+    if (d.manifest?.id) plugins[d.manifest.id] = { enabled: d.enabled, settings: d.settings }
+  }
+  const preferences = workspaceManager.load().preferences
+  workspaceManager.save({ preferences: { ...preferences, plugins } })
 }
 
 // Setup IPC handlers
 function setupIPC() {
-  // PTY creation
-  ipcMain.handle(IPC_CHANNELS.PTY_CREATE, async (_, paneId: number, cwd?: string, env?: Record<string, string>) => {
-    logger.info('pty', `Creating PTY for pane ${paneId}`, cwd ? `cwd: ${cwd}` : 'using default cwd')
-    try {
-      // Inject per-pane port-isolation env (HOST/PORT) so dev servers don't collide.
-      const isoMode = workspaceManager?.load().preferences.portIsolation
-      const iso = portIsolationEnv(paneId, isoMode)
-      const mergedEnv = Object.keys(iso).length > 0 ? { ...(env || {}), ...iso } : env
-      const result = await ptyManager?.createPty(paneId, cwd, mergedEnv)
-      if (result) {
-        logger.info('pty', `PTY created successfully for pane ${paneId}`)
-      } else {
-        logger.error('pty', `Failed to create PTY for pane ${paneId}`)
-      }
-      return result
-    } catch (error) {
-      logger.error('pty', `Exception creating PTY for pane ${paneId}`, error instanceof Error ? error.message : String(error))
-      return false
-    }
-  })
-
-  // PTY kill
-  ipcMain.handle(IPC_CHANNELS.PTY_KILL, async (_, paneId: number) => {
-    logger.info('pty', `Killing PTY for pane ${paneId}`)
-    ptyManager?.killPty(paneId)
-  })
-
-  // Terminal input
-  ipcMain.on(IPC_CHANNELS.TERMINAL_INPUT, (_, paneId: number, data: string) => {
-    ptyManager?.write(paneId, data)
-  })
-
-  // Terminal resize
-  ipcMain.on(IPC_CHANNELS.TERMINAL_RESIZE, (_, paneId: number, cols: number, rows: number) => {
-    ptyManager?.resize(paneId, cols, rows)
-  })
-
-  // Get current working directory
-  ipcMain.handle(IPC_CHANNELS.PTY_CWD, async (_, paneId: number) => {
-    return ptyManager?.getCwd(paneId)
-  })
-
-  // Get git status
-  ipcMain.handle(IPC_CHANNELS.PTY_GIT_STATUS, async (_, paneId: number) => {
-    return ptyManager?.getGitStatus(paneId)
-  })
-
-  // Check if Claude process is running in PTY
-  ipcMain.handle(IPC_CHANNELS.PTY_IS_CLAUDE_RUNNING, async (_, paneId: number) => {
-    return ptyManager?.isClaudeRunning(paneId) ?? false
-  })
-
-  // Workspace operations
-  ipcMain.handle(IPC_CHANNELS.WORKSPACE_LOAD, async () => {
-    logger.info('workspace', 'Loading workspace state')
-    try {
-      const state = workspaceManager?.load()
-      logger.info('workspace', 'Workspace loaded successfully', state ? `Layout: ${state.layout}, Panes: ${state.panes?.length || 0}` : 'No state')
-      return state
-    } catch (error) {
-      logger.error('workspace', 'Failed to load workspace', error instanceof Error ? error.message : String(error))
-      throw error
-    }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.WORKSPACE_SAVE, async (_, state) => {
-    try {
-      workspaceManager?.save(state)
-      logger.info('workspace', 'Workspace saved')
-    } catch (error) {
-      logger.error('workspace', 'Failed to save workspace', error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  // Model router (claude-code-router) — write ccr config so a pane can run the real
-  // Claude Code TUI against any non-Anthropic model.
-  ipcMain.handle(IPC_CHANNELS.ROUTER_STATUS, async () => {
-    return routerManager.status()
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_SAVE_PROVIDER, async (_, input: RouterProviderInput) => {
-    return routerManager.saveProvider(input)
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_DELETE_PROVIDER, async (_, name: string) => {
-    routerManager.deleteProvider(name)
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_TEST, async (_, input: RouterProviderInput) => {
-    return routerManager.testConnection(input)
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_SET_DELEGATION, async (_, route: string) => {
-    return routerManager.setDelegation(route)
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_DELEGATION_STATUS, async () => {
-    return routerManager.delegationStatus()
-  })
-
-  ipcMain.handle(IPC_CHANNELS.ROUTER_CLEAR_DELEGATION, async () => {
-    routerManager.clearDelegation()
-    return routerManager.delegationStatus()
-  })
-
-  // Per-pane port isolation — macOS loopback alias management.
-  ipcMain.handle(IPC_CHANNELS.NET_LOOPBACK_STATUS, async () => {
-    return loopbackStatus()
-  })
-
-  ipcMain.handle(IPC_CHANNELS.NET_ENSURE_LOOPBACK, async () => {
-    return ensureLoopbackAliases()
-  })
-
-  ipcMain.handle(IPC_CHANNELS.WORKSPACE_GET_HOME, async () => {
-    const home = app.getPath('home')
-    logger.info('workspace', 'Home directory requested', home)
-    return home
-  })
-
-  ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, async () => {
-    return app.getVersion()
-  })
-
-  // Usage tracking
-  ipcMain.handle(IPC_CHANNELS.USAGE_FETCH, async () => {
-    return usagePoller?.getLatest() ?? null
-  })
-
-  // Per-pane context window usage
-  ipcMain.handle(IPC_CHANNELS.PTY_CONTEXT_USAGE, async (_, paneId: number) => {
-    return ptyManager?.getContextUsage(paneId) ?? null
-  })
-
-  // Detect listening servers for all panes (one shared lsof+ps).
-  // Returns a plain object keyed by paneId for easy renderer consumption.
-  ipcMain.handle(IPC_CHANNELS.PTY_DETECT_SERVERS, async () => {
-    const map = (await ptyManager?.detectServers()) ?? new Map()
-    return Object.fromEntries(map)
-  })
-
-  // Kill a detected server in a pane
-  ipcMain.handle(IPC_CHANNELS.PTY_KILL_SERVER, async (_, paneId: number, pid: number) => {
-    return (await ptyManager?.killServer(paneId, pid)) ?? false
-  })
-
-  // Paste an image into a pane the way Claude Code expects: put the image
-  // bytes on the system clipboard, then send Ctrl+V so Claude Code reads it
-  // and shows an [Image #N] attachment instead of a literal file path.
-  ipcMain.handle(IPC_CHANNELS.PTY_PASTE_IMAGE, async (_, paneId: number, filePath: string) => {
-    try {
-      const img = nativeImage.createFromPath(filePath)
-      if (img.isEmpty()) return false
-      clipboard.writeImage(img)
-      ptyManager?.write(paneId, '\x16') // Ctrl+V
-      return true
-    } catch {
-      return false
-    }
-  })
-
-  // Open a URL (e.g. http://localhost:PORT) in the system default browser
-  ipcMain.handle(IPC_CHANNELS.APP_OPEN_EXTERNAL, async (_, url: string) => {
-    // Only http(s) — refuse file://, javascript:, etc. to avoid shell-handler abuse
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
-    try {
-      await shell.openExternal(url)
-      return true
-    } catch (error) {
-      logger.error('app', 'Failed to open external URL', error instanceof Error ? error.message : String(error))
-      return false
-    }
-  })
-
-  // File dialog for background image selection
-  ipcMain.handle(IPC_CHANNELS.DIALOG_OPEN_IMAGE, async () => {
-    if (!mainWindow) return null
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Choose Background Image',
-      filters: [
-        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'svg'] },
-      ],
-      properties: ['openFile'],
-    })
-    if (result.canceled || result.filePaths.length === 0) return null
-    return result.filePaths[0]
+  registerIpcHandlers({
+    ptyManager, workspaceManager, routerManager,
+    getMainWindow: () => mainWindow,
+    persistPluginPrefs, syncDelegationActive, delegationModelRoute,
   })
 }
 
@@ -1140,13 +492,33 @@ app.whenReady().then(() => {
     logger.error('workspace', 'Failed to initialize WorkspaceManager', error instanceof Error ? error.message : String(error))
   }
 
+  // Keep delegation telemetry bounded: fold an oversized event log into the cumulative
+  // per-project rollup and drop summaries for long-abandoned projects.
+  delegationLog.maintain()
+  // Delegation always starts OFF, no matter how the last session left it. Leaving it
+  // armed across launches means a worker can be handed work before you've checked the
+  // box is reachable — and an unreachable worker costs a stalled session, not an error.
+  // Turning it on is a deliberate, per-session act.
+  try {
+    const preferences = workspaceManager?.load().preferences
+    if (preferences?.delegation?.enabled) {
+      workspaceManager?.save({ preferences: { ...preferences, delegation: { ...preferences.delegation, enabled: false } } })
+      logger.info('delegation', 'Reset delegation toggle to OFF for new session')
+    }
+  } catch (error) {
+    logger.error('delegation', 'failed to reset delegation toggle', error instanceof Error ? error.message : String(error))
+  }
+  // Publish the current delegation toggle so a Claude session in a pane can detect it.
+  syncDelegationActive()
+
   try {
     logger.info('pty', 'Initializing PtyManager')
     ptyManager = new PtyManager((paneId, data) => {
-      mainWindow?.webContents.send(IPC_CHANNELS.TERMINAL_OUTPUT, paneId, data)
+      sendToRenderer(IPC_CHANNELS.TERMINAL_OUTPUT, paneId, data)
     }, (paneId, exitCode) => {
       logger.info('pty', `PTY exited for pane ${paneId}`, `Exit code: ${exitCode}`)
-      mainWindow?.webContents.send(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
+      sendToRenderer(IPC_CHANNELS.PTY_EXIT, paneId, exitCode)
+      emitPtyExit(paneId, exitCode) // feed plugins (Ops Console incident toasts)
     })
     logger.info('pty', 'PtyManager initialized')
   } catch (error) {
@@ -1155,6 +527,20 @@ app.whenReady().then(() => {
 
   logger.info('ipc', 'Setting up IPC handlers')
   setupIPC()
+  // Window transparency: the renderer owns the preference, but only main can
+  // touch the native glass material behind the window.
+  ipcMain.handle(IPC_CHANNELS.WINDOW_SET_APPEARANCE, async (evt, appearance: { groundOpacity: number; tintRgb: string; tintAlpha: number }) => {
+    const clamped = Math.min(1, Math.max(0, Number(appearance?.groundOpacity)))
+    applyGlassClarity(Number.isFinite(clamped) ? clamped : 1)
+    // Fan out to every OTHER window. The popped-out console is its own renderer
+    // with its own document, so without this it keeps whatever appearance it was
+    // born with and drifts from the main window the moment the slider moves.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed() || win.webContents.id === evt.sender.id) continue
+      win.webContents.send(IPC_CHANNELS.WINDOW_APPEARANCE_CHANGED, appearance)
+    }
+  })
+
   logger.info('ipc', 'IPC handlers registered')
 
   // Performance recording: starts automatically and writes JSONL to
@@ -1166,6 +552,27 @@ app.whenReady().then(() => {
   )
 
   createWindow()
+
+  // Generic plugin host: activates enabled plugins (e.g. the Ops Console) and
+  // wires them a read-only capability context. Must run after ptyManager +
+  // workspaceManager + createWindow (menu/notify depend on them).
+  try {
+    initPluginHost({
+      appVersion: app.getVersion(),
+      homeDir: app.getPath('home'),
+      initialPluginPrefs: workspaceManager?.load()?.preferences?.plugins,
+      ptyStats: () => ptyManager?.getStats() ?? { sessions: 0, totalBytesOut: 0, perPaneBytesOut: {} },
+      getGitStatus: (paneId) => ptyManager?.getGitStatus(paneId) ?? Promise.resolve(null),
+      getContextUsage: (paneId) => ptyManager?.getContextUsage(paneId) ?? Promise.resolve(null),
+      rebuildMenu: () => createApplicationMenu(),
+      notifyChanged: (descriptors) => sendToRenderer(IPC_CHANNELS.PLUGIN_CHANGED, descriptors),
+      sendToUi: (channel, payload) => sendToRenderer(channel, payload),
+    })
+    // Rebuild the menu so any auto-enabled plugin's item appears.
+    createApplicationMenu()
+  } catch (error) {
+    logger.error('pluginHost', 'Failed to init plugin host', error instanceof Error ? error.message : String(error))
+  }
 
   // Start usage polling
   usagePoller = new UsagePoller()
@@ -1188,7 +595,7 @@ app.whenReady().then(() => {
   // Listen for system resume (wake from sleep)
   powerMonitor.on('resume', () => {
     logger.info('app', 'System resumed from sleep')
-    mainWindow?.webContents.send(IPC_CHANNELS.SYSTEM_RESUME)
+    sendToRenderer(IPC_CHANNELS.SYSTEM_RESUME)
   })
 })
 
@@ -1208,10 +615,15 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
+let isHardExiting = false
+app.on('before-quit', (e) => {
+  if (isHardExiting) return
+  isHardExiting = true
   logger.info('app', 'App is quitting')
+  try { shutdownPlugins() } catch { /* never block quit */ }
   stopPerfMonitor()
-  // Save CWDs before killing PTYs (important when Cmd+Q is used)
+  try { stopServerScan() } catch { /* never block quit */ }
+  // Save CWDs before killing PTYs (important when Cmd+Q is used) — synchronous.
   if (ptyManager && workspaceManager) {
     const cwds = ptyManager.getAllCwds()
     if (cwds.size > 0) {
@@ -1220,6 +632,13 @@ app.on('before-quit', () => {
     }
   }
   ptyManager?.killAll()
+  // node-pty's read threads can fire a ThreadSafeFunction callback into a half-finalized
+  // V8 environment during Electron's graceful teardown → SIGABRT in pty.node (the recurring
+  // CrBrowserMain abort-on-quit). Bypass that teardown entirely: cancel the graceful quit,
+  // give the just-killed ptys a tick to release their native handles, then hard-exit so the
+  // OS reaps those threads instead of V8 racing them. State is already saved above.
+  e.preventDefault()
+  setTimeout(() => app.exit(0), 100)
 })
 
 // Catch uncaught exceptions

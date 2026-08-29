@@ -213,10 +213,10 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
 
   return (
     <div role="group" aria-labelledby="router-heading" className="mb-6">
-      <h3 id="router-heading" className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">
+      <h3 id="router-heading" className="text-body font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">
         Run any model as Claude Code
       </h3>
-      <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
+      <p className="text-body text-[--ui-text-dimmed] mb-3">
         Run the real Claude Code on any non-Anthropic model — routed through{' '}
         <span className="font-mono">claude-code-router</span> so the pane looks and behaves exactly like Claude
         Code (it applies edits instead of dumping code). Bring your own API key.
@@ -224,13 +224,13 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
 
       {/* ccr install state */}
       {status && !status.ccrInstalled && (
-        <div className="mb-3 text-[11px] text-[--ui-text-primary] bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
+        <div className="mb-3 text-body text-[--ui-text-primary] bg-[--warning-soft] border border-[--warning-line] rounded px-2 py-1.5">
           <span className="font-medium">Router not installed.</span> Run this once in any pane:
           <div className="mt-1 flex items-center gap-2">
-            <code className="font-mono text-[10px] bg-black/30 rounded px-1.5 py-0.5">{status.installHint}</code>
+            <code className="font-mono text-meta bg-black/30 rounded px-1.5 py-0.5">{status.installHint}</code>
             <button
               onClick={() => navigator.clipboard?.writeText(status.installHint)}
-              className="text-[10px] text-[--accent] hover:underline"
+              className="text-meta text-[--accent] hover:underline"
             >
               Copy
             </button>
@@ -243,14 +243,14 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
         {routerProfiles.map((p) => (
           <div key={p.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded glass-control">
             <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-sm text-[--ui-text-primary] truncate">{p.name}</span>
-              <span className="text-[11px] text-[--ui-text-dimmed] truncate font-mono">
+              <span className="text-body text-[--ui-text-primary] truncate">{p.name}</span>
+              <span className="text-body text-[--ui-text-dimmed] truncate font-mono">
                 {p.env?.ANTHROPIC_MODEL ?? p.command}
               </span>
             </div>
             <button
               onClick={() => remove(p)}
-              className="shrink-0 text-[11px] text-[--ui-text-dimmed] hover:text-red-400 px-1.5 py-0.5"
+              className="shrink-0 text-body text-[--ui-text-dimmed] hover:text-[--danger] px-1.5 py-0.5"
             >
               Delete
             </button>
@@ -259,21 +259,21 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
       </div>
 
       {!adding && (
-        <button onClick={startAdd} className="text-xs text-[--accent] hover:underline">
+        <button onClick={startAdd} className="text-body text-[--accent] hover:underline">
           + Add a model
         </button>
       )}
 
       {adding && (
-        <div className="rounded-md border border-[#444] p-3 space-y-3">
+        <div className="rounded-md border border-[--border] p-3 space-y-3">
           {/* Preset chips */}
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-[--ui-text-dimmed] mr-1">Provider:</span>
+            <span className="text-body text-[--ui-text-dimmed] mr-1">Provider:</span>
             {PRESETS.map((preset) => (
               <button
                 key={preset.label}
                 onClick={() => choosePreset(preset.label)}
-                className={`text-xs px-2 py-1 rounded glass-control ${
+                className={`text-body px-2 py-1 rounded glass-control ${
                   form.preset === preset.label ? 'text-[--accent] border border-[--accent]/50' : 'text-[--ui-text-primary]'
                 }`}
               >
@@ -283,48 +283,48 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">Display name</label>
+            <label className="text-body text-[--ui-text-dimmed]">Display name</label>
             <input
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
               placeholder="DeepSeek V3"
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body text-[--ui-text-primary] outline-none focus:border-[--accent]"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">Base URL (chat/completions endpoint)</label>
+            <label className="text-body text-[--ui-text-dimmed]">Base URL (chat/completions endpoint)</label>
             <input
               value={form.baseUrl}
               onChange={(e) => setForm({ ...form, baseUrl: e.target.value })}
               placeholder="https://openrouter.ai/api/v1/chat/completions"
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-xs font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">Model id</label>
+            <label className="text-body text-[--ui-text-dimmed]">Model id</label>
             <input
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value })}
               placeholder={PRESETS.find((p) => p.label === form.preset)?.modelPlaceholder || 'model-id'}
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-xs font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
             />
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-[11px] text-[--ui-text-dimmed]">API key (stored locally, never echoed)</label>
+            <label className="text-body text-[--ui-text-dimmed]">API key (stored locally, never echoed)</label>
             <div className="flex items-center gap-1.5">
               <input
                 type={revealKey ? 'text' : 'password'}
                 value={form.apiKey}
                 onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
                 placeholder="sk-..."
-                className="flex-1 bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-xs font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
+                className="flex-1 bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body font-mono text-[--ui-text-primary] outline-none focus:border-[--accent]"
               />
               <button
                 onClick={() => setRevealKey((v) => !v)}
-                className="shrink-0 text-[10px] text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1"
+                className="shrink-0 text-meta text-[--ui-text-dimmed] hover:text-[--ui-text-primary] px-1"
               >
                 {revealKey ? 'Hide' : 'Show'}
               </button>
@@ -332,31 +332,31 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
           </div>
 
           {/* Test feedback */}
-          {testState.kind === 'ok' && <p className="text-[11px] text-emerald-400">✓ Connected — the provider answered.</p>}
+          {testState.kind === 'ok' && <p className="text-body text-[--success]">✓ Connected — the provider answered.</p>}
           {testState.kind === 'err' && (
-            <p className="text-[11px] text-red-400 break-words">✕ {testState.msg || 'Connection failed.'}</p>
+            <p className="text-body text-[--danger] break-words">✕ {testState.msg || 'Connection failed.'}</p>
           )}
 
           <div className="flex items-center gap-2 pt-1">
             <button
               onClick={save}
               disabled={!canSubmit}
-              className="text-xs px-3 py-1 rounded bg-[--accent] text-white disabled:opacity-40"
+              className="text-body px-3 py-1 rounded bg-[--accent] text-white disabled:opacity-40"
             >
               {saving ? 'Saving…' : 'Save model'}
             </button>
             <button
               onClick={test}
               disabled={!form.baseUrl.trim() || !form.model.trim() || testState.kind === 'testing'}
-              className="text-xs px-3 py-1 rounded glass-control text-[--ui-text-primary] disabled:opacity-40"
+              className="text-body px-3 py-1 rounded glass-control text-[--ui-text-primary] disabled:opacity-40"
             >
               {testState.kind === 'testing' ? 'Testing…' : 'Test connection'}
             </button>
-            <button onClick={cancel} className="text-xs px-3 py-1 rounded glass-control text-[--ui-text-primary]">
+            <button onClick={cancel} className="text-body px-3 py-1 rounded glass-control text-[--ui-text-primary]">
               Cancel
             </button>
           </div>
-          <p className="text-[10px] text-[--ui-text-dimmed]">
+          <p className="text-meta text-[--ui-text-dimmed]">
             Saving writes the model to claude-code-router's local config and creates a launchable “{`Claude Code · …`}”
             agent. Pick it on any pane to run that model as Claude Code.
           </p>
@@ -366,19 +366,19 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
       {/* Delegation: hand bulk work to a cheaper model from the command line */}
       {routerProfiles.length > 0 && (
         <div className="mt-5 pt-4 border-t border-[#333]">
-          <h4 className="text-sm font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">Delegation</h4>
-          <p className="text-[11px] text-[--ui-text-dimmed] mb-3">
+          <h4 className="text-body font-medium text-[--ui-text-muted] uppercase tracking-wide mb-1">Delegation</h4>
+          <p className="text-body text-[--ui-text-dimmed] mb-3">
             Hand bulk work to a cheaper model from the command line. Your orchestrator runs{' '}
             <span className="font-mono">{delegation?.command ?? 'qcdelegate'} "task"</span> — the worker edits
             files via the model below and logs to the feed.
           </p>
 
           <div className="flex items-center justify-between gap-3">
-            <span className="text-sm text-[--ui-text-primary]">Delegate with</span>
+            <span className="text-body text-[--ui-text-primary]">Delegate with</span>
             <select
               value={delegation?.route ?? ''}
               onChange={(e) => chooseDelegation(e.target.value)}
-              className="bg-[--ui-bg-input] border border-[#444] rounded px-2 py-1 text-sm text-[--ui-text-primary] outline-none focus:border-[--accent] max-w-[55%]"
+              className="bg-[--ui-bg-input] border border-[--border] rounded px-2 py-1 text-body text-[--ui-text-primary] outline-none focus:border-[--accent] max-w-[55%]"
             >
               <option value="">Off</option>
               {routerProfiles.map((p) => (
@@ -392,21 +392,21 @@ export const ModelRouterSettings = memo(function ModelRouterSettings() {
           {delegation?.route && (
             <div className="mt-3 space-y-2">
               {!delegation.onPath && (
-                <div className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1.5">
+                <div className="text-body text-[--warning] bg-[--warning-soft] border border-[--warning-line] rounded px-2 py-1.5">
                   Created <span className="font-mono">{delegation.command}</span>, but{' '}
                   <span className="font-mono">{delegation.binDir}</span> isn’t on your PATH — add it so the
                   command is callable from a pane.
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-2">
-                <button onClick={copySnippet} className="text-xs px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
+                <button onClick={copySnippet} className="text-body px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
                   {copied ? 'Copied ✓' : 'Copy orchestrator instructions'}
                 </button>
-                <button onClick={addFeedProfile} className="text-xs px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
+                <button onClick={addFeedProfile} className="text-body px-2.5 py-1 rounded glass-control text-[--ui-text-primary]">
                   Add Delegation Feed pane
                 </button>
               </div>
-              <p className="text-[10px] text-[--ui-text-dimmed]">
+              <p className="text-meta text-[--ui-text-dimmed]">
                 Paste the copied snippet into your orchestrator’s instructions (e.g. ~/.claude/CLAUDE.md) so it
                 knows when to delegate.
               </p>

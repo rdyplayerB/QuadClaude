@@ -46,3 +46,18 @@ temp/
 # claude-mem auto-generated activity files
 CLAUDE.md
 **/CLAUDE.md
+
+# qcdelegate runs aider, which drops a tags cache in the repo root
+.aider*
+
+# Python bytecode from tools/
+__pycache__/
+
+# Stray copy of the main bundle that a packaging run drops at the repo root.
+# The real entry is dist/main/index.js (package.json "main").
+/index.js
+
+# Working media that collects in the repo root. The wallpaper the app actually
+# ships is public/backgrounds/bg.png; a copy here is a scratch duplicate.
+/bg.png
+/*.mp4

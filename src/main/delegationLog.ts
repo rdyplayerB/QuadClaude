@@ -1,0 +1,516 @@
+// DelegationLog — QuadClaude's owner of delegation telemetry on disk.
+//
+// The `qcdelegate` worker (see qcdelegate.sh) appends one JSON line per run to
+// ~/.quadclaude/events.jsonl. That raw stream is append-only and crash-safe, but it
+// grows forever, so THIS module owns its lifecycle:
+//   • rollup    — fold events into a compact per-project summary (summary.json) so the
+//                 UI can answer "how much of this project was delegated, and did it
+//                 work?" without re-parsing a huge log every time.
+//   • rotation  — when events.jsonl crosses a size cap, fold everything into the
+//                 cumulative summary, then truncate the raw file. Lifetime totals
+//                 survive rotation; the raw file stays bounded.
+//   • retention — drop summaries for projects untouched for longer than the retention
+//                 window so the store doesn't accumulate dead projects.
+//
+// One global events file (keyed by a `project` field per event) is deliberately simpler
+// to manage than N per-project files — one rotation policy, one place to prune — while
+// still giving fully per-project views in the UI.
+import os from 'os'
+import fs from 'fs'
+import path from 'path'
+import { logger } from './logger'
+import { DelegationEvent, DelegationProjectSummary, DelegationDecision, DelegationInsights, DelegationClassStat, ShadowOutcome } from '../shared/types'
+
+const QC_DIR = path.join(os.homedir(), '.quadclaude')
+const EVENTS_PATH = path.join(QC_DIR, 'events.jsonl')
+const SUMMARY_PATH = path.join(QC_DIR, 'summary.json')
+
+// Raw event log is folded into summary.json + truncated past this size.
+const MAX_EVENTS_BYTES = 2 * 1024 * 1024 // 2MB (~10k events)
+// Projects with no delegation activity for this long are pruned on maintenance.
+const RETENTION_DAYS = 90
+
+// Persisted shape of summary.json: a cumulative rollup keyed by absolute project path.
+interface SummaryStore {
+  version: 1
+  projects: Record<string, DelegationProjectSummary>
+}
+
+function emptySummary(project: string): DelegationProjectSummary {
+  return {
+    project,
+    projectName: path.basename(project) || project,
+    delegations: 0,
+    succeeded: 0,
+    failed: 0,
+    checked: 0,
+    checkPassed: 0,
+    coldStartRetries: 0,
+    insertions: 0,
+    deletions: 0,
+    filesTouched: 0,
+    firstAt: '',
+    lastAt: '',
+  }
+}
+
+function readSummaryStore(): SummaryStore {
+  try {
+    const raw = fs.readFileSync(SUMMARY_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && parsed.projects) return parsed as SummaryStore
+  } catch {
+    /* missing or corrupt — start fresh */
+  }
+  return { version: 1, projects: {} }
+}
+
+function writeSummaryStore(store: SummaryStore): void {
+  try {
+    fs.mkdirSync(QC_DIR, { recursive: true })
+    fs.writeFileSync(SUMMARY_PATH, JSON.stringify(store, null, 2), { encoding: 'utf8', mode: 0o600 })
+  } catch (error) {
+    logger.error('delegation', 'Failed to write summary.json', error instanceof Error ? error.message : String(error))
+  }
+}
+
+// Parse events.jsonl tolerantly: skip blank/garbled lines rather than throwing, so one
+// bad append (e.g. a crash mid-write) can never poison the whole metrics view.
+function readEvents(): DelegationEvent[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(EVENTS_PATH, 'utf8')
+  } catch {
+    return []
+  }
+  const out: DelegationEvent[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const e = JSON.parse(t)
+      if (e && e.type === 'delegation' && typeof e.project === 'string') out.push(e as DelegationEvent)
+    } catch {
+      /* skip malformed line */
+    }
+  }
+  return out
+}
+
+// Decision records (KEEP/DELEGATE) from qcdecide — tolerant parse of the same file.
+function readDecisions(): DelegationDecision[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(EVENTS_PATH, 'utf8')
+  } catch {
+    return []
+  }
+  const out: DelegationDecision[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const e = JSON.parse(t)
+      if (e && e.type === 'decision' && typeof e.group === 'string') out.push(e as DelegationDecision)
+    } catch {
+      /* skip */
+    }
+  }
+  return out
+}
+
+// Counterfactual shadow tests (qcshadow): qwen re-attempted units Claude KEPT, in
+// isolation. Tolerant parse of ~/.quadclaude/eval/shadow.jsonl.
+function readShadowOutcomes(): ShadowOutcome[] {
+  let raw: string
+  try {
+    raw = fs.readFileSync(path.join(QC_DIR, 'eval', 'shadow.jsonl'), 'utf8')
+  } catch {
+    return []
+  }
+  const out: ShadowOutcome[] = []
+  for (const line of raw.split('\n')) {
+    const t = line.trim()
+    if (!t) continue
+    try {
+      const e = JSON.parse(t)
+      if (e && e.type === 'shadow' && typeof e.group === 'string') out.push(e as ShadowOutcome)
+    } catch {
+      /* skip malformed */
+    }
+  }
+  return out
+}
+
+// Fold a single event into a project's running totals.
+function applyEvent(s: DelegationProjectSummary, e: DelegationEvent): void {
+  s.delegations += 1
+  if (e.exit === 0) s.succeeded += 1
+  else s.failed += 1
+  s.coldStartRetries += e.coldStartRetries || 0
+  s.insertions += e.insertions || 0
+  s.deletions += e.deletions || 0
+  s.filesTouched += e.files ? e.files.split(';').filter(Boolean).length : 0
+  if (e.check && typeof e.check.exit === 'number') {
+    s.checked += 1
+    if (e.check.exit === 0) s.checkPassed += 1
+  }
+  if (!s.firstAt || e.ts < s.firstAt) s.firstAt = e.ts
+  if (!s.lastAt || e.ts > s.lastAt) s.lastAt = e.ts
+}
+
+function foldEventsInto(store: SummaryStore, events: DelegationEvent[]): void {
+  for (const e of events) {
+    const key = e.project
+    if (!store.projects[key]) store.projects[key] = emptySummary(key)
+    applyEvent(store.projects[key], e)
+  }
+}
+
+// Compute a "% delegated" once totals are known. We can only attribute lines we
+// measured (delegated insertions); direct (orchestrator) authorship isn't captured
+// here, so this is reported as delegated-lines and the UI frames it accordingly.
+function withDerived(s: DelegationProjectSummary): DelegationProjectSummary {
+  const checkRate = s.checked > 0 ? s.checkPassed / s.checked : null
+  const successRate = s.delegations > 0 ? s.succeeded / s.delegations : null
+  return { ...s, checkRate, successRate }
+}
+
+class DelegationLog {
+  // Current per-project summaries: cumulative store (folded/rotated history) PLUS a live
+  // fold of whatever is still in events.jsonl. Cheap and always up to date.
+  getSummaries(): DelegationProjectSummary[] {
+    const store = readSummaryStore()
+    // Clone so the live fold doesn't mutate the persisted store in memory.
+    const merged: SummaryStore = { version: 1, projects: {} }
+    for (const [k, v] of Object.entries(store.projects)) merged.projects[k] = { ...v }
+    foldEventsInto(merged, readEvents())
+    return Object.values(merged.projects)
+      .map(withDerived)
+      .sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''))
+  }
+
+  // Raw events for the dashboard timeline, most-recent-first, capped. (Only events
+  // still in events.jsonl — rotated history lives aggregated in summary.json.)
+  getEvents(limit = 2000): DelegationEvent[] {
+    const events = readEvents()
+    events.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+    const sliced = events.slice(0, limit)
+    // Attach the human verdict (ship/revert/edit) recorded per task in the durable eval
+    // memory, so the dashboard shows which calls you've already judged. Best-effort.
+    try {
+      const raw = fs.readFileSync(path.join(QC_DIR, 'eval', 'outcomes.jsonl'), 'utf8')
+      const byTask = new Map<string, 'ship' | 'revert' | 'edit'>()
+      for (const line of raw.split('\n')) {
+        const t = line.trim()
+        if (!t) continue
+        try {
+          const o = JSON.parse(t)
+          if (o.task && o.humanVerdict) byTask.set(o.task, o.humanVerdict)
+        } catch { /* skip malformed */ }
+      }
+      if (byTask.size) for (const e of sliced) { const v = byTask.get(e.task); if (v) e.humanVerdict = v }
+    } catch { /* no eval memory yet */ }
+    return sliced
+  }
+
+  // The FULL untruncated prompt for a delegation, from the lazy per-call store qcdelegate
+  // writes (~/.quadclaude/prompts/<ts_task>.txt). Loaded on demand so events.jsonl stays small.
+  getFullPrompt(ts: string, task: string): string | null {
+    try {
+      const key = `${ts}_${task}`.replace(/[^A-Za-z0-9._-]/g, '_')
+      return fs.readFileSync(path.join(QC_DIR, 'prompts', `${key}.txt`), 'utf8')
+    } catch {
+      return null
+    }
+  }
+
+  // "What to delegate" intelligence, distilled from the durable eval memory
+  // (~/.quadclaude/eval). Surfaces per-task-class success + a delegate/keep recommendation,
+  // first-try rate, and eval calibration — the optimization layer the raw event log lacks.
+  getInsights(): DelegationInsights {
+    const evalDir = path.join(QC_DIR, 'eval')
+    let outcomes: Array<{ taskClass?: string; groundTruth?: string; iterations?: number }> = []
+    try {
+      outcomes = fs.readFileSync(path.join(evalDir, 'outcomes.jsonl'), 'utf8')
+        .split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l) } catch { return null } })
+        .filter(Boolean) as typeof outcomes
+    } catch { /* no eval memory yet */ }
+
+    const byClassMap: Record<string, { taskClass: string; n: number; checked: number; passed: number; firstTry: number }> = {}
+    for (const o of outcomes) {
+      const c = o.taskClass || 'logic'
+      const g = (byClassMap[c] = byClassMap[c] || { taskClass: c, n: 0, checked: 0, passed: 0, firstTry: 0 })
+      g.n++
+      if (o.groundTruth === 'pass' || o.groundTruth === 'fail') {
+        g.checked++
+        if (o.groundTruth === 'pass') { g.passed++; if ((o.iterations || 1) <= 1) g.firstTry++ }
+      }
+    }
+    const byClass: DelegationClassStat[] = Object.values(byClassMap).map((g) => {
+      const passRate = g.checked ? g.passed / g.checked : null
+      let recommendation: string
+      let tone: 'good' | 'warn' | 'bad' | 'muted'
+      if (g.checked === 0) { recommendation = 'Write a check first'; tone = 'muted' }
+      else if (g.checked < 3) { recommendation = 'Delegate cautiously'; tone = 'warn' }
+      else if ((passRate ?? 0) >= 0.85) { recommendation = 'Delegate'; tone = 'good' }
+      else if ((passRate ?? 0) >= 0.6) { recommendation = 'Delegate + check'; tone = 'warn' }
+      else { recommendation = 'Keep / heavy-verify'; tone = 'bad' }
+      return { ...g, passRate, recommendation, tone }
+    }).sort((a, b) => b.n - a.n)
+
+    const checked = outcomes.filter((o) => o.groundTruth === 'pass' || o.groundTruth === 'fail')
+    const passed = checked.filter((o) => o.groundTruth === 'pass')
+    const firstTry = passed.filter((o) => (o.iterations || 1) <= 1)
+
+    let calibration: DelegationInsights['calibration'] = null
+    try {
+      const c = JSON.parse(fs.readFileSync(path.join(evalDir, 'calibration.json'), 'utf8'))
+      calibration = {
+        humanLabeled: c.humanLabeled || 0,
+        evalTrustworthiness: c.evalTrustworthiness ?? null,
+        evalFalsePositives: c.evalFalsePositives || 0,
+        evalFalseNegatives: c.evalFalseNegatives || 0,
+      }
+    } catch { /* no calibration yet */ }
+
+    // Counterfactual over-caution roll-up from qcshadow (eval/shadow.jsonl).
+    let shadow: DelegationInsights['shadow'] = null
+    const shadows = readShadowOutcomes()
+    if (shadows.length) {
+      const isMatch = (s: ShadowOutcome) => s.couldMatch === 'yes' || s.couldMatch === 'likely'
+      const byClassMapS: Record<string, { taskClass: string; tested: number; matched: number }> = {}
+      for (const s of shadows) {
+        const g = (byClassMapS[s.taskClass] = byClassMapS[s.taskClass] || { taskClass: s.taskClass, tested: 0, matched: 0 })
+        g.tested++
+        if (isMatch(s)) g.matched++
+      }
+      shadow = {
+        total: shadows.length,
+        matched: shadows.filter(isMatch).length,
+        fellShort: shadows.filter((s) => s.couldMatch === 'no').length,
+        inconclusive: shadows.filter((s) => s.couldMatch === 'inconclusive').length,
+        byClass: Object.values(byClassMapS).sort((a, b) => b.tested - a.tested),
+      }
+    }
+
+    return {
+      byClass,
+      totalOutcomes: outcomes.length,
+      checkedCount: checked.length,
+      successRate: checked.length ? passed.length / checked.length : null,
+      firstTryRate: passed.length ? firstTry.length / passed.length : null,
+      calibration,
+      shadow,
+    }
+  }
+
+  // KEEP/DELEGATE decisions for the dashboard's decision ledger, most-recent-first.
+  // Each decision is annotated with its shadow verdict (qcshadow), if the unit was
+  // later counterfactually re-tested — so the ledger that records a decision also grades it.
+  getDecisions(limit = 2000): DelegationDecision[] {
+    const d = readDecisions()
+    d.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+    const sliced = d.slice(0, limit)
+    const shadows = readShadowOutcomes()
+    if (shadows.length) {
+      for (const dec of sliced) {
+        // Match on group + project; if several, take the most recent shadow run.
+        const cands = shadows.filter((s) => s.group === dec.group && s.project === dec.project)
+        if (!cands.length) continue
+        cands.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
+        const s = cands[0]
+        dec.shadow = {
+          couldMatch: s.couldMatch,
+          judgeVerdict: s.judgeVerdict,
+          checkPassed: s.check ? s.check.exit === 0 : null,
+          ts: s.ts,
+        }
+      }
+    }
+    return sliced
+  }
+
+  // A single self-contained, human- AND machine-readable report of all delegation
+  // activity — built to be pasted straight back to Claude to analyze and improve how
+  // it delegates to custom LLMs. Markdown summary + a fenced JSON block of every event.
+  buildReport(): string {
+    const summaries = this.getSummaries()
+    const events = this.getEvents()
+    const decisions = this.getDecisions()
+    const stamp = new Date().toISOString()
+    const L: string[] = []
+    L.push(`# QuadClaude delegation log`)
+    L.push(`Generated: ${stamp}`)
+    L.push('')
+    const tot = events.reduce(
+      (a, e) => ({
+        n: a.n + 1,
+        ok: a.ok + (e.exit === 0 ? 1 : 0),
+        checked: a.checked + (e.check ? 1 : 0),
+        checkPass: a.checkPass + (e.check && e.check.exit === 0 ? 1 : 0),
+        ins: a.ins + (e.insertions || 0),
+        cold: a.cold + (e.coldStartRetries || 0),
+        dur: a.dur + (e.durationSec || 0),
+      }),
+      { n: 0, ok: 0, checked: 0, checkPass: 0, ins: 0, cold: 0, dur: 0 },
+    )
+    L.push(`## Totals`)
+    L.push(`- Delegations: ${tot.n}`)
+    L.push(`- Succeeded (exit 0): ${tot.ok}/${tot.n}`)
+    L.push(`- Ground-truth checks passed: ${tot.checkPass}/${tot.checked}`)
+    L.push(`- Lines delegated: ${tot.ins}`)
+    L.push(`- Cold-start retries: ${tot.cold}`)
+    L.push(`- Avg duration: ${tot.n ? Math.round(tot.dur / tot.n) : 0}s`)
+    L.push('')
+    L.push(`## Per project`)
+    for (const s of summaries) {
+      const cr = s.checked ? `${Math.round(100 * (s.checkPassed / s.checked))}% (${s.checkPassed}/${s.checked})` : 'n/a'
+      L.push(`- **${s.projectName}** — ${s.delegations} delegations, ${s.succeeded} ok, check-pass ${cr}, ${s.insertions} lines, ${s.filesTouched} files, ${s.coldStartRetries} cold retries`)
+    }
+    L.push('')
+    if (decisions.length) {
+      const kept = decisions.filter((d) => d.verdict === 'keep').length
+      L.push(`## Decisions (KEEP/DELEGATE ledger) — ${kept} kept, ${decisions.length - kept} delegated`)
+      for (const d of decisions) {
+        L.push(`- [${d.verdict.toUpperCase()}] ${d.group} — ${d.reason}${d.check ? ` (check: ${d.check})` : ''}`)
+      }
+      L.push('')
+    }
+    L.push(`## Events (most recent first)`)
+    for (const e of events) {
+      const ck = e.check ? (e.check.exit === 0 ? 'check:PASS' : `check:FAIL(${e.check.exit})`) : 'check:none'
+      L.push('')
+      L.push(`### ${e.ts} · ${e.task} · ${e.route}`)
+      L.push(`project=${e.project} pane=${e.pane} exit=${e.exit} ${ck} +${e.insertions}/-${e.deletions} files=[${e.files}] cold=${e.coldStartRetries} dur=${e.durationSec}s git=${e.gitMode}`)
+      if (e.promptPreview) L.push(`prompt: ${e.promptPreview}`)
+      if (e.outputPreview) L.push(`output: ${e.outputPreview}`)
+    }
+    L.push('')
+    L.push(`## Raw events (JSON, one per line)`)
+    L.push('```json')
+    for (const e of events) L.push(JSON.stringify(e))
+    L.push('```')
+    return L.join('\n')
+  }
+
+  // Maintenance: rotate the raw log if oversized and prune stale projects. Safe to call
+  // on every startup — it's a no-op when the log is small and nothing is stale.
+  maintain(): void {
+    try {
+      this.rotateIfNeeded()
+      this.pruneStale()
+    } catch (error) {
+      logger.error('delegation', 'maintenance failed', error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  private rotateIfNeeded(): void {
+    let size = 0
+    try {
+      size = fs.statSync(EVENTS_PATH).size
+    } catch {
+      return // no events file yet
+    }
+    if (size <= MAX_EVENTS_BYTES) return
+    const events = readEvents()
+    const store = readSummaryStore()
+    foldEventsInto(store, events)
+    writeSummaryStore(store)
+    // Keep the most recent slice as a `.recent` tail for the live feed/debugging, then
+    // truncate the working file so it stays bounded. Totals already live in summary.json.
+    try {
+      fs.renameSync(EVENTS_PATH, EVENTS_PATH + '.1')
+    } catch {
+      /* ignore */
+    }
+    logger.info('delegation', 'Rotated events.jsonl into summary.json', `${events.length} events folded`)
+  }
+
+  private pruneStale(): void {
+    const store = readSummaryStore()
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400_000).toISOString()
+    let pruned = 0
+    for (const [key, s] of Object.entries(store.projects)) {
+      if (s.lastAt && s.lastAt < cutoff) {
+        delete store.projects[key]
+        pruned++
+      }
+    }
+    if (pruned > 0) {
+      writeSummaryStore(store)
+      logger.info('delegation', 'Pruned stale project summaries', `${pruned} removed (>${RETENTION_DAYS}d)`)
+    }
+  }
+
+  // Live tail: poll events.jsonl for newly-appended delegation events and hand each to
+  // `cb`. Polling (not fs.watch) because it's reliable cross-platform and the data is
+  // low-frequency. We start at the current end of file so app startup never replays
+  // history as "new" delegations (which would spuriously trigger the worker-feed prompt).
+  startWatching(cb: (e: DelegationEvent) => void): () => void {
+    let offset = 0
+    let partial = ''
+    try {
+      offset = fs.statSync(EVENTS_PATH).size
+    } catch {
+      offset = 0 // file not created yet — start from 0 when it appears
+    }
+    const tick = () => {
+      let size: number
+      try {
+        size = fs.statSync(EVENTS_PATH).size
+      } catch {
+        return // no file yet
+      }
+      if (size < offset) {
+        // File shrank (rotation/clear) — resync to the new end, don't replay.
+        offset = size
+        partial = ''
+        return
+      }
+      if (size === offset) return
+      let chunk = ''
+      try {
+        const fd = fs.openSync(EVENTS_PATH, 'r')
+        const buf = Buffer.alloc(size - offset)
+        fs.readSync(fd, buf, 0, buf.length, offset)
+        fs.closeSync(fd)
+        chunk = buf.toString('utf8')
+      } catch {
+        return
+      }
+      offset = size
+      const text = partial + chunk
+      const lines = text.split('\n')
+      partial = lines.pop() ?? '' // last item is an incomplete line (no trailing \n yet)
+      for (const line of lines) {
+        const t = line.trim()
+        if (!t) continue
+        try {
+          const e = JSON.parse(t)
+          // Forward both delegations and decisions so the dashboard live-refreshes on either.
+          if (e && (e.type === 'delegation' || e.type === 'decision')) cb(e as DelegationEvent)
+        } catch {
+          /* skip malformed */
+        }
+      }
+    }
+    const interval = setInterval(tick, 1500)
+    return () => clearInterval(interval)
+  }
+
+  // Explicit user action from Settings: wipe all delegation telemetry.
+  clearAll(): void {
+    for (const p of [EVENTS_PATH, EVENTS_PATH + '.1', SUMMARY_PATH]) {
+      try {
+        fs.rmSync(p)
+      } catch {
+        /* already gone */
+      }
+    }
+    logger.info('delegation', 'Cleared all delegation telemetry')
+  }
+}
+
+export const delegationLog = new DelegationLog()

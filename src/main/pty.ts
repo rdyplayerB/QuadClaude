@@ -5,6 +5,7 @@ import path from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { logger } from './logger'
+import { scanServers, stopServerScan } from './serverScan'
 import { markActivity, logPerfEvent } from './perfMonitor'
 
 // Async, non-blocking command runner. Critically, this does NOT block the
@@ -55,13 +56,38 @@ async function getLoginShellPath(): Promise<string> {
 // Cache the login shell PATH
 let cachedPath: string | null = null
 
+// Launching QuadClaude from inside a Claude Code session — a `claude` pane, a
+// Bash tool call, `open -a QuadClaude` typed into one — leaves that session's
+// identity in our environment, and `...process.env` below would hand it to every
+// pane. A `claude` started in a pane then reads CLAUDE_CODE_CHILD_SESSION, decides
+// it is a subagent of a session that has usually long since exited, and turns off
+// transcript saving — which also blinds the Ops Console, since it works by tailing
+// exactly those transcripts. A pane is a fresh top-level session, so the launcher's
+// identity is dropped here.
+//
+// Only identity is stripped, not preference: CLAUDE_EFFORT and friends are things
+// you chose, and anything your shell profile sets is re-applied by the pane's own
+// zsh a moment later regardless.
+const INHERITED_SESSION_VARS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDECODE',
+  'CLAUDE_PID',
+  'AI_AGENT',
+]
+
 async function getShellEnv(): Promise<NodeJS.ProcessEnv> {
   if (!cachedPath) {
     cachedPath = await getLoginShellPath()
   }
 
+  const inherited = { ...process.env }
+  for (const key of INHERITED_SESSION_VARS) delete inherited[key]
+
   return {
-    ...process.env,
+    ...inherited,
     PATH: cachedPath,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
@@ -86,7 +112,10 @@ const GIT_STATUS_CACHE_TTL = 10_000 // 10 seconds
 // Server detection cache - one lsof+ps pair is shared across all panes and
 // reused for a few seconds so repeated polls don't re-spawn processes.
 let serverCache: { servers: Map<number, ServerInfo[]>; timestamp: number } | null = null
-const SERVER_CACHE_TTL = 4_000
+// The scan itself now runs in a worker (see serverScan.ts), so this interval no
+// longer trades UI smoothness against freshness — it only limits how often two
+// subprocesses get spawned. 10s is plenty for a port chip to appear promptly.
+const SERVER_CACHE_TTL = 10_000
 
 // One `ps` snapshot: pid -> ppid and pid -> pgid for the whole system.
 async function psSnapshot(): Promise<{ ppid: Map<number, number>; pgid: Map<number, number> }> {
@@ -168,25 +197,39 @@ export class PtyManager {
       })
 
       ptyProcess.onData((data) => {
-        // A late event from a PTY that has since been replaced (env re-spawn or
-        // killPty) must not write into the new PTY's stream.
-        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
+        // NEVER let a JS throw escape this callback. node-pty invokes it from a native
+        // ThreadSafeFunction; a synchronous throw here becomes ThrowAsJavaScriptException
+        // → std::terminate → SIGABRT (a hard crash, especially during app teardown when
+        // the window/webContents is mid-destroy). Swallow + log instead of aborting.
+        try {
+          // A late event from a PTY that has since been replaced (env re-spawn or
+          // killPty) must not write into the new PTY's stream.
+          if (this.ptys.get(paneId)?.pty !== ptyProcess) return
 
-        // Track throughput for the performance monitor (byte length, not chars).
-        const len = Buffer.byteLength(data, 'utf8')
-        this.totalBytesOut += len
-        this.perPaneBytesOut.set(paneId, (this.perPaneBytesOut.get(paneId) || 0) + len)
+          // Track throughput for the performance monitor (byte length, not chars).
+          const len = Buffer.byteLength(data, 'utf8')
+          this.totalBytesOut += len
+          this.perPaneBytesOut.set(paneId, (this.perPaneBytesOut.get(paneId) || 0) + len)
 
-        this.onOutput(paneId, data)
+          this.onOutput(paneId, data)
+        } catch (err) {
+          logger.error('pty', `onData handler threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+        }
       })
 
       ptyProcess.onExit(({ exitCode }) => {
-        // If this instance was already superseded (re-spawn / killPty replaced the
-        // map entry), do nothing — otherwise we'd delete the NEW pty and trigger a
-        // spurious renderer auto-respawn over it.
-        if (this.ptys.get(paneId)?.pty !== ptyProcess) return
-        this.ptys.delete(paneId)
-        this.onExit(paneId, exitCode)
+        // Same hard rule as onData: a throw here aborts the process via node-pty's native
+        // callback. Guard the whole body.
+        try {
+          // If this instance was already superseded (re-spawn / killPty replaced the
+          // map entry), do nothing — otherwise we'd delete the NEW pty and trigger a
+          // spurious renderer auto-respawn over it.
+          if (this.ptys.get(paneId)?.pty !== ptyProcess) return
+          this.ptys.delete(paneId)
+          this.onExit(paneId, exitCode)
+        } catch (err) {
+          logger.error('pty', `onExit handler threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+        }
       })
 
       this.ptys.set(paneId, {
@@ -436,84 +479,19 @@ export class PtyManager {
     if (serverCache && Date.now() - serverCache.timestamp < SERVER_CACHE_TTL) {
       return serverCache.servers
     }
-    const result = new Map<number, ServerInfo[]>()
     if (os.platform() === 'win32' || this.ptys.size === 0) {
-      serverCache = { servers: result, timestamp: Date.now() }
-      return result
+      const empty = new Map<number, ServerInfo[]>()
+      serverCache = { servers: empty, timestamp: Date.now() }
+      return empty
     }
 
-    // shell pid -> paneId (+ pgid-based lookup for backgrounded processes)
-    const shellPids = new Map<number, number>()
-    const shellPgids = new Map<number, number>()
-    for (const [paneId, inst] of this.ptys) shellPids.set(inst.pty.pid, paneId)
+    // shell pid -> paneId. The worker does the rest: both commands, both parses,
+    // and the ancestry walk. Only the finished mapping crosses back, so no
+    // system-wide output is ever touched on this thread.
+    const shells: Array<[number, number]> = []
+    for (const [paneId, inst] of this.ptys) shells.push([inst.pty.pid, paneId])
 
-    try {
-      const [lsofRes, snap] = await Promise.all([
-        pExecFile('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn'], {
-          encoding: 'utf-8',
-          timeout: 3000,
-          maxBuffer: 4 * 1024 * 1024,
-        }),
-        psSnapshot(),
-      ])
-
-      // Build pgid -> paneId map: the shell's pgid typically matches itself
-      for (const [shellPid, paneId] of shellPids) {
-        const pg = snap.pgid.get(shellPid)
-        if (pg !== undefined) shellPgids.set(pg, paneId)
-      }
-
-      // Synchronous parse of system-wide lsof output (all listening sockets).
-      markActivity('pty:lsof-servers-parse')
-      let curPid = 0
-      let curCmd = ''
-      const seen = new Set<string>() // dedupe paneId:port
-      for (const line of lsofRes.stdout.split('\n')) {
-        if (!line) continue
-        const tag = line[0]
-        const val = line.slice(1)
-        if (tag === 'p') {
-          curPid = parseInt(val, 10) || 0
-          curCmd = ''
-        } else if (tag === 'c') {
-          curCmd = val
-        } else if (tag === 'n') {
-          // val: "127.0.0.1:3000" | "*:5173" | "[::1]:8080"
-          const idx = val.lastIndexOf(':')
-          if (idx < 0) continue
-          const port = parseInt(val.slice(idx + 1), 10)
-          if (!port || isNaN(port)) continue
-          // Walk the listening process's ancestry to a pane's shell
-          let owner: number | undefined
-          let cur = curPid
-          for (let i = 0; i < 40 && cur && cur !== 1; i++) {
-            if (shellPids.has(cur)) {
-              owner = shellPids.get(cur)
-              break
-            }
-            const next = snap.ppid.get(cur)
-            if (next === undefined || next === cur) break
-            cur = next
-          }
-          // Fallback: backgrounded processes get reparented (ppid=1) but
-          // keep the shell's process group ID
-          if (owner === undefined) {
-            const pg = snap.pgid.get(curPid)
-            if (pg !== undefined) owner = shellPgids.get(pg)
-          }
-          if (owner === undefined) continue
-          const key = `${owner}:${port}`
-          if (seen.has(key)) continue
-          seen.add(key)
-          const arr = result.get(owner) ?? []
-          arr.push({ pid: curPid, port, command: curCmd })
-          result.set(owner, arr)
-        }
-      }
-    } catch {
-      // lsof/ps unavailable or timed out - return whatever was resolved
-    }
-
+    const result = await scanServers(shells)
     serverCache = { servers: result, timestamp: Date.now() }
     return result
   }
@@ -570,13 +548,22 @@ export class PtyManager {
       // QuadClaude pane leaves processes behind. Fire-and-forget; never blocks
       // or throws into the kill path.
       this.detectOrphansAfterKill(paneId, shellPid).catch(() => {})
-      instance.pty.kill()
+      // Drop the map entry FIRST so any late onData/onExit for this pty short-circuits
+      // on the identity check (the callbacks compare against the map) and can't run
+      // into a teardown. Then kill — guarded, because node-pty's kill() can throw
+      // (EIO/ESRCH if the child already exited) and that must not escape the quit path.
       this.ptys.delete(paneId)
+      try {
+        instance.pty.kill()
+      } catch (err) {
+        logger.warn('pty', `kill() threw for pane ${paneId}`, err instanceof Error ? err.message : String(err))
+      }
     }
   }
 
   killAll(): void {
-    for (const [paneId] of this.ptys) {
+    // Snapshot keys — killPty mutates the map.
+    for (const paneId of [...this.ptys.keys()]) {
       this.killPty(paneId)
     }
   }

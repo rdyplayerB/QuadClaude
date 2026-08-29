@@ -1,50 +1,9 @@
+@import './tokens.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* Theme variables */
-:root {
-  --terminal-bg: #1e1e1e;
-  --terminal-fg: #d4d4d4;
-  --terminal-border: #3c3c3c;
-  --terminal-header: #1a1a1a;
-  --terminal-muted: #6b6b6b;
-  --accent: #22d3ee;
-  --accent-muted: #06b6d4;
-
-  /* UI colors */
-  --ui-bg-base: #141414;
-  --ui-bg-primary: #1e1e1e;
-  --ui-bg-elevated: #252525;
-  --ui-bg-active: #3a3a3a;
-  --ui-border: #333;
-  --ui-border-subtle: #2a2a2a;
-  --ui-text-primary: #ffffff;
-  --ui-text-secondary: #888;
-  --ui-text-muted: #999;
-  --ui-text-dimmed: #999;
-  --ui-text-faint: #888;
-
-  /* Status bar */
-  --statusbar-bg: #1e1e1e;
-
-  /* RGB values for transparency support */
-  --pane-bg-rgb: 37, 37, 37; /* #252525 */
-  --terminal-bg-rgb: 30, 30, 30; /* #1e1e1e */
-
-  /* Glass effect - low opacity to let macOS vibrancy show through */
-  --glass-bg: rgba(20, 20, 20, 0.3);
-  --glass-bg-elevated: rgba(30, 30, 30, 0.25);
-  --glass-bg-header: rgba(20, 20, 20, 0.65);
-  --glass-bg-pane-header: rgba(20, 20, 20, 0.55);
-  --glass-blur: 0px; /* Disable CSS blur - let macOS vibrancy handle it */
-
-  /* Git colors */
-  --git-green: #4ade80;
-  --git-cyan: #22d3ee;
-  --git-yellow: #fbbf24;
-  --git-orange: #fb923c;
-}
 
 
 /* Base styles */
@@ -92,6 +51,23 @@ body {
   min-height: 32px;
   max-height: 32px;
   flex: 0 0 32px;
+  /* Establish a query container so the header's controls can respond to the
+     PANE's width (panes resize dynamically; viewport media queries can't see
+     that). Below the threshold, button text labels collapse to icon-only so the
+     controls — including the Close (X) — never overflow and get clipped.
+     inline-size containment only constrains the inline axis; the header keeps
+     its own glass tint and does not gate the terminal's wallpaper passthrough
+     (that's a sibling element, not a descendant). */
+  container-type: inline-size;
+}
+
+/* Narrow pane: hide control text labels, keep icons (tooltips still describe
+   each action). Tuned so the full control set fits above ~640px-wide panes —
+   the 3-column grid case where labels were getting clipped. */
+@container (max-width: 680px) {
+  .pane-ctl-label {
+    display: none;
+  }
 }
 
 /* Terminal container */
@@ -129,13 +105,66 @@ body {
 }
 
 
+/* The Activity Console is an overlay inside the same window, so once its own
+   gutters went clear they revealed the terminal grid underneath rather than the
+   desktop — the console looked like it was floating on top of the panes instead
+   of replacing them. Hide the grid while it's open so the console's gaps read
+   exactly like the grid's do.
+   visibility, never display:none: the terminals must keep their geometry, or
+   the fit paths bail at offsetWidth 0 and panes come back blank. */
+:root[data-ops-open='1'] .terminal-grid-root { visibility: hidden; }
+
+/* A pane is a floating CARD, not a grid cell. Three things do the work here:
+   the radius (2px read as a sliced sheet at these gutters), the cast shadow
+   (impossible until the grid wrapper stopped clipping), and the specular top
+   edge that makes the surface read as lit rather than just tinted.
+   The active pane is lifted a full elevation step and picks up the accent —
+   previously "active" was border-white/10 vs /05, a 5% difference nobody
+   could see, on an app whose whole job is watching several panes at once.
+
+   A cast shadow needs a SURFACE to fall on. Over a solid ground it reads as
+   depth; over a cleared one it just tints the user's desktop, and a soft wide
+   shadow against bright content behind the window reads as a grey bubble
+   around every pane. So the shadow fades out with the ground it would land on,
+   and the edge takes over as the definition — crisp at full transparency,
+   where fog would be. */
+.pane-surface {
+  --shade: var(--ground-opacity, 1);
+  border-radius: var(--pane-radius);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, calc(0.40 * var(--shade))),
+    0 2px 5px rgba(0, 0, 0, calc(0.28 * var(--shade))),
+    var(--specular);
+  transition: box-shadow var(--motion) var(--ease);
+}
+
+.pane-surface.is-active {
+  box-shadow:
+    0 16px 44px rgba(0, 0, 0, calc(0.55 * var(--shade))),
+    0 4px 12px rgba(0, 0, 0, calc(0.36 * var(--shade))),
+    var(--specular),
+    /* The ring is a hard 1px edge, not a glow — it stays exact at any
+       transparency, where a soft halo would smear onto the desktop. */
+    0 0 0 1px var(--accent-line);
+}
+
 /* Glass effect utilities - uses macOS vibrancy for blur, CSS only for tint */
+/* .glass is the GROUND the panes sit on — the one surface behind everything.
+   --ground-opacity scales its tint away entirely (0 = fully clear), which lets
+   the native liquid-glass material, and through it the desktop, read between
+   the panes. Pane surfaces are untouched, so terminal text never loses its
+   backdrop. Set from Settings → Background; defaults to the standard tint. */
 .glass {
-  background: var(--glass-bg);
+  background: color-mix(in srgb, var(--glass-bg) calc(var(--ground-opacity, 1) * 100%), transparent);
 }
 
 .glass-elevated {
   background: var(--glass-bg-elevated);
+}
+
+/* Opaque modal surface (dashboard / settings) — readable over terminals, not see-through. */
+.glass-modal {
+  background: var(--glass-bg-modal);
 }
 
 .glass-header {
@@ -144,6 +173,35 @@ body {
 
 .glass-pane-header {
   background: var(--glass-bg-pane-header);
+}
+
+/* Title-bar / chrome legibility. The title bar is the one place text sits over
+   the bright wallpaper (through translucent glass), so gray text washes out. A
+   dark text-shadow halo (+ icon drop-shadow) makes text/icons read over ANY
+   wallpaper WITHOUT reducing the bar's transparency. */
+.chrome-legible,
+.chrome-legible * { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+.chrome-legible svg { filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.55)); }
+
+/* Keyboard focus: a visible cyan ring on interactive chrome (accessibility +
+   pro-user keyboard speed). :focus-visible fires only for keyboard focus, so
+   mouse clicks stay ring-free. Terminals manage their own focus — the xterm
+   hidden textarea and anything inside a terminal are explicitly excluded so a
+   focused pane never sprouts a ring. */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.xterm-helper-textarea:focus-visible,
+.terminal-container :focus-visible {
+  outline: none;
 }
 
 /* Glass control surfaces - theme-aware for settings/modals */
@@ -161,10 +219,59 @@ body {
 }
 
 
+/* Link target preview. Hovering a URL or .md path in a terminal shows where it
+   actually goes before you commit to clicking it. Positioned by linkTooltip.ts;
+   `xterm-hover` (xterm's own contract) keeps the label from swallowing the link
+   underneath it. Sits above the terminal but below the pane header's menus. */
+.qc-link-tip {
+  position: absolute;
+  z-index: 20;
+  display: none;
+  max-width: min(560px, 92%);
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: var(--glass-bg-modal);
+  border: 1px solid var(--ui-border);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-family: Menlo, Monaco, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  /* A long URL must wrap rather than force the label wider than the pane. */
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+.qc-link-tip-target {
+  display: block;
+  color: var(--ui-text-primary);
+}
+
+.qc-link-tip-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--ui-text-muted);
+  font-size: 10px;
+}
+
 /* Pane transitions */
 .pane-transition {
   transition: opacity 0.15s ease-out;
   isolation: isolate;
+}
+
+/* PiP wrappers: hidden panes in duo/solo, rendered as floating live tiles.
+   pointer-events off so the scaled-down xterm can never take clicks or
+   keyboard focus — the strip chrome's capture overlays (PipStrip.tsx) own all
+   interaction. The pane's own header is hidden; the tile mini-header replaces
+   it. NEVER display:none these wrappers: every fit path bails at
+   offsetWidth === 0 and the beta canvas addon renders blank at 0×0 — the
+   collapsed state uses visibility:hidden, which keeps geometry. */
+.pip-wrapper {
+  pointer-events: none;
+  isolation: isolate;
+}
+.pip-wrapper .pane-header {
+  display: none;
 }
 
 /* Claude is waiting on a yes/no decision - pulsing amber glow. Inset so it isn't
